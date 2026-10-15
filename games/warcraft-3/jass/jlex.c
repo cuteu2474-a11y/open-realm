@@ -24,7 +24,7 @@ bool eat_token(wordExtractor_t *p, cstring_t value) {
 
 cstring_t parse_token(wordExtractor_t *p) {
     static char word[MAX_SEGMENT_SIZE];
-    while (isspace(*p->buffer)) ++p->buffer;
+    while (isspace((unsigned char)*p->buffer)) ++p->buffer;
     if (*p->buffer == '\"' || *p->buffer == '\'') {
         char quote = *p->buffer;
         cstring_t closingQuote = ordr_closing_quote(p->buffer + 1, quote);
@@ -81,7 +81,7 @@ cstring_t parse_token(wordExtractor_t *p) {
         /* Stop at quotes: minified JASS glues return"" and 'Hpal'or(x) without space.
          * Quotes are not jdo delimiters; the quote branches above read the literal. */
         while (*p->buffer &&
-           (!isspace(*p->buffer) && *p->buffer != '"' && *p->buffer != '\'' && strchr(p->delimiters, *p->buffer) == NULL) &&
+           (!isspace((unsigned char)*p->buffer) && *p->buffer != '"' && *p->buffer != '\'' && strchr(p->delimiters, *p->buffer) == NULL) &&
                segmentLength < MAX_SEGMENT_SIZE - 1) {
             word[segmentLength++] = *(p->buffer++);
         }
@@ -104,7 +104,7 @@ cstring_t parse_segment(wordExtractor_t *p) {
     memset(segment, 0, MAX_SEGMENT_SIZE);
     if (*p->buffer == '\0')
         return NULL;
-    while (isspace(*p->buffer))
+    while (isspace((unsigned char)*p->buffer))
         ++p->buffer;
     cstring_t start = p->buffer;
     if (*p->buffer == '"') {
@@ -154,7 +154,7 @@ cstring_t parse_segment2(wordExtractor_t *p) {
     memset(segment, 0, MAX_SEGMENT_SIZE);
     if (*p->buffer == '\0')
         return NULL;
-    while (isspace(*p->buffer))
+    while (isspace((unsigned char)*p->buffer))
         ++p->buffer;
     uint32_t num_quotes = 0;
     string_t out = segment;
