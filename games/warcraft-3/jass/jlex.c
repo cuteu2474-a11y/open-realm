@@ -164,6 +164,13 @@ cstring_t parse_segment2(wordExtractor_t *p) {
             ++p->buffer;
             break;
         }
+        /* Escaped quotes are literal characters, not CSV-style field boundaries. */
+        if (*p->buffer == '\\' && p->buffer[1]) {
+            if (out < out_end) *out++ = *p->buffer;
+            ++p->buffer;
+            if (out < out_end) *out++ = *p->buffer;
+            continue;
+        }
         if (*p->buffer == '"')
             ++num_quotes;
         if (out < out_end) {
