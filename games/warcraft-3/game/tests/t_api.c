@@ -9141,4 +9141,13 @@ TEST(wc3_api, ordr_real_extended_unit_native_bindings) {
     T_ASSERT(facing == SetUnitFacing);
 }
 
+/* TOC includes are restricted to map-owned .fdf definition files. */
+TEST(wc3_api, ordr_toc_accepts_fdf_templates) {
+    T_ASSERT(ORDR_IsFdfFile("war3mapImported\\ORDR.fdf"));
+    T_ASSERT(ORDR_IsFdfFile("UI\\LoginDialog.FDF"));
+    T_ASSERT(!ORDR_IsFdfFile("UI\\LoginDialog.toc"));
+    T_ASSERT(!ORDR_IsFdfFile("UI\\Logo.blp"));
+    T_ASSERT(!ORDR_IsFdfFile(""));
+}
+
 #endif /* BZ_TESTS */
