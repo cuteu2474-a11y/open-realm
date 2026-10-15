@@ -6,6 +6,10 @@ on:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
       - '.github/workflows/ordr-ipad-build.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compile-ipad:
     runs-on: macos-15
