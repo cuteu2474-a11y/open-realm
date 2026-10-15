@@ -9127,4 +9127,18 @@ TEST(wc3_api, game_save_event_registration_survives_snapshot) {
     remove(filename);
 }
 
+/* Verified against the original ORDR map's JASS native declarations:
+ * EXPauseUnit(unit, boolean), EXSetUnitFacing(unit, real).
+ * Aliases must dispatch to actual unit behavior, not silent no-ops. */
+TEST(wc3_api, ordr_real_extended_unit_native_bindings) {
+    jassCFunction_t pause = NULL, facing = NULL;
+    extern jassModule_t jass_funcs[];
+    for (jassModule_t const *native = jass_funcs; native->name; ++native) {
+        if (!strcmp(native->name, "EXPauseUnit")) pause = native->func;
+        if (!strcmp(native->name, "EXSetUnitFacing")) facing = native->func;
+    }
+    T_ASSERT(pause == PauseUnit);
+    T_ASSERT(facing == SetUnitFacing);
+}
+
 #endif /* BZ_TESTS */
