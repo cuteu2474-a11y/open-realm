@@ -94,6 +94,20 @@ static void cheat_console_capture_reset(void) {
  * Shared JASS/list lexer regressions
  * ========================================================================= */
 
+/* ORDR custom UI strings contain escaped quotes and literal // text.
+ * Verify tokenization doesn't split at the escaped quote. */
+TEST(wc3_jass_map, ordr_escaped_quote_preserves_jass_literal_token) {
+    char const *src = "\"text \\\" // remains in string\"";
+    wordExtractor_t parser = {
+        .buffer = src,
+        .start = src,
+        .delimiters = ",;()[]+-/*=<>!"
+    };
+
+    T_STREQ(jlex_parse_token(&parser), src);
+    T_ASSERT(*parser.buffer == '\0');
+}
+
 TEST(wc3_jass_map, parse_segment_quoted_single_value_stops_at_end) {
     wordExtractor_t parser = {
         .buffer = "\"Learn Holy Light - [Level %d]\"",
