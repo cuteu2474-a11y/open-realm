@@ -16,10 +16,13 @@ class NativeCoverageTests(unittest.TestCase):
             { "DzFrameShow", DzFrameShow },
             { "EXPauseUnit", PauseUnit },
             // { "DzFake", DzFake }
+            /* { "DzBlocked", DzBlocked } */
         '''
         names = audit_module.registry_names(source)
         self.assertIn("DzFrameShow", names)
         self.assertIn("EXPauseUnit", names)
+        self.assertNotIn("DzFake", names)
+        self.assertNotIn("DzBlocked", names)
 
     def test_only_extension_calls_count(self):
         usage = {"map": "fixture.w3x", "native_calls": {
