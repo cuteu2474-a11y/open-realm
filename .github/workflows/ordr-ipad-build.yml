@@ -1,0 +1,32 @@
+name: ORDR iPad unsigned build check
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packaging/ipad/**'
+      - 'games/warcraft-3/**'
+      - '.github/workflows/ordr-ipad-build.yml'
+jobs:
+  compile-ipad:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tools
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          cmake --version
+      - name: Build unsigned iPad app
+        run: make ipad
+      - name: Check build output
+        run: |
+          test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          find build/ipad -maxdepth 5 -name '*.app' -print
+      - name: Upload unsigned app for diagnostics only
+        uses: actions/upload-artifact@v4
+        with:
+          name: openrealm-ipad-unsigned
+          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          if-no-files-found: error
+          retention-days: 7
