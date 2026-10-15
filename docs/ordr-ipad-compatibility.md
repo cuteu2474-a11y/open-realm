@@ -1,4 +1,9 @@
-# ORDR Season 2 2.323[C] — iPad compatibility checkpoint
+# ORDR Season 2 2.323[C] — iPad offline compatibility checkpoint
+
+## Scope
+
+- **Single-player, offline iPad gameplay only.** No matchmaking, multiplayer networking, or account system.
+- Preserve local gameplay and map initialization. If a map API has network-oriented naming, investigate whether it is used for local UI or state before excluding it.
 
 ## Verified on GitHub Actions
 
@@ -10,14 +15,14 @@
 
 ## Changes in this checkpoint
 
-- Escaped quote handling in Warcraft III JASS lexer
+- Escaped quote handling in Warcraft III JASS lexer, including comma-delimited segments
 - Initial native aliases: `EXPauseUnit`, `EXSetUnitFacing`
 
 ## Not yet verified
 
 - Whether `ORDR_S2_2.323[C].w3x` parses, loads, initializes, or is playable
 - ORDR extended native signatures and behavior; aliases must be validated against the map script
-- `DzFrame*` user interface functions, JN sync APIs, and other extension dependencies
+- `DzFrame*` user interface functions and other extension dependencies used by the map; local state semantics must be determined from the actual map script
 - Warcraft III asset loading on iPad and code signing
 
 ## Reproduction steps
