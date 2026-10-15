@@ -7,7 +7,7 @@ The original user-supplied `ORDR_S2_2.323[C].w3x` was available in a local priva
 - Private W3X SHA-256: `0794996c9bc73eaa3020f20ebc45fb37cfa64a6e98ffe8aa0dfa3b356e77bc5c`
 - Extracted `war3map.j`: 2,503,677 bytes, 63,651 lines
 - Custom JASS declarations: **43** (29 Dz, 12 JN, 2 EX)
-- Extension native registry entries in this checkpoint: **2** (EXPauseUnit and EXSetUnitFacing); the remaining 41 require evaluation or implementation.
+- Extension native registry entries initially verified: **2** (EXPauseUnit and EXSetUnitFacing). This branch now also registers a real map-local TOC/FDF loader as **DzLoadToc**, bringing the static registry count to **3 of 43** (40 other extensions remain). The new TOC implementation still needs the latest GitHub compile and runtime tests.
 
 ### Baseline unmodified engine JASS interpreter
 
@@ -46,7 +46,7 @@ The map uses dynamic BACKDROP, BUTTON, TEXT and SPRITE frames and custom frame m
 ## Single-player scope / ordering
 
 1. Preserve script parser correctness (confirmed by local standalone smoke test).
-2. Hook map-contained FDF/TOC definitions into the game's existing HUD frame loader.
+2. Hook map-contained FDF/TOC definitions into the game's existing HUD frame loader (initial `DzLoadToc` native implemented, unverified in live game).
 3. Implement frame creation, text, texture, point, show/hide, and callback delivery against that UI system.
 4. Implement **local** `DzSyncData` dispatch: the map uses it after local button events even in single-player; no networking/matchmaking is necessary. Do not just drop the events.
 5. Confirm game `config`/`main`, first wave, combat, and input on iPad with separately supplied legitimate Warcraft III assets.
