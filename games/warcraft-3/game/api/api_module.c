@@ -18,8 +18,10 @@
 #include "api_quest.h"
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
+#include "api_ordr.h"
 
 jassModule_t jass_funcs[] = {
+    { "DzLoadToc", DzLoadToc },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },
