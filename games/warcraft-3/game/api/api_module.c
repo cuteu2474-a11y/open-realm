@@ -19,9 +19,14 @@
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
 #include "api_ordr.h"
+#include "api_ordr_strings.h"
 
 jassModule_t jass_funcs[] = {
     { "DzLoadToc", DzLoadToc },
+    { "JNStringCount", JNStringCount },
+    { "JNStringSplit", JNStringSplit },
+    { "JNStringReplace", JNStringReplace },
+    { "JNStringRegex", JNStringRegex },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },
