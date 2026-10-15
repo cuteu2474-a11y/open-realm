@@ -9141,6 +9141,39 @@ TEST(wc3_api, ordr_real_extended_unit_native_bindings) {
     T_ASSERT(facing == SetUnitFacing);
 }
 
+/* ORDR's input validation uses regex character classes, not substring counts.
+ * In particular, Hangul must work even under the default C locale on iPad. */
+TEST(wc3_api, ordr_korean_regex_and_separator_count) {
+    T_EQ(ORDR_RegexCount("A,B,,C", ","), 3);
+    T_EQ(ORDR_RegexCount("ABc123", "[A-Za-z0-9]"), 6);
+    T_EQ(ORDR_RegexCount("Ab한글ㄱ9", "[ㄱ-ㅣ가-힣]"), 3);
+    T_EQ(ORDR_RegexCount("ABC", "[ㄱ-ㅣ가-힣]"), 0);
+    T_EQ(ORDR_RegexCount("ABC", ""), 0);
+    T_EQ(ORDR_RegexCount("ABC", "["), 0); /* invalid regex is harmless */
+}
+
+TEST(wc3_api, ordr_jn_string_natives_execute_from_jass) {
+    T_ASSERT(run_test_jass(
+        "native JNStringCount takes string s, string p returns integer\n"
+        "native JNStringSplit takes string s, string p, integer i returns string\n"
+        "native JNStringReplace takes string s, string a, string b returns string\n"
+        "native JNStringRegex takes string s, string p, integer i returns string\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer commas = JNStringCount(\"a,b,,c\", \",\")\n"
+        "  local string second = JNStringSplit(\"a,b,,c\", \",\", 1)\n"
+        "  local string third = JNStringSplit(\"a,b,,c\", \",\", 2)\n"
+        "  local string last = JNStringSplit(\"a,b,,c\", \",\", 3)\n"
+        "  local string replaced = JNStringReplace(\"a*a*\", \"*\", \"\")\n"
+        "  local string matchStr = JNStringRegex(\"Hello123\", \"[0-9]+\", 0)\n"
+        "  if commas != 3 or second != \"b\" or third != \"\" or last != \"c\" or\n"
+        "     replaced != \"aa\" or matchStr != \"123\" then\n"
+        "    call TriggerSleepAction(-1.0)\n"
+        "  endif\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 /* TOC includes are restricted to map-owned .fdf definition files. */
 TEST(wc3_api, ordr_toc_accepts_fdf_templates) {
     T_ASSERT(ORDR_IsFdfFile("war3mapImported\\ORDR.fdf"));
