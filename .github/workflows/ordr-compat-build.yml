@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Test ORDR audit logic
+        run: python3 -m unittest discover -s tools -p 'test_ordr_native_audit.py'
       - name: Audit ORDR native coverage (informational)
         run: python3 tools/ordr_native_audit.py tools/ordr_native_usage.json | tee ordr-native-audit.json
       - name: Upload native coverage report
