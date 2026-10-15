@@ -3,6 +3,10 @@ on:
   workflow_dispatch:
   push:
     branches: [ordr-compat-01]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-build:
     runs-on: macos-15
