@@ -3,6 +3,15 @@
 
 #define MAX_SEGMENT_SIZE 16384  /* Galaxy scripts contain long string literals */
 
+/* Skip escaped characters when finding the end of a JASS quoted literal. */
+static cstring_t ordr_closing_quote(cstring_t start, char quote) {
+    for (cstring_t it = start; *it; ++it) {
+        if (*it == '\\' && it[1]) { ++it; continue; }
+        if (*it == quote) return it;
+    }
+    return NULL;
+}
+
 bool eat_token(wordExtractor_t *p, cstring_t value) {
     cstring_t tok = peek_token(p);
     if (!strcmp(tok, value)) {
@@ -18,7 +27,7 @@ cstring_t parse_token(wordExtractor_t *p) {
     while (isspace(*p->buffer)) ++p->buffer;
     if (*p->buffer == '\"' || *p->buffer == '\'') {
         char quote = *p->buffer;
-        cstring_t closingQuote = strchr(p->buffer + 1, quote);
+        cstring_t closingQuote = ordr_closing_quote(p->buffer + 1, quote);
         size_t stringLength;
         if (!closingQuote) {
             strlcpy(word, p->buffer, MAX_SEGMENT_SIZE);
@@ -104,7 +113,7 @@ cstring_t parse_segment(wordExtractor_t *p) {
         size_t seglen;
 
         ++start;
-        closingQuote = strchr(start, '"');
+        closingQuote = ordr_closing_quote(start, '"');
         if (!closingQuote) {
             seglen = MIN(strlen(start), MAX_SEGMENT_SIZE - 1);
             memcpy(segment, start, seglen);
