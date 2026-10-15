@@ -129,9 +129,9 @@ static uint32_t JNStringReplace(jass_t *j) {
     if (after_length > before_length &&
         count > (ORDR_STRING_LIMIT - source_length) / (after_length - before_length))
         return jass_pushstring(j, source);
-    result_length = source_length + count * (after_length - before_length);
-    /* size_t unsigned wrap on shrinking replacements: recompute safely. */
-    if (after_length < before_length)
+    if (after_length >= before_length)
+        result_length = source_length + count * (after_length - before_length);
+    else
         result_length = source_length - count * (before_length - after_length);
     if (result_length > ORDR_STRING_LIMIT) return jass_pushstring(j, source);
     buffer = gi.MemAlloc((long)result_length + 1);
