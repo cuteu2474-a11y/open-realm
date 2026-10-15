@@ -10,7 +10,7 @@ REGISTRY = ROOT / "games/warcraft-3/game/api/api_module.c"
 PREFIXES = ("Dz", "JN", "EX")
 
 def registry_names(source):
-    source = re.sub(r"/\\*.*?\\*/|//[^\\n]*", "", source, flags=re.S)
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
     return set(re.findall(r'\{\s*"([A-Za-z][A-Za-z0-9_]*)"\s*,', source))
 
 def audit(usage, registry):
