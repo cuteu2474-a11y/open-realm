@@ -9,6 +9,13 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Audit ORDR native coverage (informational)
+        run: python3 tools/ordr_native_audit.py tools/ordr_native_usage.json | tee ordr-native-audit.json
+      - name: Upload native coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordr-native-coverage
+          path: ordr-native-audit.json
       - name: Build unsigned iPad app
         run: make ipad
       - name: Verify iPad app exists
