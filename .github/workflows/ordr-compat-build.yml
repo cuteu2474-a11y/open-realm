@@ -9,8 +9,6 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Build JASS parser tool
-        run: make -j2 jass-tool
       - name: Build unsigned iPad app
         run: make ipad
       - name: Verify iPad app exists
