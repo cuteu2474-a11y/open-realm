@@ -9153,6 +9153,9 @@ TEST(wc3_api, ordr_korean_regex_and_separator_count) {
 }
 
 TEST(wc3_api, ordr_jn_string_natives_execute_from_jass) {
+    player_t *previous = currentplayer;
+    game.clients[0].ps.stats[1] = 0;
+    currentplayer = &game.clients[0].ps;
     T_ASSERT(run_test_jass(
         "native JNStringCount takes string s, string p returns integer\n"
         "native JNStringSplit takes string s, string p, integer i returns string\n"
@@ -9165,13 +9168,17 @@ TEST(wc3_api, ordr_jn_string_natives_execute_from_jass) {
         "  local string last = JNStringSplit(\"a,b,,c\", \",\", 3)\n"
         "  local string replaced = JNStringReplace(\"a*a*\", \"*\", \"\")\n"
         "  local string matchStr = JNStringRegex(\"Hello123\", \"[0-9]+\", 0)\n"
-        "  if commas != 3 or second != \"b\" or third != \"\" or last != \"c\" or\n"
-        "     replaced != \"aa\" or matchStr != \"123\" then\n"
-        "    call TriggerSleepAction(-1.0)\n"
+        "  if commas != 3 or second != \"b\" or third != \"\" or last != \"c\" then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 1)\n"
+        "  endif\n"
+        "  if replaced != \"aa\" or matchStr != \"123\" then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 2)\n"
         "  endif\n"
         "endfunction\n"
     ));
     T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(game.clients[0].ps.stats[1], 0);
+    currentplayer = previous;
 }
 
 /* TOC includes are restricted to map-owned .fdf definition files. */
