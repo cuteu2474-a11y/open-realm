@@ -1035,6 +1035,8 @@ typedef struct {
 #define JASS_GROUP_INITIAL_CAPACITY 64 // handle pointer slots; grows dynamically while group objects stay at stable addresses
 #define MAX_TRIGGERS 4096 // handles; bounds deterministic per-map trigger registry slots
 #define MAX_TIMERS 16384 // handles; ORDR preallocates 1024 timers plus globals and may pool up to 8190
+#define MAX_ORDR_SYNC_REGISTRATIONS 128 // map-local offline channel registrations
+#define MAX_ORDR_SYNC_PREFIX 96 // bytes, including terminator
 #define MAX_TIMERDIALOGS 64 // handles; bounds map-lifetime timer-dialog registry slots
 #define MAX_LEADERBOARDS 32 // handles; fixed save-stable leaderboard registry
 #define MAX_LEADERBOARD_ITEMS 24 // rows; covers classic player/campaign boards
@@ -2350,7 +2352,15 @@ typedef struct {
     vec3_t color;
 } wc3EnvironmentFogParams_t;
 
+typedef struct {
+    trigger_t *trigger;
+    char prefix[MAX_ORDR_SYNC_PREFIX];
+    bool server;
+} ordrSyncRegistration_t;
+
 struct level_locals {
+    ordrSyncRegistration_t ordr_sync_registrations[MAX_ORDR_SYNC_REGISTRATIONS];
+    uint32_t ordr_num_sync_registrations;
     jass_t *vm;
     ggroup_t **groups;
     uint32_t num_groups;
