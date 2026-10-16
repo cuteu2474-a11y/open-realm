@@ -1037,6 +1037,8 @@ typedef struct {
 #define MAX_TIMERS 16384 // handles; ORDR preallocates 1024 timers plus globals and may pool up to 8190
 #define MAX_ORDR_SYNC_REGISTRATIONS 128 // map-local offline channel registrations
 #define MAX_ORDR_SYNC_PREFIX 96 // bytes, including terminator
+#define MAX_ORDR_FRAMES 2048 // per-map logical dynamic DzFrame registry
+#define MAX_ORDR_FRAME_SCRIPT_EVENTS 8 // callbacks per frame (render/input bridge pending)
 #define MAX_TIMERDIALOGS 64 // handles; bounds map-lifetime timer-dialog registry slots
 #define MAX_LEADERBOARDS 32 // handles; fixed save-stable leaderboard registry
 #define MAX_LEADERBOARD_ITEMS 24 // rows; covers classic player/campaign boards
@@ -2358,7 +2360,34 @@ typedef struct {
     bool server;
 } ordrSyncRegistration_t;
 
+/* Backend-independent logical frame state. These handles and parent/anchor
+ * relationships are real map-local objects, but the client paint/gesture
+ * transport is a separate remaining implementation task. */
+typedef struct {
+    int32_t event_id;
+    struct jass_function const *func;
+    bool sync;
+} ordrFrameEvent_t;
+
+typedef struct {
+    uint32_t handle_id;
+    uint32_t parent;
+    int32_t create_context;
+    int32_t relative_point;
+    uint32_t relative_frame;
+    int32_t anchor;
+    float x, y, width, height;
+    int32_t alpha, priority, text_alignment;
+    bool visible, enabled, focused, absolute;
+    char type[24], name[96], template_name[96];
+    char text[512], texture[256], font[128], model[256];
+    ordrFrameEvent_t callbacks[MAX_ORDR_FRAME_SCRIPT_EVENTS];
+    uint32_t callback_count;
+} ordrFrame_t;
+
 struct level_locals {
+    ordrFrame_t ordr_frames[MAX_ORDR_FRAMES];
+    uint32_t ordr_num_frames;
     ordrSyncRegistration_t ordr_sync_registrations[MAX_ORDR_SYNC_REGISTRATIONS];
     uint32_t ordr_num_sync_registrations;
     jass_t *vm;
