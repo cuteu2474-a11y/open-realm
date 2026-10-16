@@ -9218,4 +9218,55 @@ TEST(wc3_api, ordr_toc_accepts_fdf_templates) {
     T_ASSERT(!ORDR_IsFdfFile(""));
 }
 
+
+/* ORDR native signatures are taken from the user-owned Season 2 map.
+ * Distinct queued messages must retain their own sender and payload, not
+ * alias the most recently sent value. */
+TEST(wc3_api, ordr_offline_sync_payloads_and_game_ui_root) {
+    player_t *previous = currentplayer;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(
+        "native DzTriggerRegisterSyncData takes trigger trig, string prefix, boolean server returns nothing\n"
+        "native DzSyncData takes string prefix, string data returns nothing\n"
+        "native DzGetTriggerSyncData takes nothing returns string\n"
+        "native DzGetTriggerSyncPlayer takes nothing returns player\n"
+        "native DzGetGameUI takes nothing returns integer\n"
+        "globals\n"
+        "  integer receivedX = 0\n"
+        "  integer receivedY = 0\n"
+        "endglobals\n"
+        "function on_x takes nothing returns nothing\n"
+        "  call BJassAssert(DzGetTriggerSyncPlayer() == Player(0), \"sync player missing\")\n"
+        "  if DzGetTriggerSyncData() == \"first\" then\n"
+        "    set receivedX = receivedX + 1\n"
+        "  elseif DzGetTriggerSyncData() == \"third\" then\n"
+        "    set receivedX = receivedX + 10\n"
+        "  else\n"
+        "    call BJassAssert(false, \"wrong X payload\")\n"
+        "  endif\n"
+        "endfunction\n"
+        "function on_y takes nothing returns nothing\n"
+        "  call BJassAssert(DzGetTriggerSyncData() == \"second\", \"wrong Y payload\")\n"
+        "  set receivedY = receivedY + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger x = CreateTrigger()\n"
+        "  local trigger y = CreateTrigger()\n"
+        "  call BJassAssert(DzGetGameUI() > 0, \"game UI root must be nonzero\")\n"
+        "  call TriggerAddAction(x, function on_x)\n"
+        "  call TriggerAddAction(y, function on_y)\n"
+        "  call DzTriggerRegisterSyncData(x, \"X\", false)\n"
+        "  call DzTriggerRegisterSyncData(y, \"Y\", false)\n"
+        "  call DzSyncData(\"X\", \"first\")\n"
+        "  call DzSyncData(\"Y\", \"second\")\n"
+        "  call DzSyncData(\"other\", \"ignored\")\n"
+        "  call DzSyncData(\"X\", \"third\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    currentplayer = previous;
+}
+
+
 #endif /* BZ_TESTS */
