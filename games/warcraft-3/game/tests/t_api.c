@@ -9413,6 +9413,12 @@ TEST(wc3_api, ordr_private_main_from_script) {
     size_t read_count;
     player_t *previous = currentplayer;
     bool ran;
+    int requested_frames = 0;
+    cstring_t frame_setting = getenv("ORDR_TIMED_FRAMES");
+    if (frame_setting && *frame_setting) {
+        long parsed = strtol(frame_setting, NULL, 10);
+        if (parsed > 0 && parsed <= 300) requested_frames = (int)parsed;
+    }
     if (!filename || !*filename) {
         fprintf(stderr, "ORDR_PRIVATE_MAIN SKIP: ORDR_JASS_PATH not provided\n");
         return;
@@ -9438,6 +9444,44 @@ TEST(wc3_api, ordr_private_main_from_script) {
         (unsigned)level.num_timers,
         level.vm && jass_rterror_pending(level.vm)
             ? jass_rterror_message(level.vm) : "(none)");
+    /*
+     * Opt-in next-frame smoke using the engine's actual timer and JASS event
+     * dispatchers. This is materially stronger than calling main() alone and
+     * helps catch failures in difficulty-picker / timed-wave callbacks.
+     * The fixture MPQs lack the retail unit database, so unit behavior is not
+     * a proof of visual rendering or in-game playability.
+     */
+    if (ran && requested_frames > 0) {
+        uint32_t initial_edicts = globals.num_edicts;
+        fprintf(stderr, "ORDR_PRIVATE_TIMERS BEGIN frames=%d starting_entities=%u\n",
+                requested_frames, (unsigned)initial_edicts);
+        for (int frame = 1; frame <= requested_frames; ++frame) {
+            G_RunTimers();
+            G_RunEvents();
+            jass_runevents(level.vm);
+            if (frame <= 5 || (frame % 20) == 0 || frame == requested_frames ||
+                jass_rterror_pending(level.vm)) {
+                uint32_t alive = 0, player7 = 0, hostile = 0, active_events = 0;
+                FOR_LOOP(i, globals.num_edicts) {
+                    edict_t const *e = &globals.edicts[i];
+                    if (!e->inuse) continue;
+                    ++alive;
+                    if (e->s.player == 7) ++player7;
+                    if (e->s.player == 15) ++hostile;
+                }
+                FOR_EACH_EVENT(e) ++active_events;
+                fprintf(stderr,
+                    "ORDR_PRIVATE_TIMERS frame=%d/%d entities=%u alive=%u p7=%u p15=%u timers=%u triggers=%u events=%u/%u error=%s\n",
+                    frame, requested_frames, (unsigned)globals.num_edicts,
+                    (unsigned)alive, (unsigned)player7, (unsigned)hostile,
+                    (unsigned)level.num_timers, (unsigned)level.num_triggers,
+                    (unsigned)active_events, (unsigned)MAX_EVENTS,
+                    jass_rterror_pending(level.vm)
+                        ? jass_rterror_message(level.vm) : "(none)");
+            }
+            if (jass_rterror_pending(level.vm)) { ran = false; break; }
+        }
+    }
     currentplayer = previous;
     free(source);
     T_ASSERT(ran);
