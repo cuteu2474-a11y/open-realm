@@ -66,13 +66,22 @@ static int32_t ORDR_RegexCount(cstring_t source, cstring_t pattern) {
         }
         return count;
     }
-    if (regcomp(&regex, pattern, REG_EXTENDED)) return 0;
+    if (strlen(pattern) > 2048 || regcomp(&regex, pattern, REG_EXTENDED)) return 0;
     cursor = source;
-    while (*cursor && regexec(&regex, cursor, 1, &match, 0) == 0) {
-        if (count == INT32_MAX) break;
+    bool at_start = true;
+    while (regexec(&regex, cursor, 1, &match, at_start ? 0 : REG_NOTBOL) == 0) {
+        if (count == INT32_MAX || match.rm_so < 0) break;
         ++count;
-        if (match.rm_eo > 0) cursor += match.rm_eo;
-        else (void)ORDR_Utf8Codepoint(&cursor); /* zero-width match */
+        /* REG_NOTBOL keeps ^ anchored to the original input, not each suffix. */
+        at_start = false;
+        if (match.rm_eo > 0) {
+            cursor += match.rm_eo;
+            if (match.rm_so == match.rm_eo && !*cursor) break;
+        } else if (*cursor) {
+            (void)ORDR_Utf8Codepoint(&cursor); /* zero-width match */
+        } else {
+            break; /* zero-width match on final terminator */
+        }
     }
     regfree(&regex);
     return count;
@@ -161,7 +170,7 @@ static uint32_t JNStringRegex(jass_t *j) {
     uint32_t result;
     if (!source || !pattern || index < 0 || index >= 16)
         return jass_pushstring(j, "");
-    if (regcomp(&regex, pattern, REG_EXTENDED))
+    if (strlen(pattern) > 2048 || regcomp(&regex, pattern, REG_EXTENDED))
         return jass_pushstring(j, "");
     if (regexec(&regex, source, (size_t)index + 1, match, 0) != 0 ||
         match[index].rm_so < 0 || match[index].rm_eo < match[index].rm_so) {
