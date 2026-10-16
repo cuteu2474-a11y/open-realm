@@ -9534,4 +9534,48 @@ TEST(wc3_api, ordr_startup_invalid_trigger_pointer_safe) {
     ));
 }
 
+
+/* ORDR first-frame regression: timer callbacks must dispatch normally, while
+ * malformed trigger handles are dropped rather than dereferenced by libjass.
+ * A synthetic bad event models corrupt handles seen under incomplete MPQ shims. */
+TEST(wc3_api, ordr_first_timed_event_ignores_invalid_trigger_and_runs_valid_one) {
+    gtimer_t *registered_timer = NULL;
+    event_t *malformed;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer fired = 0\n"
+        "endglobals\n"
+        "function on_timer takes nothing returns nothing\n"
+        "  set fired = fired + 1\n"
+        "endfunction\n"
+        "function verify_timer takes nothing returns nothing\n"
+        "  call BJassAssert(fired == 1, \"timer callback lost or duplicated\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, function on_timer)\n"
+        "  call TriggerRegisterTimerEvent(t, 0.001, false)\n"
+        "endfunction\n"
+    ));
+    FOR_EACH_EVENT(e)
+        if (e->type == EVENT_GAME_TIMER_EXPIRED && e->trigger && e->timer) {
+            registered_timer = e->timer;
+            break;
+        }
+    T_NOT_NULL(registered_timer);
+    if (!registered_timer) return;
+    malformed = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    T_NOT_NULL(malformed);
+    if (!malformed) return;
+    malformed->timer = registered_timer;
+    malformed->trigger = (trigger_t *)(uintptr_t)0x4544000044840000ULL;
+    G_RunTimers();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "verify_timer", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 #endif /* BZ_TESTS */
