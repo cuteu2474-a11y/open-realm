@@ -9578,4 +9578,53 @@ TEST(wc3_api, ordr_first_timed_event_ignores_invalid_trigger_and_runs_valid_one)
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+
+/* Logical DzFrame API is intentionally headless until the native client
+ * rendering/input bridge is implemented. Regression checks identity, lookup,
+ * state storage, and callback registration without claiming visual display. */
+TEST(wc3_api, ordr_first_timed_frame_logical_creation_and_properties) {
+    ordrFrame_t const *frame;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string frameType, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameFindByName takes string name, integer id returns integer\n"
+        "native DzFrameSetSize takes integer frame, real w, real h returns nothing\n"
+        "native DzFrameSetPoint takes integer frame, integer point, integer relativeFrame, integer relativePoint, real x, real y returns nothing\n"
+        "native DzFrameSetTexture takes integer frame, string texture, integer flag returns nothing\n"
+        "native DzFrameSetText takes integer frame, string text returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "native DzFrameShow takes integer frame, boolean enabled returns nothing\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer eventId, code action, boolean sync returns nothing\n"
+        "globals\n"
+        "  integer frameHandle = 0\n"
+        "endglobals\n"
+        "function event_handler takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set frameHandle = DzCreateFrameByTagName(\"TEXT\", \"ORDRTestFrame\", DzGetGameUI(), \"\", 42)\n"
+        "  call BJassAssert(frameHandle > DzGetGameUI(), \"frame handle unavailable\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ORDRTestFrame\", 42) == frameHandle, \"frame lookup failed\")\n"
+        "  call DzFrameSetSize(frameHandle, 0.3, 0.1)\n"
+        "  call DzFrameSetPoint(frameHandle, 4, DzGetGameUI(), 4, 0.01, -0.02)\n"
+        "  call DzFrameSetTexture(frameHandle, \"Interface\\\\ORDR.tga\", 0)\n"
+        "  call DzFrameSetText(frameHandle, \"난이도 선택\")\n"
+        "  call BJassAssert(DzFrameGetText(frameHandle) == \"난이도 선택\", \"frame text roundtrip\")\n"
+        "  call DzFrameShow(frameHandle, false)\n"
+        "  call DzFrameSetScriptByCode(frameHandle, 1, function event_handler, false)\n"
+        "endfunction\n"
+    ));
+    T_EQ(level.ordr_num_frames, (uint32_t)1);
+    frame = &level.ordr_frames[0];
+    T_EQ(frame->handle_id, (uint32_t)2);
+    T_EQ(frame->parent, (uint32_t)1);
+    T_EQ(frame->create_context, 42);
+    T_STREQ(frame->name, "ORDRTestFrame");
+    T_STREQ(frame->text, "난이도 선택");
+    T_ASSERT(!frame->visible);
+    T_FEQ(frame->width, 0.3f, 0.0001f);
+    T_FEQ(frame->x, 0.01f, 0.0001f);
+    T_EQ(frame->callback_count, (uint32_t)1);
+}
+
 #endif /* BZ_TESTS */
