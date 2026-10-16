@@ -97,6 +97,8 @@ uint32_t  jass_pushnullhandle(jass_t *j, cstring_t type);
 uint32_t  jass_pushinteger(jass_t *j, int32_t value);
 uint32_t  jass_pushnumber(jass_t *j, float value);
 uint32_t  jass_pushboolean(jass_t *j, bool value);
+/* Copy runtime bytes verbatim; only parsed source literals decode escapes.
+ * pushstringlen requires len readable bytes, without a trailing NUL. */
 uint32_t  jass_pushstring(jass_t *j, cstring_t value);
 uint32_t  jass_pushstringlen(jass_t *j, cstring_t value, uint32_t len);
 uint32_t  jass_pushlighthandle(jass_t *j, handle_t value, cstring_t type);

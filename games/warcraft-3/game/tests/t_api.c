@@ -9152,6 +9152,31 @@ TEST(wc3_api, ordr_korean_regex_and_separator_count) {
     T_EQ(ORDR_RegexCount("ABC", "["), 0); /* invalid regex is harmless */
 }
 
+TEST(wc3_api, ordr_regex_count_keeps_original_string_anchors) {
+    T_EQ(ORDR_RegexCount("aaa", "^a"), 1);
+    T_EQ(ORDR_RegexCount("aaa", "^"), 1);
+    T_EQ(ORDR_RegexCount("aaa", "$"), 1);
+    T_EQ(ORDR_RegexCount("aa", "a*"), 2);
+    T_EQ(ORDR_RegexCount("", "^$"), 1);
+}
+
+/* The real login dialog uses .$ to extract the last typed password character.
+ * The VM starts in the C locale, so POSIX regex alone returns a UTF-8 tail byte. */
+TEST(wc3_api, ordr_password_regex_preserves_last_utf8_character) {
+    T_ASSERT(run_test_jass(
+        "native JNStringRegex takes string s, string p, integer i returns string\n"
+        "function main takes nothing returns nothing\n"
+        "call BJassAssert(JNStringRegex(\"abcé\", \".$\", 0) == \"é\", \"two-byte password character\")\n"
+        "call BJassAssert(JNStringRegex(\"abc한\", \".$\", 0) == \"한\", \"three-byte character\")\n"
+        "call BJassAssert(JNStringRegex(\"abc😀\", \".$\", 0) == \"😀\", \"four-byte password character\")\n"
+        "call BJassAssert(JNStringRegex(\"\", \".$\", 0) == \"\", \"empty password\")\n"
+        "call BJassAssert(JNStringRegex(\"abcé\", \".$\", 1) == \"\", \"no capture group\")\n"
+        "call BJassAssert(JNStringRegex(\"abc9\", \"[A-Za-z0-9]$\", 0) == \"9\", \"ASCII password mode\")\n"
+        "call BJassAssert(JNStringRegex(\"User9\", \"^[^,;|]+$\", 0) == \"User9\", \"valid login id\")\n"
+        "call BJassAssert(JNStringRegex(\"bad;id\", \"^[^,;|]+$\", 0) == \"\", \"invalid login id\")\n"
+        "endfunction\n"));
+}
+
 TEST(wc3_api, ordr_jn_string_natives_execute_from_jass) {
     player_t *previous = currentplayer;
     game.clients[0].ps.stats[1] = 0;

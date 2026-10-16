@@ -214,6 +214,32 @@ static void jass_remove_quotes(string_t str, char quote) {
     }
 }
 
+/* Escapes belong to source literals, not to native strings or concatenation.
+ * Preserve unknown escapes so legacy map paths retain their backslashes. */
+static void jass_decode_string_literal(string_t str) {
+    char *src = str, *dst = str;
+    while (*src) {
+        if (*src == '\\' && src[1]) {
+            char decoded;
+            switch (src[1]) {
+                case '\\': decoded = '\\'; break;
+                case '"': decoded = '"'; break;
+                case 'n': decoded = '\n'; break;
+                case 'r': decoded = '\r'; break;
+                case 't': decoded = '\t'; break;
+                case 'b': decoded = '\b'; break;
+                case 'f': decoded = '\f'; break;
+                default: *dst++ = *src++; continue;
+            }
+            *dst++ = decoded;
+            src += 2;
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
+
 token_t *alloc_ident_token(wordExtractor_t *p, TOKENTYPE tt) {
     token_t *t = alloc_token(tt);
     t->primary = strdup(parse_token(p));
@@ -267,6 +293,7 @@ wordExtractor_t(read_single_identifier) {
     } else if (is_string(tok)) {
         left = alloc_ident_token(p, TT_STRING);
         jass_remove_quotes(left->primary, '\"');
+        jass_decode_string_literal(left->primary);
     } else if (is_fourcc(tok)) {
         left = alloc_ident_token(p, TT_FOURCC);
         jass_remove_quotes(left->primary, '\'');

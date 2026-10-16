@@ -25,11 +25,27 @@ jobs:
       - name: Build unsigned iPad app
         run: make ipad
       - name: Verify iPad app exists
-        run: test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+        run: |
+          app=build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          plutil -lint "$app/Info.plist" "$app"/Frameworks/*.framework/Info.plist
+          for binary in "$app/warcraft3" "$app"/Frameworks/*.framework/*; do
+            case "$binary" in */Info.plist) continue ;; esac
+            test -x "$binary"
+            xcrun lipo -verify_arch arm64 "$binary"
+          done
+      - name: Archive unsigned app preserving executable permissions
+        run: |
+          tar -czf build/ipad/Warcraft3-iphoneos-arm64-unsigned.tar.gz \
+            -C build/ipad/iphoneos-arm64/warcraft3 Warcraft3.app
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Device compilation and bundle checks only. This unsigned app needs signing and separately supplied Warcraft III data. ORDR map loading, combat, rendering, and iPad input have not been verified by this workflow.
+
+          Extract the artifact's `.tar.gz` before signing or installing it; the archive preserves executable permissions.
+          EOF
       - name: Upload diagnostic app bundle
         uses: actions/upload-artifact@v4
         with:
           name: ordr-openrealm-ipad-unsigned
-          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          path: build/ipad/Warcraft3-iphoneos-arm64-unsigned.tar.gz
           if-no-files-found: error
           retention-days: 7

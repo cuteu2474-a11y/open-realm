@@ -76,6 +76,7 @@ Useful direct options include:
 --limit N           audit only the first N filtered maps
 --rerun-crashes     rerun first-pass crashes serially
 --fail-on-crash     return nonzero after reports have been written
+--fail-on-errors    also fail on logged diagnostics, including exit-zero JASS errors
 --output-dir PATH   report/log destination
 ```
 
@@ -109,7 +110,10 @@ into counted families so one map remains one readable table row.
 `completed` means only that the process reached `com_frame_limit` with exit
 code zero. `SIGSEGV`, `timeout`, and `auditor-error` are process-level failures.
 Warnings and runtime errors remain listed even when the process reaches its
-frame limit. Visual correctness requires a rendered pass or human inspection;
+frame limit. Use `--fail-on-errors` when using the audit as a compatibility gate;
+it preserves reports and logs before returning nonzero for any collected
+diagnostic or process failure. A clean bounded run still proves only that interval.
+Visual correctness requires a rendered pass or human inspection;
 mission completion requires scripted milestones or human play.
 
 ## Custom Maps

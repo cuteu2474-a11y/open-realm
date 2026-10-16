@@ -322,18 +322,6 @@ jassModule_t jass_operators[] = {
  * String utilities
  * ========================================================================= */
 
-void removeDoubleBackslashes(string_t str) {
-    size_t len = strlen(str);
-    size_t j = 0;
-    for (size_t i = 0; i < len; i++) {
-        str[j++] = str[i];
-        if (str[i] == '\\' && str[i + 1] == '\\') {
-            i++;
-        }
-    }
-    str[j] = '\0';
-}
-
 bool is_integer(cstring_t tok) {
     string_t endptr;
     if (!tok || !*tok) return false;
@@ -1650,9 +1638,11 @@ uint32_t jass_pushboolean(jass_t *j, bool value) {
 
 uint32_t jass_pushstringlen(jass_t *j, cstring_t value, uint32_t len) {
     JASS_ADD_STACK(j, var, jasstype_string);
-    jass_store_value(var, value, len+1);
+    if (!value) len = 0;
+    jass_setnull(var);
+    var->value = jass_alloc((long)len + 1);
+    if (len) memcpy(var->value, value, len);
     ((string_t)var->value)[len] = '\0';
-    removeDoubleBackslashes(var->value);
     return 1;
 }
 

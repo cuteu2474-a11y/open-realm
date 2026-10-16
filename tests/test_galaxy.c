@@ -131,8 +131,20 @@ static unsigned int gal_TestFail(jass_t *j) {
     return 0;
 }
 
+static char gal_captured_string[256];
+static uint32_t gal_CaptureString(jass_t *j) {
+    strlcpy(gal_captured_string, jass_checkstring(j, 1), sizeof(gal_captured_string));
+    return 0;
+}
+
+static uint32_t gal_EchoString(jass_t *j) {
+    return jass_pushstring(j, jass_checkstring(j, 1));
+}
+
 static jassModule_t gal_test_natives[] = {
     { "TestFail", gal_TestFail },
+    { "CaptureString", gal_CaptureString },
+    { "EchoString", gal_EchoString },
     { "NoValue", gal_void },
     { "SaveCode", gal_save_code },
     { "CallSaved", gal_call_saved },
@@ -325,6 +337,40 @@ static int gal_parse_mode(gal_state_t *s, char const *src, JASSMODE mode) {
 }
 
 static int gal_parse(gal_state_t *s, char const *src) { return gal_parse_mode(s, src, JASS_MODE_GALAXY); }
+
+/* ORDR includes escaped UI quotes and a backslash character table. Source
+ * escapes are decoded once; native output and concatenation preserve values. */
+TEST(jass_strings, source_escapes_decode_once_in_both_modes) {
+    char const *literal = "\"quote: \\\" // keep\\n\\t\\r\\b\\f slash: \\\\\\\\ end\"";
+    char const *expected = "quote: \" // keep\n\t\r\b\f slash: \\\\ end";
+    for (int mode = JASS_MODE_JASS; mode <= JASS_MODE_GALAXY; mode++) {
+        gal_state_t s = gal_new();
+        char source[1024];
+        if (mode == JASS_MODE_JASS)
+            snprintf(source, sizeof(source),
+                "native CaptureString takes string s returns nothing\n"
+                "native EchoString takes string s returns string\n"
+                "function main takes nothing returns nothing\n"
+                "call CaptureString(EchoString(%s + \"\"))\nendfunction\n", literal);
+        else
+            snprintf(source, sizeof(source),
+                "void main() { CaptureString(EchoString(%s + \"\")); }", literal);
+        gal_captured_string[0] = '\0';
+        T_ASSERT(gal_run_mode(&s, source, (JASSMODE)mode));
+        T_STREQ(gal_captured_string, expected);
+        gal_destroy(&s);
+    }
+}
+
+TEST(jass_strings, native_values_preserve_backslashes_and_bounded_bytes) {
+    gal_state_t s = gal_new();
+    char const bytes[] = { '\\', '\\' }; /* no trailing NUL required */
+    jass_pushstring(s.j, "\\\\server\\folder");
+    T_STREQ(jass_checkstring(s.j, -1), "\\\\server\\folder");
+    jass_pushstringlen(s.j, bytes, sizeof(bytes));
+    T_STREQ(jass_checkstring(s.j, -1), "\\\\");
+    gal_destroy(&s);
+}
 
 /* =========================================================================
  * Parser tests — verify specific Galaxy constructs parse without error
