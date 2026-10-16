@@ -9627,4 +9627,50 @@ TEST(wc3_api, ordr_first_timed_frame_logical_creation_and_properties) {
     T_EQ(frame->callback_count, (uint32_t)1);
 }
 
+
+/* ORDR Bcx registers chat commands across players. Verify substring vs exact
+ * matching, sender identity, and the event-text getters in real JASS code. */
+TEST(wc3_api, ordr_chat_registration_and_dispatch_sender_and_text) {
+    player_t *previous = currentplayer;
+    player_t *zero;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    zero = currentplayer;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer received = 0\n"
+        "endglobals\n"
+        "function partial_chat takes nothing returns nothing\n"
+        "  call BJassAssert(GetTriggerPlayer() == Player(0), \"wrong player in chat context\")\n"
+        "  call BJassAssert(GetEventPlayerChatStringMatched() == \"-hello\", \"wrong chat match\")\n"
+        "  set received = received + 1\n"
+        "endfunction\n"
+        "function exact_chat takes nothing returns nothing\n"
+        "  call BJassAssert(GetEventPlayerChatString() == \"-hello\", \"wrong exact message\")\n"
+        "  set received = received + 10\n"
+        "endfunction\n"
+        "function verify_chat takes nothing returns nothing\n"
+        "  call BJassAssert(received == 12, \"chat callbacks did not match 1+1+10\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger partial = CreateTrigger()\n"
+        "  local trigger exact = CreateTrigger()\n"
+        "  call TriggerAddAction(partial, function partial_chat)\n"
+        "  call TriggerAddAction(exact, function exact_chat)\n"
+        "  call TriggerRegisterPlayerChatEvent(partial, Player(0), \"-hello\", false)\n"
+        "  call TriggerRegisterPlayerChatEvent(exact, Player(0), \"-hello\", true)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    G_JassPlayerChat(zero, "prefix -hello suffix");
+    G_JassPlayerChat(G_GetPlayerByNumber(1), "-hello");
+    G_JassPlayerChat(zero, "-hello");
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "verify_chat", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    currentplayer = previous;
+}
+
 #endif /* BZ_TESTS */
