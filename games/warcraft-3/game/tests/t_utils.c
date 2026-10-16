@@ -222,7 +222,7 @@ static void test_private_map_progress(jass_t *vm, cstring_t function, uint64_t o
     (void)vm;
     if (!getenv("ORDR_JASS_PATH")) return;
     if (operations != 256 && (operations % 4096u) != 0) return;
-    fprintf(stderr, "ORDR_PRIVATE_PROGRESS function=%s operations=%llu\\n",
+    fprintf(stderr, "ORDR_PRIVATE_PROGRESS function=%s operations=%llu\n",
             function ? function : "(unknown)", (unsigned long long)operations);
 }
 
