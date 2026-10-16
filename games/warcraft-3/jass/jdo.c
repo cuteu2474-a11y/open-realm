@@ -1123,6 +1123,7 @@ void jass_runevents(jass_t *j) {
  * ========================================================================= */
 
 static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
+    if (!j || !params || !params->trigger) return false;
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     if (!tmp_state) return false;
@@ -1232,6 +1233,7 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 }
 
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
+    if (!j || !params || !params->trigger) return;
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
