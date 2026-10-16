@@ -400,12 +400,32 @@ uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
     //float limitval = jass_checknumber(j, 5);
     return jass_pushnullhandle(j, "event");
 }
+/* Warcraft player chat: exact equals, non-exact substring match. Reuse
+ * EVENT_PLAYER_CHAT's dedicated event type and existing variable/limitop slots
+ * for registration text/flag (game-variable events use another event type).
+ * The event registry is map-local and survives until the map is unloaded. */
 uint32_t TriggerRegisterPlayerChatEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //cstring_t chatMessageToDetect = jass_checkstring(j, 3);
-    //bool exactMatchOnly = jass_checkboolean(j, 4);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    player_t *whichPlayer = jass_checkhandle(j, 2, "player");
+    cstring_t match = jass_checkstring(j, 3);
+    bool exact = jass_checkboolean(j, 4);
+    event_t *evt;
+    size_t length;
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !whichPlayer || !match)
+        return jass_pushnullhandle(j, "event");
+    length = strlen(match);
+    if (length >= 1024) {
+        jass_rterror(j, "TriggerRegisterPlayerChatEvent: match text too long");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(EVENT_PLAYER_CHAT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger;
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
+    evt->variable = gi.MemAlloc(length + 1);
+    memcpy((void *)evt->variable, match, length + 1);
+    evt->limitop = exact ? 1 : 0;
+    return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterDeathEvent(jass_t *j) {
     /* Fire whichTrigger when whichWidget dies.  "widget" is the base type of
