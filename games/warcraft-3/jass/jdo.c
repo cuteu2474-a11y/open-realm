@@ -858,6 +858,7 @@ static void jass_coroutine_return(jasscoroutine_t *co) {
 
 static void jass_resumecoroutine(jasscoroutine_t *co) {
     jass_t *j = co->state;
+    uint64_t diagnostic_operations = 0;
 
     if (!j->num_stack) {
         jass_pushfunction(j, j->context.func);
@@ -877,6 +878,20 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
 
     co->yielded = false;
     while (co->frames && !co->yielded) {
+        /*
+         * A custom map can crash or exhaust its runtime budget before
+         * jass_runevents() returns.  Sample every 2048 interpreter operations
+         * without yielding or modifying JASS execution semantics.
+         */
+        if (jass_host.ExecutionProgress && (++diagnostic_operations % 2048u) == 0u) {
+            jassCoroutineframe_t *function_frame = jass_coroutine_functionframe(co);
+            jass_host.ExecutionProgress(j,
+                function_frame && function_frame->func
+                    ? jass_functionname(function_frame->func) : "(native/root)",
+                diagnostic_operations);
+        } else if (!jass_host.ExecutionProgress) {
+            /* Keep the non-diagnostic interpreter path free of work. */
+        }
         jassCoroutineframe_t *frame = co->frames;
         token_t const *token = frame->pc;
         token_t const *next;
