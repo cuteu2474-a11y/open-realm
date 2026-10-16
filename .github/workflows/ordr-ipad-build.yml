@@ -27,6 +27,14 @@ jobs:
         run: |
           test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
           find build/ipad -maxdepth 5 -name '*.app' -print
+      - name: Verify device executable and embedded frameworks
+        run: |
+          APP=build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          test -f "$APP/Warcraft3"
+          xcrun lipo -info "$APP/Warcraft3" | grep -q arm64
+          test -d "$APP/Frameworks"
+          find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d -print
+          test "$(find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d | wc -l | tr -d ' ')" -ge 6
       - name: Upload unsigned app for diagnostics only
         uses: actions/upload-artifact@v4
         with:
