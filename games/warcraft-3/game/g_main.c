@@ -31,6 +31,7 @@
 #include "games/warcraft-3/common/minimap.h"
 #include "jass/jass.h"
 #include <stdarg.h>
+#include <time.h>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -42,6 +43,9 @@
  * Keep diagnostics in the data container rather than modifying the map.
  */
 static char g_last_jass_error[512];
+static bool g_tracking_jass_startup;
+static bool g_jass_progress_recorded;
+static clock_t g_jass_last_progress_cpu;
 
 static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset) {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -64,11 +68,40 @@ static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset)
 
 void G_JassDiagnosticReset(cstring_t map) {
     g_last_jass_error[0] = '\0';
+    g_tracking_jass_startup = false;
+    g_jass_progress_recorded = false;
+    g_jass_last_progress_cpu = 0;
     G_WriteJassDiagnostic("map", map ? map : "(unknown)", true);
 }
 
 void G_JassDiagnosticNote(cstring_t stage) {
     G_WriteJassDiagnostic("stage", stage, false);
+}
+
+/*
+ * A native crash, jetsam or watchdog kill skips our normal error boundary.
+ * Record the innermost running function periodically so that the last
+ * completed sample survives in Documents/OpenRealm-JASS.log.
+ */
+void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    clock_t cpu = clock();
+    char detail[256];
+    (void)vm;
+    if (!g_tracking_jass_startup) return;
+    if (g_jass_progress_recorded && cpu != (clock_t)-1 &&
+        g_jass_last_progress_cpu != (clock_t)-1 &&
+        cpu >= g_jass_last_progress_cpu &&
+        (double)(cpu - g_jass_last_progress_cpu) / CLOCKS_PER_SEC < 0.5)
+        return;
+    snprintf(detail, sizeof(detail), "function=%s coroutine_steps=%llu",
+             function ? function : "(unknown)", (unsigned long long)operations);
+    G_WriteJassDiagnostic("main-progress", detail, false);
+    g_jass_progress_recorded = true;
+    g_jass_last_progress_cpu = cpu;
+#else
+    (void)vm; (void)function; (void)operations;
+#endif
 }
 
 void G_JassDiagnosticError(cstring_t stage) {
@@ -1231,8 +1264,12 @@ static void G_StartScripts(void) {
 
     G_JassDiagnosticNote("calling main");
     jass_callbyname(level.vm, "main", true);
+    G_JassDiagnosticNote("main coroutine queued");
     level.scriptsStarted = true;
+    g_tracking_jass_startup = true;
     jass_runevents(level.vm);
+    g_tracking_jass_startup = false;
+    G_JassDiagnosticNote("main event dispatcher returned");
     G_JassDiagnosticError("main");
     if (!jass_rterror_pending(level.vm)) G_JassDiagnosticNote("main initial events processed");
 
