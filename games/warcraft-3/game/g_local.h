@@ -2459,6 +2459,9 @@ typedef struct {
 // g_main.c
 player_t *G_GetPlayerByNumber(uint32_t);
 void G_InitJassHost(void);
+void G_JassDiagnosticReset(cstring_t map);
+void G_JassDiagnosticNote(cstring_t stage);
+void G_JassDiagnosticError(cstring_t stage);
 edict_t *G_GetPlayerEntityByNumber(uint32_t);
 gameClient_t *G_GetPlayerClientByNumber(uint32_t);
 void G_SetClientConnected(edict_t *player, bool connected);
