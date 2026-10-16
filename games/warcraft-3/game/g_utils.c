@@ -149,6 +149,9 @@ event_t *G_MakeEvent(EVENTTYPE type) {
         evt->inuse = true; evt->type = type; return evt;
     }
     fprintf(stderr, "WC3: event slot limit %u reached\n", MAX_EVENTS);
+    /* Some older native registrations assume an event allocation succeeds.
+     * Persist the exhaustion marker before a possible invalid dereference. */
+    G_JassDiagnosticNote("event handler registry exhausted");
     return NULL;
 }
 

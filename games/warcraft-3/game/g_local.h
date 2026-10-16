@@ -1034,7 +1034,11 @@ typedef struct {
 #define MAX_GROUP_SIZE 256 // entities; Warcraft III group enumeration cap used by JASS group handles
 #define JASS_GROUP_INITIAL_CAPACITY 64 // handle pointer slots; grows dynamically while group objects stay at stable addresses
 #define MAX_TRIGGERS 4096 // handles; bounds deterministic per-map trigger registry slots
-#define MAX_TIMERS 1024 // handles; bounds deterministic per-map timer registry slots
+#define MAX_TIMERS 16384 // handles; ORDR preallocates 1024 timers plus globals and may pool up to 8190
+#define MAX_ORDR_SYNC_REGISTRATIONS 128 // map-local offline channel registrations
+#define MAX_ORDR_SYNC_PREFIX 96 // bytes, including terminator
+#define MAX_ORDR_FRAMES 2048 // per-map logical dynamic DzFrame registry
+#define MAX_ORDR_FRAME_SCRIPT_EVENTS 8 // callbacks per frame (render/input bridge pending)
 #define MAX_TIMERDIALOGS 64 // handles; bounds map-lifetime timer-dialog registry slots
 #define MAX_LEADERBOARDS 32 // handles; fixed save-stable leaderboard registry
 #define MAX_LEADERBOARD_ITEMS 24 // rows; covers classic player/campaign boards
@@ -2350,7 +2354,42 @@ typedef struct {
     vec3_t color;
 } wc3EnvironmentFogParams_t;
 
+typedef struct {
+    trigger_t *trigger;
+    char prefix[MAX_ORDR_SYNC_PREFIX];
+    bool server;
+} ordrSyncRegistration_t;
+
+/* Backend-independent logical frame state. These handles and parent/anchor
+ * relationships are real map-local objects, but the client paint/gesture
+ * transport is a separate remaining implementation task. */
+typedef struct {
+    int32_t event_id;
+    struct jass_function const *func;
+    bool sync;
+} ordrFrameEvent_t;
+
+typedef struct {
+    uint32_t handle_id;
+    uint32_t parent;
+    int32_t create_context;
+    int32_t relative_point;
+    uint32_t relative_frame;
+    int32_t anchor;
+    float x, y, width, height, font_height;
+    int32_t alpha, priority, text_alignment, font_flags;
+    bool visible, enabled, focused, absolute;
+    char type[24], name[96], template_name[96];
+    char text[512], texture[256], font[128], model[256];
+    ordrFrameEvent_t callbacks[MAX_ORDR_FRAME_SCRIPT_EVENTS];
+    uint32_t callback_count;
+} ordrFrame_t;
+
 struct level_locals {
+    ordrFrame_t ordr_frames[MAX_ORDR_FRAMES];
+    uint32_t ordr_num_frames;
+    ordrSyncRegistration_t ordr_sync_registrations[MAX_ORDR_SYNC_REGISTRATIONS];
+    uint32_t ordr_num_sync_registrations;
     jass_t *vm;
     ggroup_t **groups;
     uint32_t num_groups;
@@ -2459,6 +2498,11 @@ typedef struct {
 // g_main.c
 player_t *G_GetPlayerByNumber(uint32_t);
 void G_InitJassHost(void);
+void G_JassDiagnosticReset(cstring_t map);
+void G_JassPlayerChat(player_t *player, cstring_t message);
+void G_JassDiagnosticNote(cstring_t stage);
+void G_JassDiagnosticError(cstring_t stage);
+void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations);
 edict_t *G_GetPlayerEntityByNumber(uint32_t);
 gameClient_t *G_GetPlayerClientByNumber(uint32_t);
 void G_SetClientConnected(edict_t *player, bool connected);

@@ -31,6 +31,104 @@
 #include "games/warcraft-3/common/minimap.h"
 #include "jass/jass.h"
 #include <stdarg.h>
+#include <time.h>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+/*
+ * JASS startup diagnostics for custom maps.  On iPad, HOME/Documents is the
+ * Files-visible Documents directory, including when hosted by LiveContainer.
+ * Keep diagnostics in the data container rather than modifying the map.
+ */
+static char g_last_jass_error[512];
+static bool g_tracking_jass_startup;
+static bool g_jass_progress_recorded;
+static clock_t g_jass_last_progress_cpu;
+static uint32_t g_jass_progress_samples;
+
+static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    char path[MAX_PATHLEN];
+    cstring_t home = getenv("HOME");
+    FILE *fp;
+    if (!home || !*home) return;
+    if (snprintf(path, sizeof(path), "%s/Documents/OpenRealm-JASS.log", home) >= (int)sizeof(path))
+        return;
+    fp = fopen(path, reset ? "w" : "a");
+    if (!fp) return;
+    fprintf(fp, "%s: %s\n", stage, detail ? detail : "(none)");
+    fclose(fp);
+#else
+    (void)stage;
+    (void)detail;
+    (void)reset;
+#endif
+}
+
+void G_JassDiagnosticReset(cstring_t map) {
+    g_last_jass_error[0] = '\0';
+    g_tracking_jass_startup = false;
+    g_jass_progress_recorded = false;
+    g_jass_last_progress_cpu = 0;
+    g_jass_progress_samples = 0;
+    G_WriteJassDiagnostic("map", map ? map : "(unknown)", true);
+}
+
+void G_JassDiagnosticNote(cstring_t stage) {
+    G_WriteJassDiagnostic("stage", stage, false);
+}
+
+/*
+ * A native crash, jetsam or watchdog kill skips our normal error boundary.
+ * Record the innermost running function periodically so that the last
+ * completed sample survives in Documents/OpenRealm-JASS.log.
+ */
+void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    clock_t cpu;
+    char detail[256];
+    uint32_t active_events = 0;
+    (void)vm;
+    if (!g_tracking_jass_startup) return;
+    /*
+     * The previous 0.5-second throttle lost every sample after the first
+     * 2048 instructions on an iPad terminated early in main(). Capture the
+     * first 128 samples (~32k instructions) unthrottled, then no more than
+     * 25 per process-CPU second to limit filesystem overhead.
+     */
+    ++g_jass_progress_samples;
+    cpu = clock();
+    if (g_jass_progress_samples > 128 && g_jass_progress_recorded &&
+        cpu != (clock_t)-1 && g_jass_last_progress_cpu != (clock_t)-1 &&
+        cpu >= g_jass_last_progress_cpu &&
+        (double)(cpu - g_jass_last_progress_cpu) / CLOCKS_PER_SEC < 0.04)
+        return;
+    FOR_LOOP(i, MAX_EVENTS) if (level.events.handlers[i].inuse) ++active_events;
+    snprintf(detail, sizeof(detail),
+        "function=%s coroutine_steps=%llu triggers=%u timers=%u events=%u/%u",
+        function ? function : "(unknown)", (unsigned long long)operations,
+        (unsigned)level.num_triggers, (unsigned)level.num_timers,
+        (unsigned)active_events, (unsigned)MAX_EVENTS);
+    G_WriteJassDiagnostic("main-progress", detail, false);
+    g_jass_progress_recorded = true;
+    g_jass_last_progress_cpu = cpu;
+#else
+    (void)vm; (void)function; (void)operations;
+#endif
+}
+
+void G_JassDiagnosticError(cstring_t stage) {
+    cstring_t message;
+    if (!level.vm || !jass_rterror_pending(level.vm)) return;
+    message = jass_rterror_message(level.vm);
+    if (!message || !*message) message = "(unspecified JASS runtime error)";
+    if (!strcmp(g_last_jass_error, message)) return;
+    snprintf(g_last_jass_error, sizeof(g_last_jass_error), "%s", message);
+    fprintf(stderr, "WC3_JASS_ERROR stage=%s error=%s\n", stage, message);
+    G_WriteJassDiagnostic(stage, message, false);
+}
 
 struct game_export globals;
 struct game_import gi;
@@ -449,6 +547,7 @@ static bool G_LoadMap(cstring_t mapFilename) {
      * paths do not parse FDF on first use. */
     UI_LoadHud();
     gi.LoadingFrame();
+    G_JassDiagnosticReset(mapFilename);
     G_SpawnEntities();
     gi.LoadingFrame();
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
@@ -1178,9 +1277,16 @@ static void G_StartScripts(void) {
      */
     G_SetDestructableScriptBinding(true);
 
+    G_JassDiagnosticNote("calling main");
     jass_callbyname(level.vm, "main", true);
+    G_JassDiagnosticNote("main coroutine queued");
     level.scriptsStarted = true;
+    g_tracking_jass_startup = true;
     jass_runevents(level.vm);
+    g_tracking_jass_startup = false;
+    G_JassDiagnosticNote("main event dispatcher returned");
+    G_JassDiagnosticError("main");
+    if (!jass_rterror_pending(level.vm)) G_JassDiagnosticNote("main initial events processed");
 
     G_SetDestructableScriptBinding(false);
 }
@@ -1325,6 +1431,7 @@ static void G_RunFrame(void) {
     G_RunTimers();
     G_RunEvents();
     jass_runevents(level.vm);
+    G_JassDiagnosticError("simulation frame");
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 

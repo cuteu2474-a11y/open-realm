@@ -740,10 +740,21 @@ uint32_t GetEventPlayerState(jass_t *j) {
     return jass_pushnullhandle(j, "playerstate");
 }
 uint32_t GetEventPlayerChatString(jass_t *j) {
-    return jass_pushstring(j, 0);
+    jassContext_t const *context = jass_getcontext(j);
+    return jass_pushstring(j, context ? context->syncData : "");
 }
 uint32_t GetEventPlayerChatStringMatched(jass_t *j) {
-    return jass_pushstring(j, 0);
+    jassContext_t const *context = jass_getcontext(j);
+    if (context && context->trigger) {
+        FOR_EACH_EVENT(evt) {
+            if (evt->type != EVENT_PLAYER_CHAT || evt->trigger != context->trigger ||
+                !evt->variable || !context->syncData[0]) continue;
+            if (evt->limitop ? strcmp(context->syncData, evt->variable) == 0
+                             : strstr(context->syncData, evt->variable) != NULL)
+                return jass_pushstring(j, evt->variable);
+        }
+    }
+    return jass_pushstring(j, "");
 }
 uint32_t GetEventUnitState(jass_t *j) {
     return jass_pushnullhandle(j, "unitstate");

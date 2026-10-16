@@ -22,7 +22,7 @@
 #define INF_LOOP_PROTECTION 1000000  /* SC2 Galaxy scripts have large but legitimate loops */
 #define SYNTAX_C_OPERATORS 1 // bitmask; enables Galaxy symbolic logic and shift operators
 #define SYNTAX_INCLUDES    2 // bitmask; enables Galaxy include preprocessing
-#define BZ_JASS_SNAPSHOT_VERSION 8 // format version; v8 persists GetEnumUnit callback context
+#define BZ_JASS_SNAPSHOT_VERSION 9 // v9 preserves queued offline sync event payloads
 #define BZ_JASS_SNAPSHOT_MAX_COUNT (1u << 20) // records; bounds allocations and list walks from corrupt snapshots
 #define BZ_JASS_SNAPSHOT_MAX_STRING (1u << 20) // bytes; bounds strings from corrupt snapshots
 
@@ -33,6 +33,7 @@ typedef struct {
     int32_t value;
     uint32_t dialog_id, dialog_button_id;
     player_t *event_player;
+    cstring_t sync_data;
     vec2_t const *point;
     bool has_point;
     handle_t timer;
@@ -857,6 +858,7 @@ static void jass_coroutine_return(jasscoroutine_t *co) {
 
 static void jass_resumecoroutine(jasscoroutine_t *co) {
     jass_t *j = co->state;
+    uint64_t diagnostic_operations = 0;
 
     if (!j->num_stack) {
         jass_pushfunction(j, j->context.func);
@@ -876,6 +878,19 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
 
     co->yielded = false;
     while (co->frames && !co->yielded) {
+        /*
+         * A custom map can crash or exhaust its runtime budget before
+         * jass_runevents() returns. Sample every 256 interpreter operations.
+         * The iPad host rate-limits disk writes after early startup; the VM
+         * itself continues executing unmodified.
+         */
+        if (jass_host.ExecutionProgress && (++diagnostic_operations % 256u) == 0u) {
+            jassCoroutineframe_t *function_frame = jass_coroutine_functionframe(co);
+            jass_host.ExecutionProgress(j,
+                function_frame && function_frame->func
+                    ? jass_functionname(function_frame->func) : "(native/root)",
+                diagnostic_operations);
+        }
         jassCoroutineframe_t *frame = co->frames;
         token_t const *token = frame->pc;
         token_t const *next;
@@ -1108,6 +1123,7 @@ void jass_runevents(jass_t *j) {
  * ========================================================================= */
 
 static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
+    if (!j || !params || !params->trigger) return false;
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     if (!tmp_state) return false;
@@ -1125,6 +1141,8 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.hasPoint = params->has_point;
         tmp_state->context.playerState = player;
         tmp_state->context.localPlayerState = currentplayer;
+        if (params->sync_data)
+            snprintf(tmp_state->context.syncData, sizeof(tmp_state->context.syncData), "%s", params->sync_data);
         tmp_state->context.timer = currenttimer;
         tmp_state->context.region = params->region ? params->region : jass_getcontext(j)->region;
         jass_pushfunction(tmp_state, cond->expr);
@@ -1215,6 +1233,7 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 }
 
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
+    if (!j || !params || !params->trigger) return;
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
@@ -1242,6 +1261,9 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
             co->loop_a_index_valid = true;
         }
         if (co) {
+            if (params->sync_data)
+                snprintf(co->state->context.syncData, sizeof(co->state->context.syncData),
+                         "%s", params->sync_data);
             if (!first) first = co;
             last = co;
         }
@@ -1274,6 +1296,12 @@ static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const 
         return false;
     jass_executetriggercontext(j, params, false);
     return true;
+}
+
+bool jass_calltriggersync(jass_t *j, trigger_t *trigger, player_t *player, cstring_t payload) {
+    if (!trigger || !payload) return false;
+    return jass_calltriggercontext(j, &(jassTriggerContextParams_t){
+        .trigger = trigger, .event_player = player, .sync_data = payload });
 }
 
 bool jass_calltriggerwithvalue(jass_t *j,
@@ -2748,7 +2776,8 @@ static bool jass_snapshot_writecontext(jassSnapshot_t *snapshot, jassContext_t c
         !jass_snapshot_io(snapshot, (void *)&context->point, sizeof(context->point)) ||
         !jass_snapshot_io(snapshot, (void *)&context->hasPoint, sizeof(context->hasPoint)) ||
         !jass_snapshot_io(snapshot, (void *)&context->timer_generation, sizeof(context->timer_generation)) ||
-        !jass_snapshot_io(snapshot, (void *)&context->timer_pending, sizeof(context->timer_pending))) return false;
+        !jass_snapshot_io(snapshot, (void *)&context->timer_pending, sizeof(context->timer_pending)) ||
+        !jass_snapshot_io(snapshot, (void *)context->syncData, sizeof(context->syncData))) return false;
     FOR_LOOP(i, sizeof(handles) / sizeof(*handles))
         if (!jass_snapshot_writecontext_handle(snapshot, handles[i].type, handles[i].value)) return false;
     return true;
@@ -2776,6 +2805,8 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
         !jass_snapshot_io(snapshot, &context->hasPoint, sizeof(context->hasPoint)) ||
         !jass_snapshot_io(snapshot, &context->timer_generation, sizeof(context->timer_generation)) ||
         !jass_snapshot_io(snapshot, &context->timer_pending, sizeof(context->timer_pending)) ||
+        !jass_snapshot_io(snapshot, context->syncData, sizeof(context->syncData)) ||
+        !memchr(context->syncData, 0, sizeof(context->syncData)) ||
         context->hasPoint > 1 || context->timer_pending > 1) return false;
     FOR_LOOP(i, sizeof(handles) / sizeof(*handles)) {
         uint32_t present, id;

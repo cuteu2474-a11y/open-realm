@@ -26,6 +26,7 @@
 edict_t *alloc_test_unit(uint32_t class_id, float x, float y);
 void reset_entities(void);
 void setup_test_world(void);
+bool setup_ordr_private_world(void);
 void CM_SetupTestPathmap(uint32_t width, uint32_t height, uint8_t const *cells);
 void CM_SetupTestWorldBounds(box2_t const *bounds);
 bool run_test_jass(cstring_t src);
@@ -4605,6 +4606,34 @@ TEST(wc3_api, model_effects_are_rendered_but_not_world_selectable) {
     T_ASSERT(target_effect->s.model != 0);
     T_ASSERT(target_effect->s.flags & EF_NOT_SELECTABLE);
     T_EQ(unit_team_color(target_effect), 6);
+}
+
+/* ORDR S2 creates a 1024-handle timer pool during script startup, in
+ * addition to timer globals. A 1024-slot engine registry aborts main(). */
+TEST(wc3_api, ordr_timer_pool_fits_alongside_global_timers) {
+    setup_test_world();
+    /* Reserve 32 extra slots to stand in for map global timers. */
+    FOR_LOOP(i, 1024 + 32) {
+        gtimer_t *timer = G_AllocJassTimer();
+        T_NOT_NULL(timer);
+        if (!timer) return;
+    }
+    T_EQ(level.num_timers, 1056);
+}
+
+/* Warcraft's GetAbilityEffectById is a STRING query for ability art; unlike
+ * AddSpellEffectById it must not spawn an entity or return an effect handle. */
+TEST(wc3_api, ability_effect_art_query_natives_return_strings) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local string a = GetAbilityEffectById('AHhb', EFFECT_TYPE_TARGET, 0)\n"
+        "  local string b = GetAbilityEffect(\"AHhb\", EFFECT_TYPE_TARGET, 0)\n"
+        "  call BJassAssert(a == b, \"ability id and string art queries disagree\")\n"
+        "  call BJassAssert(a != \"\", \"known ability target art is missing\")\n"
+        "  call BJassAssert(GetAbilityEffectById('ZZZZ', EFFECT_TYPE_TARGET, 0) == \"\", \"unknown ability art must be empty\")\n"
+        "  call BJassAssert(GetAbilityEffectById('AHhb', EFFECT_TYPE_TARGET, -1) == \"\", \"negative art index must be empty\")\n"
+        "endfunction\n"));
 }
 
 TEST(wc3_api, effect_natives_return_independent_handles) {
@@ -9189,5 +9218,478 @@ TEST(wc3_api, ordr_toc_accepts_fdf_templates) {
     T_ASSERT(!ORDR_IsFdfFile("UI\\Logo.blp"));
     T_ASSERT(!ORDR_IsFdfFile(""));
 }
+
+
+/* ORDR native signatures are taken from the user-owned Season 2 map.
+ * Distinct queued messages must retain their own sender and payload, not
+ * alias the most recently sent value. */
+TEST(wc3_api, ordr_offline_sync_payloads_and_game_ui_root) {
+    player_t *previous = currentplayer;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(
+        "native DzTriggerRegisterSyncData takes trigger trig, string prefix, boolean server returns nothing\n"
+        "native DzSyncData takes string prefix, string data returns nothing\n"
+        "native DzGetTriggerSyncData takes nothing returns string\n"
+        "native DzGetTriggerSyncPlayer takes nothing returns player\n"
+        "native DzGetGameUI takes nothing returns integer\n"
+        "globals\n"
+        "  integer receivedX = 0\n"
+        "  integer receivedY = 0\n"
+        "endglobals\n"
+        "function on_x takes nothing returns nothing\n"
+        "  call BJassAssert(DzGetTriggerSyncPlayer() == Player(0), \"sync player missing\")\n"
+        "  if DzGetTriggerSyncData() == \"first\" then\n"
+        "    set receivedX = receivedX + 1\n"
+        "  elseif DzGetTriggerSyncData() == \"third\" then\n"
+        "    set receivedX = receivedX + 10\n"
+        "  else\n"
+        "    call BJassAssert(false, \"wrong X payload\")\n"
+        "  endif\n"
+        "endfunction\n"
+        "function on_y takes nothing returns nothing\n"
+        "  call BJassAssert(DzGetTriggerSyncData() == \"second\", \"wrong Y payload\")\n"
+        "  set receivedY = receivedY + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger x = CreateTrigger()\n"
+        "  local trigger y = CreateTrigger()\n"
+        "  call BJassAssert(DzGetGameUI() > 0, \"game UI root must be nonzero\")\n"
+        "  call TriggerAddAction(x, function on_x)\n"
+        "  call TriggerAddAction(y, function on_y)\n"
+        "  call DzTriggerRegisterSyncData(x, \"X\", false)\n"
+        "  call DzTriggerRegisterSyncData(y, \"Y\", false)\n"
+        "  call DzSyncData(\"X\", \"first\")\n"
+        "  call DzSyncData(\"Y\", \"second\")\n"
+        "  call DzSyncData(\"other\", \"ignored\")\n"
+        "  call DzSyncData(\"X\", \"third\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    currentplayer = previous;
+}
+
+
+
+/*
+ * ORDR S2 startup workload approximation (NO proprietary map script):
+ * static private-map call-graph inspection found ~201 Bcx registrations.
+ * Each Bcx creates one trigger and registers four player chat handlers.
+ * Exercise that nested interpreter path followed by 1,078 additional
+ * triggers, near the map's ~1,279 statically reachable CreateTrigger calls.
+ * This checks scheduler/registry stability, not full ORDR functionality.
+ */
+TEST(wc3_api, ordr_startup_trigger_stress_201_chat_registration_loops) {
+    player_t *previous = currentplayer;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(
+        "function no_action takes nothing returns nothing\n"
+        "endfunction\n"
+        "function synthetic_chat_registration takes string prefix, boolean exactMatch, code action returns nothing\n"
+        "  local integer playerIndex = 0\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, action)\n"
+        "  loop\n"
+        "    exitwhen playerIndex >= 4\n"
+        "    call TriggerRegisterPlayerChatEvent(t, Player(playerIndex), prefix, exactMatch)\n"
+        "    set playerIndex = playerIndex + 1\n"
+        "  endloop\n"
+        "  set t = null\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer i = 0\n"
+        "  local trigger scratch = null\n"
+        "  loop\n"
+        "    exitwhen i >= 201\n"
+        "    call synthetic_chat_registration(\"-synthetic\", false, function no_action)\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1078\n"
+        "    set scratch = CreateTrigger()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(level.num_triggers, (uint32_t)1279);
+    currentplayer = previous;
+}
+
+/* Saturating the fixed event pool must report a clean allocation failure. */
+TEST(wc3_api, ordr_startup_event_capacity_fails_without_memory_corruption) {
+    setup_test_world();
+    FOR_LOOP(i, MAX_EVENTS)
+        T_NOT_NULL(G_MakeEvent(EVENT_PLAYER_CHAT));
+    T_ASSERT(G_MakeEvent(EVENT_PLAYER_CHAT) == NULL);
+}
+
+
+/*
+ * Map-scale script smoke: roughly 3,381 separate JASS functions and ~80,000
+ * statements. This is synthetic (not the user's copyrighted war3map.j).
+ * Exercises parser, dispatch and native allocations in the headless WC3 host.
+ */
+TEST(wc3_api, ordr_startup_map_sized_parser_and_registry_stress) {
+    enum { MAP_STUB_FUNCTIONS = 3381, SYNTHETIC_CAPACITY = 6 * 1024 * 1024 };
+    char *source = malloc(SYNTHETIC_CAPACITY);
+    size_t written = 0;
+    player_t *previous = currentplayer;
+    uint32_t k;
+
+#define ORDR_APPEND(...) do {                                                  \
+    int n = snprintf(source + written, SYNTHETIC_CAPACITY - written, __VA_ARGS__); \
+    if (n < 0 || (size_t)n >= SYNTHETIC_CAPACITY - written) {                    \
+        free(source); T_ASSERT(false); return;                                   \
+    }                                                                          \
+    written += (size_t)n;                                                       \
+} while (0)
+
+    T_NOT_NULL(source);
+    if (!source) return;
+    ORDR_APPEND(
+        "function no_action takes nothing returns nothing\n"
+        "endfunction\n"
+        "function synthetic_chat_registration takes nothing returns nothing\n"
+        "  local integer p = 0\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, function no_action)\n"
+        "  loop\n"
+        "    exitwhen p >= 4\n"
+        "    call TriggerRegisterPlayerChatEvent(t, Player(p), \"-synthetic\", false)\n"
+        "    set p = p + 1\n"
+        "  endloop\n"
+        "endfunction\n");
+    for (k = 0; k < MAP_STUB_FUNCTIONS; ++k) {
+        ORDR_APPEND("function ordr_dummy_%04u takes nothing returns nothing\n", k);
+        FOR_LOOP(v, 12) ORDR_APPEND("  local integer v%02u = %u\n", v, v);
+        FOR_LOOP(v, 12) ORDR_APPEND("  set v%02u = v%02u + 1\n", v, v);
+        ORDR_APPEND("endfunction\n");
+    }
+    ORDR_APPEND(
+        "function main takes nothing returns nothing\n"
+        "  local integer i = 0\n"
+        "  local trigger t = null\n"
+        "  loop\n"
+        "    exitwhen i >= 201\n"
+        "    call synthetic_chat_registration()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1078\n"
+        "    set t = CreateTrigger()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "endfunction\n");
+    fprintf(stderr, "ORDR_SYNTHETIC_MAP script_bytes=%zu functions=%u\n",
+        written, (unsigned)(MAP_STUB_FUNCTIONS + 3));
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(source));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(level.num_triggers, (uint32_t)1279);
+    currentplayer = previous;
+    free(source);
+#undef ORDR_APPEND
+}
+
+
+/*
+ * Run a private extracted war3map.j from an explicit local path:
+ *   ORDR_JASS_PATH=/private/war3map.j build/bin/openwarcraft3-tests \
+ *      -data build/tests +dedicated 1 +test 'wc3_api.ordr_private_main_from_script'
+ *
+ * The proprietary script is never checked into GitHub, attached to CI or
+ * emitted to logs. The headless fixture is NOT the complete retail MPQ data
+ * set; a missing rawcode or native can still fail independently of iPadOS.
+ */
+TEST(wc3_api, ordr_private_main_from_script) {
+    cstring_t filename = getenv("ORDR_JASS_PATH");
+    FILE *in;
+    long size;
+    char *source;
+    size_t read_count;
+    player_t *previous = currentplayer;
+    bool ran;
+    int requested_frames = 0;
+    cstring_t frame_setting = getenv("ORDR_TIMED_FRAMES");
+    if (frame_setting && *frame_setting) {
+        long parsed = strtol(frame_setting, NULL, 10);
+        if (parsed > 0 && parsed <= 300) requested_frames = (int)parsed;
+    }
+    if (!filename || !*filename) {
+        fprintf(stderr, "ORDR_PRIVATE_MAIN SKIP: ORDR_JASS_PATH not provided\n");
+        return;
+    }
+    in = fopen(filename, "rb");
+    if (!in) { T_ASSERT(false); return; }
+    if (fseek(in, 0, SEEK_END) != 0 || (size = ftell(in)) < 0 ||
+        size > (long)(8 * 1024 * 1024) || fseek(in, 0, SEEK_SET) != 0) {
+        fclose(in); T_ASSERT(false); return;
+    }
+    source = malloc((size_t)size + 1);
+    if (!source) { fclose(in); T_ASSERT(false); return; }
+    read_count = fread(source, 1, (size_t)size, in);
+    fclose(in);
+    if (read_count != (size_t)size) { free(source); T_ASSERT(false); return; }
+    source[size] = '\0';
+    fprintf(stderr, "ORDR_PRIVATE_MAIN script_size=%ld bytes\n", size);
+    T_ASSERT(setup_ordr_private_world());
+    currentplayer = G_GetPlayerByNumber(0);
+    ran = run_test_jass(source);
+    fprintf(stderr, "ORDR_PRIVATE_MAIN %s triggers=%u timers=%u error=%s\n",
+        ran ? "PASS" : "FAIL", (unsigned)level.num_triggers,
+        (unsigned)level.num_timers,
+        level.vm && jass_rterror_pending(level.vm)
+            ? jass_rterror_message(level.vm) : "(none)");
+    /*
+     * Opt-in next-frame smoke using the engine's actual timer and JASS event
+     * dispatchers. This is materially stronger than calling main() alone and
+     * helps catch failures in difficulty-picker / timed-wave callbacks.
+     * The fixture MPQs lack the retail unit database, so unit behavior is not
+     * a proof of visual rendering or in-game playability.
+     */
+    if (ran && requested_frames > 0) {
+        uint32_t initial_edicts = globals.num_edicts;
+        fprintf(stderr, "ORDR_PRIVATE_TIMERS BEGIN frames=%d starting_entities=%u\n",
+                requested_frames, (unsigned)initial_edicts);
+        for (int frame = 1; frame <= requested_frames; ++frame) {
+            G_RunTimers();
+            G_RunEvents();
+            jass_runevents(level.vm);
+            if (frame <= 5 || (frame % 20) == 0 || frame == requested_frames ||
+                jass_rterror_pending(level.vm)) {
+                uint32_t alive = 0, player7 = 0, hostile = 0, active_events = 0;
+                FOR_LOOP(i, globals.num_edicts) {
+                    edict_t const *e = &globals.edicts[i];
+                    if (!e->inuse) continue;
+                    ++alive;
+                    if (e->s.player == 7) ++player7;
+                    if (e->s.player == 15) ++hostile;
+                }
+                FOR_EACH_EVENT(e) ++active_events;
+                fprintf(stderr,
+                    "ORDR_PRIVATE_TIMERS frame=%d/%d entities=%u alive=%u p7=%u p15=%u timers=%u triggers=%u events=%u/%u error=%s\n",
+                    frame, requested_frames, (unsigned)globals.num_edicts,
+                    (unsigned)alive, (unsigned)player7, (unsigned)hostile,
+                    (unsigned)level.num_timers, (unsigned)level.num_triggers,
+                    (unsigned)active_events, (unsigned)MAX_EVENTS,
+                    jass_rterror_pending(level.vm)
+                        ? jass_rterror_message(level.vm) : "(none)");
+            }
+            if (jass_rterror_pending(level.vm)) { ran = false; break; }
+        }
+    }
+    currentplayer = previous;
+    free(source);
+    T_ASSERT(ran);
+}
+
+
+/* Regress the null-dereference reproduced by privately replaying ORDR main().
+ * Game data may be missing/invalid in offline fixtures; the engine must return
+ * a null event rather than dereferencing null player or event handles. */
+TEST(wc3_api, ordr_startup_invalid_player_event_handles_no_crash) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call BJassAssert(TriggerRegisterPlayerEvent(t, null, EVENT_PLAYER_LEAVE) == null, \"null player event\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerEvent(t, Player(0), null) == null, \"null event type\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerUnitEvent(t, null, EVENT_PLAYER_UNIT_DEATH, null) == null, \"null unit-event player\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerUnitEvent(t, Player(0), null, null) == null, \"null unit-event type\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+
+/* Real private-map replay with incomplete BJ shims exposed a second fatal
+ * native: TriggerEvaluate(null) dereferenced a null trigger in the JASS VM. */
+TEST(wc3_api, ordr_startup_null_trigger_evaluation_safe) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(null), \"null trigger should evaluate false\")\n"
+        "  call TriggerExecute(null)\n"
+        "  call TriggerExecuteWait(null)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+
+/* A non-null rawcode is not a trigger. Previous TriggerEvaluate dereferenced
+ * it as a condition-list pointer and crashed (SIGSEGV) in a private map replay. */
+TEST(wc3_api, ordr_startup_invalid_trigger_pointer_safe) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(123456789), \"invalid trigger pointer should be false\")\n"
+        "  call TriggerExecute(123456789)\n"
+        "  call TriggerExecuteWait(123456789)\n"
+        "endfunction\n"
+    ));
+}
+
+
+/* ORDR first-frame regression: timer callbacks must dispatch normally, while
+ * malformed trigger handles are dropped rather than dereferenced by libjass.
+ * A synthetic bad event models corrupt handles seen under incomplete MPQ shims. */
+TEST(wc3_api, ordr_first_timed_event_ignores_invalid_trigger_and_runs_valid_one) {
+    gtimer_t *registered_timer = NULL;
+    event_t *malformed;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer fired = 0\n"
+        "endglobals\n"
+        "function on_timer takes nothing returns nothing\n"
+        "  set fired = fired + 1\n"
+        "endfunction\n"
+        "function verify_timer takes nothing returns nothing\n"
+        "  call BJassAssert(fired == 1, \"timer callback lost or duplicated\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, function on_timer)\n"
+        "  call TriggerRegisterTimerEvent(t, 0.001, false)\n"
+        "endfunction\n"
+    ));
+    FOR_EACH_EVENT(e)
+        if (e->type == EVENT_GAME_TIMER_EXPIRED && e->trigger && e->timer) {
+            registered_timer = e->timer;
+            break;
+        }
+    T_NOT_NULL(registered_timer);
+    if (!registered_timer) return;
+    malformed = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    T_NOT_NULL(malformed);
+    if (!malformed) return;
+    malformed->timer = registered_timer;
+    malformed->trigger = (trigger_t *)(uintptr_t)0x4544000044840000ULL;
+    G_RunTimers();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "verify_timer", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+
+/* Logical DzFrame API is intentionally headless until the native client
+ * rendering/input bridge is implemented. Regression checks identity, lookup,
+ * state storage, and callback registration without claiming visual display. */
+TEST(wc3_api, ordr_first_timed_frame_logical_creation_and_properties) {
+    ordrFrame_t const *frame;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string frameType, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameFindByName takes string name, integer id returns integer\n"
+        "native DzFrameSetSize takes integer frame, real w, real h returns nothing\n"
+        "native DzFrameSetPoint takes integer frame, integer point, integer relativeFrame, integer relativePoint, real x, real y returns nothing\n"
+        "native DzFrameSetTexture takes integer frame, string texture, integer flag returns nothing\n"
+        "native DzFrameSetText takes integer frame, string text returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "native DzFrameShow takes integer frame, boolean enabled returns nothing\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer eventId, code action, boolean sync returns nothing\n"
+        "globals\n"
+        "  integer frameHandle = 0\n"
+        "endglobals\n"
+        "function event_handler takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set frameHandle = DzCreateFrameByTagName(\"TEXT\", \"ORDRTestFrame\", DzGetGameUI(), \"\", 42)\n"
+        "  call BJassAssert(frameHandle > DzGetGameUI(), \"frame handle unavailable\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ORDRTestFrame\", 42) == frameHandle, \"frame lookup failed\")\n"
+        "  call DzFrameSetSize(frameHandle, 0.3, 0.1)\n"
+        "  call DzFrameSetPoint(frameHandle, 4, DzGetGameUI(), 4, 0.01, -0.02)\n"
+        "  call DzFrameSetTexture(frameHandle, \"Interface\\\\ORDR.tga\", 0)\n"
+        "  call DzFrameSetText(frameHandle, \"난이도 선택\")\n"
+        "  call BJassAssert(DzFrameGetText(frameHandle) == \"난이도 선택\", \"frame text roundtrip\")\n"
+        "  call DzFrameShow(frameHandle, false)\n"
+        "  call DzFrameSetScriptByCode(frameHandle, 1, function event_handler, false)\n"
+        "endfunction\n"
+    ));
+    T_EQ(level.ordr_num_frames, (uint32_t)1);
+    frame = &level.ordr_frames[0];
+    T_EQ(frame->handle_id, (uint32_t)2);
+    T_EQ(frame->parent, (uint32_t)1);
+    T_EQ(frame->create_context, 42);
+    T_STREQ(frame->name, "ORDRTestFrame");
+    T_STREQ(frame->text, "난이도 선택");
+    T_ASSERT(!frame->visible);
+    T_FEQ(frame->width, 0.3f, 0.0001f);
+    T_FEQ(frame->x, 0.01f, 0.0001f);
+    T_EQ(frame->callback_count, (uint32_t)1);
+}
+
+
+/* ORDR Bcx registers chat commands across players. Verify substring vs exact
+ * matching, sender identity, and the event-text getters in real JASS code. */
+TEST(wc3_api, ordr_chat_registration_and_dispatch_sender_and_text) {
+    player_t *previous = currentplayer;
+    player_t *zero;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    zero = currentplayer;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer received = 0\n"
+        "endglobals\n"
+        "function partial_chat takes nothing returns nothing\n"
+        "  call BJassAssert(GetTriggerPlayer() == Player(0), \"wrong player in chat context\")\n"
+        "  call BJassAssert(GetEventPlayerChatStringMatched() == \"-hello\", \"wrong chat match\")\n"
+        "  set received = received + 1\n"
+        "endfunction\n"
+        "function exact_chat takes nothing returns nothing\n"
+        "  call BJassAssert(GetEventPlayerChatString() == \"-hello\", \"wrong exact message\")\n"
+        "  set received = received + 10\n"
+        "endfunction\n"
+        "function verify_chat takes nothing returns nothing\n"
+        "  call BJassAssert(received == 12, \"chat callbacks did not match 1+1+10\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger partial = CreateTrigger()\n"
+        "  local trigger exact = CreateTrigger()\n"
+        "  call TriggerAddAction(partial, function partial_chat)\n"
+        "  call TriggerAddAction(exact, function exact_chat)\n"
+        "  call TriggerRegisterPlayerChatEvent(partial, Player(0), \"-hello\", false)\n"
+        "  call TriggerRegisterPlayerChatEvent(exact, Player(0), \"-hello\", true)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    G_JassPlayerChat(zero, "prefix -hello suffix");
+    G_JassPlayerChat(G_GetPlayerByNumber(1), "-hello");
+    G_JassPlayerChat(zero, "-hello");
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "verify_chat", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    currentplayer = previous;
+}
+
+
+/* Headless ORDR-private fixture covers map coordinates used by CUN's unit
+ * selector. Previously the +/-1024 fixture silently rejected distant spawns.
+ * This check uses a stock fixture unit; it does NOT prove a custom ORDR unit
+ * definition, animation or iPad screen rendering is available.
+ */
+TEST(wc3_api, ordr_large_private_world_accepts_selection_coordinates) {
+    T_ASSERT(setup_ordr_private_world());
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit difficulty = CreateUnit(Player(15), 'hfoo', -6640.0, -8464.0, 270.0)\n"
+        "  call BJassAssert(difficulty != null, \"selection position outside fixture world\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 
 #endif /* BZ_TESTS */

@@ -34,6 +34,30 @@ static uint32_t JassAbilityStringId(cstring_t ability) {
     return id;
 }
 
+/* Warcraft III art-query natives return model paths, not effect handles.
+ * Use the same map-scoped ability/buff art resolver as AddSpellEffectById. */
+uint32_t GetAbilityEffectById(jass_t *j) {
+    uint32_t ability_id = (uint32_t)jass_checkinteger(j, 1);
+    wc3EffectType_t type;
+    int32_t index = jass_checkinteger(j, 3);
+    cstring_t art;
+    if (!ability_id || index < 0 || !JassEffectType(j, 2, &type))
+        return jass_pushstring(j, "");
+    art = G_AbilityEffectArt(ability_id, type, (uint32_t)index);
+    return jass_pushstring(j, art ? art : "");
+}
+
+uint32_t GetAbilityEffect(jass_t *j) {
+    uint32_t ability_id = JassAbilityStringId(jass_checkstring(j, 1));
+    wc3EffectType_t type;
+    int32_t index = jass_checkinteger(j, 3);
+    cstring_t art;
+    if (!ability_id || index < 0 || !JassEffectType(j, 2, &type))
+        return jass_pushstring(j, "");
+    art = G_AbilityEffectArt(ability_id, type, (uint32_t)index);
+    return jass_pushstring(j, art ? art : "");
+}
+
 uint32_t AddSpecialEffect(jass_t *j) {
     cstring_t modelName = jass_checkstring(j, 1);
     vec2_t where = { jass_checknumber(j, 2), jass_checknumber(j, 3) };

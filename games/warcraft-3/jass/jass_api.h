@@ -51,6 +51,8 @@ typedef struct {
     bool (*TimerCoroutineValid)(handle_t timer, uint32_t generation);
     void (*VariableChanged)(cstring_t name, float before, float after);
     jassFunctionTrace_t FunctionTrace;
+    /* Optional low-frequency interpreter progress, for startup crash diagnosis. */
+    void (*ExecutionProgress)(jass_t *vm, cstring_t function, uint64_t operations);
 } jassHost_t;
 
 /* VM lifecycle */

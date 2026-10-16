@@ -140,6 +140,42 @@ void setup_test_world(void) {
 
 }
 
+
+/*
+ * Private-map headless replay needs a larger world than the 64 x 64 fixture.
+ * The actual ORDR difficulty selection area is near (-6000, -8800), outside
+ * the normal fixture's +/- 1024 world-coordinate range. This changes only
+ * the opted-in private JASS test; no retail assets are incorporated.
+ *
+ * A walkable 768 x 768 grid covers +/- 12288 world units. Allocations are
+ * retained for the duration of the test process, not mapped into game saves.
+ */
+bool setup_ordr_private_world(void) {
+    enum { MAP_CELLS = 768 };
+    static uint8_t *walkable;
+    static war3mapVertex_t *vertices;
+    const size_t cell_count = (size_t)MAP_CELLS * MAP_CELLS;
+    const size_t vertex_count = (size_t)(MAP_CELLS + 1) * (MAP_CELLS + 1);
+    if (!walkable) walkable = calloc(cell_count, sizeof(*walkable));
+    if (!vertices) {
+        vertices = calloc(vertex_count, sizeof(*vertices));
+        if (vertices) FOR_LOOP(i, vertex_count) vertices[i].accurate_height = 0x2000;
+    }
+    if (!walkable || !vertices) return false;
+    setup_test_world();
+    memset(walkable, 0, cell_count);
+    test_worldmap.width = MAP_CELLS;
+    test_worldmap.height = MAP_CELLS;
+    test_worldmap.vertices = vertices;
+    world.map = &test_worldmap;
+    CM_SetupTestPathmap(MAP_CELLS, MAP_CELLS, walkable);
+    CM_SetupTestWorldBounds(&MAKE(box2_t,
+        .min = {-MAP_CELLS * 16.0f, -MAP_CELLS * 16.0f},
+        .max = { MAP_CELLS * 16.0f,  MAP_CELLS * 16.0f}));
+    gi.ClearWorld();
+    return true;
+}
+
 /* Every in-engine WC3 test starts from the state contract the old standalone harness provided. */
 static void reset_test_state(void) {
     G_ResetDeferredFrees();
@@ -217,6 +253,15 @@ static void ignore_jass_error(cstring_t message) { (void)message; }
  * Returns true if no JASS runtime error occurred. The test host captures VM
  * errors so callers can distinguish expected failures from test failures.
  */
+/* Local-only diagnostics for ORDR_PRIVATE_MAIN (no proprietary code logged). */
+static void test_private_map_progress(jass_t *vm, cstring_t function, uint64_t operations) {
+    (void)vm;
+    if (!getenv("ORDR_JASS_PATH")) return;
+    if (operations != 256 && (operations % 4096u) != 0) return;
+    fprintf(stderr, "ORDR_PRIVATE_PROGRESS function=%s operations=%llu\n",
+            function ? function : "(unknown)", (unsigned long long)operations);
+}
+
 static bool run_test_jass_impl(cstring_t src, cstring_t expected) {
     /* jass_dobuffer mutates the string in-place; duplicate to avoid clobbering read-only literals. */
     uint32_t len = strlen(src);
@@ -237,6 +282,7 @@ static bool run_test_jass_impl(cstring_t src, cstring_t expected) {
         .SaveHandle       = G_SaveJassHandle,
         .LoadHandle       = G_LoadJassHandle,
         .VariableChanged  = G_JassVariableChanged,
+        .ExecutionProgress = test_private_map_progress,
     ));
     level.vm = jass_newstate();
 
