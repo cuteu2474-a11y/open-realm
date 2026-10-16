@@ -9443,4 +9443,22 @@ TEST(wc3_api, ordr_private_main_from_script) {
     T_ASSERT(ran);
 }
 
+
+/* Regress the null-dereference reproduced by privately replaying ORDR main().
+ * Game data may be missing/invalid in offline fixtures; the engine must return
+ * a null event rather than dereferencing null player or event handles. */
+TEST(wc3_api, ordr_startup_invalid_player_event_handles_no_crash) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call BJassAssert(TriggerRegisterPlayerEvent(t, null, EVENT_PLAYER_LEAVE) == null, \"null player event\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerEvent(t, Player(0), null) == null, \"null event type\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerUnitEvent(t, null, EVENT_PLAYER_UNIT_DEATH, null) == null, \"null unit-event player\")\n"
+        "  call BJassAssert(TriggerRegisterPlayerUnitEvent(t, Player(0), null, null) == null, \"null unit-event type\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 #endif /* BZ_TESTS */
