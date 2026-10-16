@@ -9461,4 +9461,19 @@ TEST(wc3_api, ordr_startup_invalid_player_event_handles_no_crash) {
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+
+/* Real private-map replay with incomplete BJ shims exposed a second fatal
+ * native: TriggerEvaluate(null) dereferenced a null trigger in the JASS VM. */
+TEST(wc3_api, ordr_startup_null_trigger_evaluation_safe) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(null), \"null trigger should evaluate false\")\n"
+        "  call TriggerExecute(null)\n"
+        "  call TriggerExecuteWait(null)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 #endif /* BZ_TESTS */
