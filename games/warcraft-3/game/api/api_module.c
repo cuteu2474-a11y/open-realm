@@ -23,6 +23,11 @@
 
 jassModule_t jass_funcs[] = {
     { "DzLoadToc", DzLoadToc },
+    { "DzTriggerRegisterSyncData", DzTriggerRegisterSyncData },
+    { "DzSyncData", DzSyncData },
+    { "DzGetTriggerSyncData", DzGetTriggerSyncData },
+    { "DzGetTriggerSyncPlayer", DzGetTriggerSyncPlayer },
+    { "DzGetGameUI", DzGetGameUI },
     { "JNStringCount", JNStringCount },
     { "JNStringSplit", JNStringSplit },
     { "JNStringReplace", JNStringReplace },
