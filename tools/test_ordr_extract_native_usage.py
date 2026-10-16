@@ -25,5 +25,27 @@ class ExtractionTests(unittest.TestCase):
         source = 'set s = "text \\" DzFake(0)"\ncall EXPauseUnit(u, true)'
         self.assertEqual(module.extract_calls(source), {"EXPauseUnit": 1})
 
+    def test_native_signatures_preserve_types_and_line_numbers(self):
+        source = ('// private text is not exported\n'
+                  'native EXPauseUnit takes unit u,boolean flag returns nothing\r\n'
+                  'constant native JNUse takes nothing returns boolean\n'
+                  'native StockNative takes string value returns integer\n')
+        self.assertEqual(module.extract_declarations(source), {
+            'EXPauseUnit': {'parameters': [{'type': 'unit', 'name': 'u'},
+                                          {'type': 'boolean', 'name': 'flag'}],
+                            'returns': 'nothing', 'line': 2},
+            'JNUse': {'parameters': [], 'returns': 'boolean', 'line': 3},
+        })
+
+    def test_native_declarations_ignore_strings_and_block_comments(self):
+        source = ('/*\nnative DzFake takes nothing returns integer\n*/\n'
+                  'set s = "native JNFake takes nothing returns string"\n'
+                  'native DzSyncData takes string prefix, string data returns nothing // comment\n')
+        self.assertEqual(module.extract_declarations(source), {
+            'DzSyncData': {'parameters': [{'type': 'string', 'name': 'prefix'},
+                                         {'type': 'string', 'name': 'data'}],
+                           'returns': 'nothing', 'line': 5},
+        })
+
 if __name__ == "__main__":
     unittest.main()

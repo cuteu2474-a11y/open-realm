@@ -46,5 +46,658 @@
     "JNStringRegex": 3,
     "JNStringReplace": 1
   },
-  "note": "Original map script and proprietary assets are not stored in this repository."
+  "note": "Original map script and proprietary assets are not stored in this repository.",
+  "native_declarations": {
+    "DzGetGameUI": {
+      "parameters": [],
+      "returns": "integer",
+      "line": 2298
+    },
+    "DzCreateFrame": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "parent"
+        },
+        {
+          "type": "integer",
+          "name": "id"
+        }
+      ],
+      "returns": "integer",
+      "line": 2299
+    },
+    "DzCreateFrameByTagName": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "frameType"
+        },
+        {
+          "type": "string",
+          "name": "name"
+        },
+        {
+          "type": "integer",
+          "name": "parent"
+        },
+        {
+          "type": "string",
+          "name": "template"
+        },
+        {
+          "type": "integer",
+          "name": "id"
+        }
+      ],
+      "returns": "integer",
+      "line": 2300
+    },
+    "DzFrameSetTexture": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "string",
+          "name": "texture"
+        },
+        {
+          "type": "integer",
+          "name": "flag"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2301
+    },
+    "DzFrameSetSize": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "real",
+          "name": "w"
+        },
+        {
+          "type": "real",
+          "name": "h"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2302
+    },
+    "DzFrameSetPoint": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "point"
+        },
+        {
+          "type": "integer",
+          "name": "relativeFrame"
+        },
+        {
+          "type": "integer",
+          "name": "relativePoint"
+        },
+        {
+          "type": "real",
+          "name": "x"
+        },
+        {
+          "type": "real",
+          "name": "y"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2303
+    },
+    "DzFrameShow": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "boolean",
+          "name": "enable"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2304
+    },
+    "DzFrameSetScriptByCode": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "eventId"
+        },
+        {
+          "type": "code",
+          "name": "funcHandle"
+        },
+        {
+          "type": "boolean",
+          "name": "sync"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2305
+    },
+    "DzGetTriggerUIEventPlayer": {
+      "parameters": [],
+      "returns": "player",
+      "line": 2306
+    },
+    "DzGetTriggerUIEventFrame": {
+      "parameters": [],
+      "returns": "integer",
+      "line": 2307
+    },
+    "DzFrameSetText": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "string",
+          "name": "text"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2308
+    },
+    "DzFrameSetFont": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "string",
+          "name": "fileName"
+        },
+        {
+          "type": "real",
+          "name": "height"
+        },
+        {
+          "type": "integer",
+          "name": "flag"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2309
+    },
+    "DzFrameSetAlpha": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "alpha"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2310
+    },
+    "DzFrameSetTextAlignment": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "align"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2311
+    },
+    "DzFrameSetEnable": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "name"
+        },
+        {
+          "type": "boolean",
+          "name": "enable"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2312
+    },
+    "DzLoadToc": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "fileName"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2313
+    },
+    "DzFrameClearAllPoints": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2314
+    },
+    "DzFrameSetAbsolutePoint": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "point"
+        },
+        {
+          "type": "real",
+          "name": "x"
+        },
+        {
+          "type": "real",
+          "name": "y"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2315
+    },
+    "DzFrameSetModel": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "string",
+          "name": "modelFile"
+        },
+        {
+          "type": "integer",
+          "name": "modelType"
+        },
+        {
+          "type": "integer",
+          "name": "flag"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2316
+    },
+    "DzFrameSetPriority": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "integer",
+          "name": "priority"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2317
+    },
+    "EXPauseUnit": {
+      "parameters": [
+        {
+          "type": "unit",
+          "name": "u"
+        },
+        {
+          "type": "boolean",
+          "name": "flag"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2318
+    },
+    "EXSetUnitFacing": {
+      "parameters": [
+        {
+          "type": "unit",
+          "name": "u"
+        },
+        {
+          "type": "real",
+          "name": "angle"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2319
+    },
+    "JNUse": {
+      "parameters": [],
+      "returns": "boolean",
+      "line": 2320
+    },
+    "JNObjectCharacterSave": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "MapId"
+        },
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "SecretKey"
+        },
+        {
+          "type": "string",
+          "name": "Character"
+        }
+      ],
+      "returns": "string",
+      "line": 2321
+    },
+    "JNObjectCharacterInit": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "MapId"
+        },
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "SecretKey"
+        },
+        {
+          "type": "string",
+          "name": "Character"
+        }
+      ],
+      "returns": "integer",
+      "line": 2322
+    },
+    "JNObjectCharacterGetString": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "Field"
+        }
+      ],
+      "returns": "string",
+      "line": 2323
+    },
+    "JNObjectCharacterSetString": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "Field"
+        },
+        {
+          "type": "string",
+          "name": "Value"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2324
+    },
+    "JNObjectCharacterGetInt": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "Field"
+        }
+      ],
+      "returns": "integer",
+      "line": 2325
+    },
+    "JNObjectCharacterSetInt": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "UserId"
+        },
+        {
+          "type": "string",
+          "name": "Field"
+        },
+        {
+          "type": "integer",
+          "name": "Value"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2326
+    },
+    "DzSyncData": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "prefix"
+        },
+        {
+          "type": "string",
+          "name": "data"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2327
+    },
+    "DzTriggerRegisterSyncData": {
+      "parameters": [
+        {
+          "type": "trigger",
+          "name": "trig"
+        },
+        {
+          "type": "string",
+          "name": "prefix"
+        },
+        {
+          "type": "boolean",
+          "name": "server"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2328
+    },
+    "DzGetTriggerSyncData": {
+      "parameters": [],
+      "returns": "string",
+      "line": 2329
+    },
+    "DzGetTriggerSyncPlayer": {
+      "parameters": [],
+      "returns": "player",
+      "line": 2330
+    },
+    "JNStringSplit": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "str"
+        },
+        {
+          "type": "string",
+          "name": "sub"
+        },
+        {
+          "type": "integer",
+          "name": "index"
+        }
+      ],
+      "returns": "string",
+      "line": 2331
+    },
+    "JNStringCount": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "str"
+        },
+        {
+          "type": "string",
+          "name": "sub"
+        }
+      ],
+      "returns": "integer",
+      "line": 2332
+    },
+    "JNLogin": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "userId"
+        },
+        {
+          "type": "string",
+          "name": "passWord"
+        }
+      ],
+      "returns": "boolean",
+      "line": 2333
+    },
+    "DzGetTriggerKeyPlayer": {
+      "parameters": [],
+      "returns": "player",
+      "line": 2334
+    },
+    "DzTriggerRegisterKeyEventByCode": {
+      "parameters": [
+        {
+          "type": "trigger",
+          "name": "trig"
+        },
+        {
+          "type": "integer",
+          "name": "key"
+        },
+        {
+          "type": "integer",
+          "name": "status"
+        },
+        {
+          "type": "boolean",
+          "name": "sync"
+        },
+        {
+          "type": "code",
+          "name": "funcHandle"
+        }
+      ],
+      "returns": "nothing",
+      "line": 2335
+    },
+    "DzFrameFindByName": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "name"
+        },
+        {
+          "type": "integer",
+          "name": "id"
+        }
+      ],
+      "returns": "integer",
+      "line": 2336
+    },
+    "DzFrameGetText": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        }
+      ],
+      "returns": "string",
+      "line": 2337
+    },
+    "DzFrameSetFocus": {
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "frame"
+        },
+        {
+          "type": "boolean",
+          "name": "enable"
+        }
+      ],
+      "returns": "boolean",
+      "line": 2338
+    },
+    "JNStringRegex": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "str"
+        },
+        {
+          "type": "string",
+          "name": "regex"
+        },
+        {
+          "type": "integer",
+          "name": "index"
+        }
+      ],
+      "returns": "string",
+      "line": 2339
+    },
+    "JNStringReplace": {
+      "parameters": [
+        {
+          "type": "string",
+          "name": "str"
+        },
+        {
+          "type": "string",
+          "name": "old"
+        },
+        {
+          "type": "string",
+          "name": "newstr"
+        }
+      ],
+      "returns": "string",
+      "line": 2340
+    }
+  }
 }

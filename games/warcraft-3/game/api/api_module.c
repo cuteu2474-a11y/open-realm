@@ -20,13 +20,33 @@
 #include "api_hashtable.h"
 #include "api_ordr.h"
 #include "api_ordr_strings.h"
+#include "api_ordr_frames.h"
 
 jassModule_t jass_funcs[] = {
     { "DzLoadToc", DzLoadToc },
+    { "DzTriggerRegisterSyncData", DzTriggerRegisterSyncData },
+    { "DzSyncData", DzSyncData },
+    { "DzGetTriggerSyncData", DzGetTriggerSyncData },
+    { "DzGetTriggerSyncPlayer", DzGetTriggerSyncPlayer },
     { "JNStringCount", JNStringCount },
     { "JNStringSplit", JNStringSplit },
     { "JNStringReplace", JNStringReplace },
     { "JNStringRegex", JNStringRegex },
+    { "DzGetGameUI", DzGetGameUI },
+    { "DzCreateFrame", DzCreateFrame },
+    { "DzCreateFrameByTagName", DzCreateFrameByTagName },
+    { "DzFrameFindByName", DzFrameFindByName },
+    { "DzFrameSetText", DzFrameSetText },
+    { "DzFrameGetText", DzFrameGetText },
+    { "DzFrameSetSize", DzFrameSetSize },
+    { "DzFrameSetPoint", DzFrameSetPoint },
+    { "DzFrameSetAbsolutePoint", DzFrameSetAbsolutePoint },
+    { "DzFrameClearAllPoints", DzFrameClearAllPoints },
+    { "DzFrameSetTexture", DzFrameSetTexture },
+    { "DzFrameSetFont", DzFrameSetFont },
+    { "DzFrameSetAlpha", DzFrameSetAlpha },
+    { "DzFrameSetEnable", DzFrameSetEnable },
+    { "DzFrameShow", DzFrameShow },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },

@@ -68,11 +68,15 @@ static int32_t ORDR_RegexCount(cstring_t source, cstring_t pattern) {
     }
     if (regcomp(&regex, pattern, REG_EXTENDED)) return 0;
     cursor = source;
-    while (*cursor && regexec(&regex, cursor, 1, &match, 0) == 0) {
+    while (regexec(&regex, cursor, 1, &match,
+                   cursor == source ? 0 : REG_NOTBOL) == 0) {
         if (count == INT32_MAX) break;
         ++count;
-        if (match.rm_eo > 0) cursor += match.rm_eo;
-        else (void)ORDR_Utf8Codepoint(&cursor); /* zero-width match */
+        cursor += match.rm_eo;
+        if (match.rm_so == match.rm_eo) {
+            if (!*cursor) break;
+            (void)ORDR_Utf8Codepoint(&cursor); /* zero-width match */
+        }
     }
     regfree(&regex);
     return count;
@@ -161,6 +165,18 @@ static uint32_t JNStringRegex(jass_t *j) {
     uint32_t result;
     if (!source || !pattern || index < 0 || index >= 16)
         return jass_pushstring(j, "");
+    /* The login dialog extracts the final typed character with .$. POSIX
+     * regex in the C locale matches bytes; keep complete UTF-8 characters
+     * here regardless of the process/device locale. There are no captures. */
+    if (!strcmp(pattern, ".$")) {
+        char const *cursor = source, *last = source;
+        if (index || !*source) return jass_pushstring(j, "");
+        while (*cursor) {
+            last = cursor;
+            (void)ORDR_Utf8Codepoint(&cursor);
+        }
+        return jass_pushstringlen(j, last, (uint32_t)(cursor - last));
+    }
     if (regcomp(&regex, pattern, REG_EXTENDED))
         return jass_pushstring(j, "");
     if (regexec(&regex, source, (size_t)index + 1, match, 0) != 0 ||

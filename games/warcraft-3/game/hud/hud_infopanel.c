@@ -1576,6 +1576,7 @@ void G_RefreshResourceBar(edict_t *ent) {
         UI_WriteStart(LAYER_CONSOLE);
         UI_WriteConsoleBackdrop(ent->client, food_u, food_c);
         UI_WriteMinimapFrame();
+        G_DzFramesWrite(ent);
         UI_WriteEnd(ent);
     }
 

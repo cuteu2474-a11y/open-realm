@@ -457,6 +457,7 @@ typedef enum {
     EVENT_PLAYER_UNIT_DAMAGED = 308,
 
     EVENT_UNIT_IN_RANGE = 92,
+    EVENT_CUSTOM_SYNC_DATA = 0x10000, /* Internal local extension event; outside retail event IDs. */
 } EVENTTYPE;
 
 /* struct uiFrameDef_s is defined in common/stb_fdf.h (shared with UI module) */
@@ -984,6 +985,8 @@ typedef struct gameevent_s {
     event_t *responseTo;
     uint32_t dialog_id, button_id;
     uint32_t dialog_player; /* one-based player index; zero means no override */
+    string_t sync_data; /* owned until dispatch; recipient coroutines retain independent copies */
+    uint32_t sync_player; /* one-based sender; zero means no sync context */
 } gameEvent_t;
 
 typedef struct {
@@ -2109,7 +2112,7 @@ struct gevent_s {
     uint32_t state;
     uint32_t limitop;
     float limitval;
-    cstring_t variable;
+    cstring_t variable; /* variable-limit name or local sync prefix */
     bool inuse;
     uint32_t handle_generation;
     uint8_t generation_exhausted;
@@ -3229,6 +3232,11 @@ void UI_AddCreateGameSlot(uint32_t, cstring_t, cstring_t, cstring_t, uint32_t);
 void UI_PrintClasses(void);
 void UI_ClearTemplates(void);
 void UI_ResetHud(void);
+/* Dz runtime frame state is deliberately unsavable until it has a serializer. */
+void G_DzFramesReset(void);
+bool G_DzFramesActive(void);
+void G_DzFramesWrite(edict_t *ent);
+void G_DzFramesUpdate(void);
 void UI_LoadHud(void);
 void UI_LoadHudLoading(void);
 void UI_LoadHudTimerDialogs(void);
@@ -3736,6 +3744,7 @@ void jass_runevents(jass_t *);
 // g_events.c
 void G_RunEntities(void);
 void G_RunEvents(void);
+void G_ClearSyncEvents(void);
 /* Host save/restore lifecycle; the basic filename is only visible during these callbacks. */
 bool G_BeforeSaveGame(cstring_t name);
 void G_AfterLoadGame(cstring_t name);

@@ -346,6 +346,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rerun-crashes", action="store_true", help="confirm first-pass crashes serially")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "build/wc3-map-audit")
     parser.add_argument("--fail-on-crash", action="store_true", help="exit nonzero after writing the report")
+    parser.add_argument(
+        "--fail-on-errors", action="store_true",
+        help="exit nonzero for process failures or logged diagnostics, after writing reports")
     return parser.parse_args(argv)
 
 
@@ -435,6 +438,9 @@ def main() -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     failed = any(item["status"] != "completed" for item in report_maps)
+    # A frame-limit exit can still contain a stopped JASS script or missing assets.
+    if args.fail_on_errors and (failed or any(item["compact_errors"] for item in report_maps)):
+        return 1
     return 1 if args.fail_on_crash and failed else 0
 
 

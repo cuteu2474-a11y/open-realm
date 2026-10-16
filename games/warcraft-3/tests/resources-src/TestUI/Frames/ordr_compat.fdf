@@ -1,0 +1,10 @@
+// Minimal authored fixture for runtime DzCreateFrame instances.
+Frame "FRAME" "ORDRCompatPanel" {
+    Width 0.23,
+    Height 0.17,
+    Frame "TEXT" "ORDRCompatLabel" {
+        Text "template text",
+        FrameFont "Fonts\\FRIZQT__.TTF", 0.012, "",
+        SetPoint TOPLEFT, "ORDRCompatPanel", TOPLEFT, 0.01, -0.02,
+    }
+}

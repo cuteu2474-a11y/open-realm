@@ -77,6 +77,8 @@ struct jass_context {
     edict_t *source;
     int32_t eventValue;
     uint32_t dialog_id, dialog_button_id;
+    string_t sync_data; /* action coroutines own a copy; synchronous conditions borrow */
+    player_t *sync_player;
     vec2_t point;
     uint8_t hasPoint;
     player_t *playerState;

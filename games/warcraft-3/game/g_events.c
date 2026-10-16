@@ -193,6 +193,10 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
     FOR_EACH_EVENT(e) {
         if (!G_EventSubjectIsCurrent(e)) continue;
         switch (e->type) {
+            case EVENT_CUSTOM_SYNC_DATA:
+                if (evt->type == e->type && evt->responseTo == e)
+                    jass_calltriggerevent(level.vm, e->trigger, evt);
+                break;
             case EVENT_DIALOG_CLICK:
             case EVENT_DIALOG_BUTTON_CLICK:
                 if (evt->responseTo == e && evt->dialog_id == e->dialog_id &&
@@ -499,6 +503,20 @@ void G_RunEvents(void) {
                 evt->type == EVENT_PLAYER_VICTORY ? "VICTORY" : "DEFEAT");
         }
         G_ExecuteEvent(evt);
+        /* Trigger actions own copies, including actions suspended by sleeps. */
+        SAFE_DELETE(evt->sync_data, gi.MemFree);
+    }
+}
+
+/* A map replacement or load may discard queued sends before normal dispatch. */
+void G_ClearSyncEvents(void) {
+    FOR_LOOP(i, MAX_EVENT_QUEUE) SAFE_DELETE(level.events.queue[i].sync_data, gi.MemFree);
+    FOR_LOOP(i, MAX_EVENTS) {
+        event_t *evt = &level.events.handlers[i];
+        if (evt->type == EVENT_CUSTOM_SYNC_DATA && evt->variable) {
+            gi.MemFree((handle_t)evt->variable);
+            evt->variable = NULL;
+        }
     }
 }
 

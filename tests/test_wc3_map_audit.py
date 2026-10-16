@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
+import json
 import os
 import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -93,6 +97,56 @@ class ReportTest(unittest.TestCase):
         self.assertIn("`Human05.w3m`", markdown)
         self.assertIn("600 frames", markdown)
         self.assertNotIn("map works", markdown.lower())
+
+
+class AuditExitTest(unittest.TestCase):
+    def run_audit(self, diagnostic, exit_code, strict):
+        """Drive the real CLI/process/report path with a tiny diagnostic executable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            target = data / "Maps" / "Custom.w3x"
+            target.parent.mkdir()
+            target.write_bytes(b"fixture")
+            binary = data / "engine"
+            binary.write_text("#!/bin/sh\nprintf '%s\\n' '" + diagnostic + "'\nexit " + str(exit_code) + "\n")
+            binary.chmod(0o755)
+            mpqtool = data / "mpqtool"
+            (data / "war3map.w3i").write_bytes(w3i_fixture("Custom", "", ""))
+            mpqtool.write_text(
+                "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+                "if sys.argv[-1] == 'war3map.w3i':\n"
+                "    sys.stdout.buffer.write(Path(__file__).with_name('war3map.w3i').read_bytes())\n")
+            mpqtool.chmod(0o755)
+            output = data / "report"
+            argv = ["wc3_map_audit", "--data", str(data), "--binary", str(binary),
+                    "--mpqtool", str(mpqtool), "--loose-map", str(target),
+                    "--output-dir", str(output), "--jobs", "1", "--frames", "1"]
+            if strict:
+                argv.append("--fail-on-errors")
+            with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+                result = AUDIT.main()
+            report = json.loads((output / "report.json").read_text())
+            self.assertTrue((output / "report.md").is_file())
+            self.assertTrue(Path(report["maps"][0]["log"]).is_file())
+            return result, report["maps"][0]
+
+    def test_exit_zero_native_error_fails_strict_audit_and_preserves_reports(self):
+        diagnostic = "JASS runtime error: unknown function: DzGetGameUI"
+        result, item = self.run_audit(diagnostic, 0, True)
+        self.assertEqual(result, 1)
+        self.assertEqual(item["status"], "completed")
+        self.assertTrue(any("DzGetGameUI" in error for error in item["compact_errors"]))
+        self.assertEqual(self.run_audit(diagnostic, 0, False)[0], 0)
+
+    def test_clean_bounded_run_passes_strict_audit(self):
+        result, item = self.run_audit("Server initialized.", 0, True)
+        self.assertEqual(result, 0)
+        self.assertEqual(item["compact_errors"], [])
+
+    def test_process_failure_fails_strict_audit(self):
+        result, item = self.run_audit("", 3, True)
+        self.assertEqual(result, 1)
+        self.assertEqual(item["status"], "crashed")
 
 
 class LooseMapTest(unittest.TestCase):

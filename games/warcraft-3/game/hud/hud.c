@@ -842,6 +842,7 @@ void UI_AddCreateGameSlot(uint32_t slot, cstring_t name, cstring_t race, cstring
 }
 
 void UI_ResetHud(void) {
+    G_DzFramesReset();
     memset(&hud, 0, sizeof(hud));
     UI_ClearTemplates();
 }

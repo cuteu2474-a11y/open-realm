@@ -1,16 +1,65 @@
-name: ORDR iPad unsigned build check
+name: ORDR regressions and iPad unsigned build check
 on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'Makefile'
+      - 'client/**'
+      - 'common/**'
+      - 'renderer/**'
+      - 'server/**'
+      - 'shared/**'
+      - 'sound/**'
+      - 'share/**'
+      - 'vendor/blast/**'
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
+      - 'tools/ipad/**'
+      - 'tools/ordr_*.py'
+      - 'tools/test_ordr_*.py'
+      - 'tools/ordr_native_usage.json'
+      - 'tools/wc3_map_audit.py'
+      - 'tests/**'
       - '.github/workflows/ordr-ipad-build.yml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  test-linux:
+    name: SDK-free Linux regressions
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'ordr-compat-01'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/corepunch/open-realm-ci:ubuntu-24.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Trust the checked out workspace in the job container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Test ORDR diagnostic tools
+        run: python3 -m unittest discover -s tools -p 'test_ordr_*.py'
+      - name: Test Warcraft III map auditor
+        run: make test-wc3-map-audit
+      - name: Run full SDK-free test suite
+        run: make test TEST_JOBS=4 EOS=0
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ordr-linux-junit-test-results
+          path: build/tests/junit/*.xml
+          if-no-files-found: warn
+          retention-days: 7
+
   compile-ipad:
     runs-on: macos-15
     timeout-minutes: 90
@@ -21,16 +70,32 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
           cmake --version
+      - name: Test ORDR diagnostic tools
+        run: python3 -m unittest discover -s tools -p 'test_ordr_*.py'
       - name: Build unsigned iPad app
         run: make ipad
       - name: Check build output
         run: |
-          test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
-          find build/ipad -maxdepth 5 -name '*.app' -print
+          app=build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          plutil -lint "$app/Info.plist" "$app"/Frameworks/*.framework/Info.plist
+          for binary in "$app/warcraft3" "$app"/Frameworks/*.framework/*; do
+            case "$binary" in */Info.plist) continue ;; esac
+            test -x "$binary"
+            xcrun lipo "$binary" -verify_arch arm64
+          done
+      - name: Archive unsigned app preserving executable permissions
+        run: |
+          tar -czf build/ipad/Warcraft3-iphoneos-arm64-unsigned.tar.gz \
+            -C build/ipad/iphoneos-arm64/warcraft3 Warcraft3.app
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Device compilation and bundle checks only. This unsigned app needs signing and separately supplied Warcraft III data. ORDR map loading, combat, rendering, and iPad input have not been verified by this workflow.
+
+          Extract the artifact's `.tar.gz` before signing or installing it; the archive preserves executable permissions.
+          EOF
       - name: Upload unsigned app for diagnostics only
         uses: actions/upload-artifact@v4
         with:
           name: openrealm-ipad-unsigned
-          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          path: build/ipad/Warcraft3-iphoneos-arm64-unsigned.tar.gz
           if-no-files-found: error
           retention-days: 7

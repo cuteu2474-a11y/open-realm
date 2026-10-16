@@ -117,7 +117,8 @@ static uint32_t const save_commit = MAKEFOURCC('W', '3', 'O', 'K');
 /* Version 87 persists creep guard return recovery state. */
 /* Version 88 stores a single creep guard lifecycle phase. */
 /* Version 89 retains entity identity for ability-owned point-spell approaches. */
-static uint32_t const save_version = 89;
+/* Version 90 persists local Dz sync payloads and sender identity. */
+static uint32_t const save_version = 90;
 #define SAVE_STREAM_BUFFER (1u << 20) // bytes; save files are several MB of field writes, so a large stdio buffer avoids per-4 KB syscalls
 #define MAX_SAVE_STRING (1u << 20) // bytes; bounds quest-string allocations from corrupt saves
 #define MAX_SAVE_GROUP_HANDLES 65536u // corrupt-save bound only; runtime group registry itself grows dynamically
@@ -369,6 +370,8 @@ static field_t const save_game_event_fields[] = {
     F(gameevent_s, dialog_id, F_INT),
     F(gameevent_s, button_id, F_INT),
     F(gameevent_s, dialog_player, F_INT),
+    F(gameevent_s, sync_data, F_LSTRING),
+    F(gameevent_s, sync_player, F_INT),
     { NULL, 0, 0, 0, 0, 0 }
 };
 
@@ -2244,6 +2247,10 @@ bool WriteGame(cstring_t filename) {
     };
     strlcpy(header.map_path, level.map_path, sizeof(header.map_path));
 
+    if (G_DzFramesActive()) {
+        fprintf(stderr, "WC3 SaveGame: Dz runtime UI frames cannot yet be restored; save rejected\n");
+        return false;
+    }
     if (level.num_groups > MAX_SAVE_GROUP_HANDLES) {
         fprintf(stderr, "WC3 SaveGame: group handle count %u exceeds save safety bound %u\n",
                 (unsigned)level.num_groups, (unsigned)MAX_SAVE_GROUP_HANDLES);
@@ -2374,6 +2381,7 @@ bool ReadGame(cstring_t filename) {
         current_nonregion_event_slots[i] = event->inuse &&
             event->type != EVENT_GAME_ENTER_REGION && event->type != EVENT_GAME_LEAVE_REGION;
     }
+    G_ClearSyncEvents();
     if (!ReadMappedFields(f, level_fields, (uint8_t *)&level)) {
         fprintf(stderr, "WC3 LoadGame: failed at level state\n"); fclose(f); return false;
     }
