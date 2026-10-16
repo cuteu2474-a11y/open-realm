@@ -19,6 +19,7 @@
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
 #include "api_ordr.h"
+#include "api_ordr_frames.h"
 #include "api_ordr_strings.h"
 
 jassModule_t jass_funcs[] = {
@@ -28,6 +29,27 @@ jassModule_t jass_funcs[] = {
     { "DzGetTriggerSyncData", DzGetTriggerSyncData },
     { "DzGetTriggerSyncPlayer", DzGetTriggerSyncPlayer },
     { "DzGetGameUI", DzGetGameUI },
+    { "DzCreateFrame", DzCreateFrame },
+    { "DzCreateFrameByTagName", DzCreateFrameByTagName },
+    { "DzFrameFindByName", DzFrameFindByName },
+    { "DzFrameSetTexture", DzFrameSetTexture },
+    { "DzFrameSetSize", DzFrameSetSize },
+    { "DzFrameSetPoint", DzFrameSetPoint },
+    { "DzFrameSetAbsolutePoint", DzFrameSetAbsolutePoint },
+    { "DzFrameClearAllPoints", DzFrameClearAllPoints },
+    { "DzFrameShow", DzFrameShow },
+    { "DzFrameSetEnable", DzFrameSetEnable },
+    { "DzFrameSetText", DzFrameSetText },
+    { "DzFrameGetText", DzFrameGetText },
+    { "DzFrameSetFont", DzFrameSetFont },
+    { "DzFrameSetAlpha", DzFrameSetAlpha },
+    { "DzFrameSetTextAlignment", DzFrameSetTextAlignment },
+    { "DzFrameSetPriority", DzFrameSetPriority },
+    { "DzFrameSetFocus", DzFrameSetFocus },
+    { "DzFrameSetModel", DzFrameSetModel },
+    { "DzFrameSetScriptByCode", DzFrameSetScriptByCode },
+    { "DzGetTriggerUIEventPlayer", DzGetTriggerUIEventPlayer },
+    { "DzGetTriggerUIEventFrame", DzGetTriggerUIEventFrame },
     { "JNStringCount", JNStringCount },
     { "JNStringSplit", JNStringSplit },
     { "JNStringReplace", JNStringReplace },
