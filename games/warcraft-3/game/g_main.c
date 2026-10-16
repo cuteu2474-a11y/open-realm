@@ -46,6 +46,7 @@ static char g_last_jass_error[512];
 static bool g_tracking_jass_startup;
 static bool g_jass_progress_recorded;
 static clock_t g_jass_last_progress_cpu;
+static uint32_t g_jass_progress_samples;
 
 static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset) {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -71,6 +72,7 @@ void G_JassDiagnosticReset(cstring_t map) {
     g_tracking_jass_startup = false;
     g_jass_progress_recorded = false;
     g_jass_last_progress_cpu = 0;
+    g_jass_progress_samples = 0;
     G_WriteJassDiagnostic("map", map ? map : "(unknown)", true);
 }
 
@@ -85,17 +87,30 @@ void G_JassDiagnosticNote(cstring_t stage) {
  */
 void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations) {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-    clock_t cpu = clock();
+    clock_t cpu;
     char detail[256];
+    uint32_t active_events = 0;
     (void)vm;
     if (!g_tracking_jass_startup) return;
-    if (g_jass_progress_recorded && cpu != (clock_t)-1 &&
-        g_jass_last_progress_cpu != (clock_t)-1 &&
+    /*
+     * The previous 0.5-second throttle lost every sample after the first
+     * 2048 instructions on an iPad terminated early in main(). Capture the
+     * first 128 samples (~32k instructions) unthrottled, then no more than
+     * 25 per process-CPU second to limit filesystem overhead.
+     */
+    ++g_jass_progress_samples;
+    cpu = clock();
+    if (g_jass_progress_samples > 128 && g_jass_progress_recorded &&
+        cpu != (clock_t)-1 && g_jass_last_progress_cpu != (clock_t)-1 &&
         cpu >= g_jass_last_progress_cpu &&
-        (double)(cpu - g_jass_last_progress_cpu) / CLOCKS_PER_SEC < 0.5)
+        (double)(cpu - g_jass_last_progress_cpu) / CLOCKS_PER_SEC < 0.04)
         return;
-    snprintf(detail, sizeof(detail), "function=%s coroutine_steps=%llu",
-             function ? function : "(unknown)", (unsigned long long)operations);
+    FOR_LOOP(i, MAX_EVENTS) if (level.events.handlers[i].inuse) ++active_events;
+    snprintf(detail, sizeof(detail),
+        "function=%s coroutine_steps=%llu triggers=%u timers=%u events=%u/%u",
+        function ? function : "(unknown)", (unsigned long long)operations,
+        (unsigned)level.num_triggers, (unsigned)level.num_timers,
+        (unsigned)active_events, (unsigned)MAX_EVENTS);
     G_WriteJassDiagnostic("main-progress", detail, false);
     g_jass_progress_recorded = true;
     g_jass_last_progress_cpu = cpu;
