@@ -317,7 +317,10 @@ uint32_t TriggerRegisterPlayerEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerEvent = jass_checkhandle(j, 3, "playerevent");
+    if (!whichTrigger || !whichPlayer || !whichPlayerEvent)
+        return jass_pushnullhandle(j, "event");
     event_t *evt = G_MakeEvent(*whichPlayerEvent);
+    if (!evt) return jass_pushnullhandle(j, "event");
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerEvent, evt->subject, "player");
@@ -337,7 +340,10 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerUnitEvent = jass_checkhandle(j, 3, "playerunitevent");
     //handle_t filter = jass_checkhandle(j, 4, "boolexpr");
+    if (!whichTrigger || !whichPlayer || !whichPlayerUnitEvent)
+        return jass_pushnullhandle(j, "event");
     event_t *evt = G_MakeEvent(*whichPlayerUnitEvent);
+    if (!evt) return jass_pushnullhandle(j, "event");
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
