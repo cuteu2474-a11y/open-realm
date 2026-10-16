@@ -22,7 +22,7 @@
 #define INF_LOOP_PROTECTION 1000000  /* SC2 Galaxy scripts have large but legitimate loops */
 #define SYNTAX_C_OPERATORS 1 // bitmask; enables Galaxy symbolic logic and shift operators
 #define SYNTAX_INCLUDES    2 // bitmask; enables Galaxy include preprocessing
-#define BZ_JASS_SNAPSHOT_VERSION 8 // format version; v8 persists GetEnumUnit callback context
+#define BZ_JASS_SNAPSHOT_VERSION 9 // format version; v9 persists local sync callback payload and sender
 #define BZ_JASS_SNAPSHOT_MAX_COUNT (1u << 20) // records; bounds allocations and list walks from corrupt snapshots
 #define BZ_JASS_SNAPSHOT_MAX_STRING (1u << 20) // bytes; bounds strings from corrupt snapshots
 
@@ -33,6 +33,8 @@ typedef struct {
     int32_t value;
     uint32_t dialog_id, dialog_button_id;
     player_t *event_player;
+    cstring_t sync_data;
+    player_t *sync_player;
     vec2_t const *point;
     bool has_point;
     handle_t timer;
@@ -414,6 +416,7 @@ static void jass_free_coroutine(jasscoroutine_t *co) {
         co->frames = next;
     }
     FOR_LOOP(i, co->state->num_stack) jass_setnull(co->state->stack + i);
+    SAFE_DELETE(co->state->context.sync_data, jass_free);
     SAFE_DELETE(co->state, jass_free);
     jass_free(co);
 }
@@ -498,6 +501,17 @@ jasscoroutine_t *jass_startcoroutine(jass_t *j, jassContext_t const *context) {
     co_state->stack_pointer = co_state->stack;
     co_state->num_stack = 0;
     co_state->context = *context;
+    /* Queue slots are released after dispatch. Each action (and nested
+     * TriggerExecute) retains its own payload until completion or VM close. */
+    if (!co_state->context.sync_data) {
+        co_state->context.sync_data = jass_getcontext(j)->sync_data;
+        co_state->context.sync_player = jass_getcontext(j)->sync_player;
+    }
+    if (co_state->context.sync_data) {
+        cstring_t data = co_state->context.sync_data;
+        co_state->context.sync_data = jass_alloc(strlen(data) + 1);
+        strcpy(co_state->context.sync_data, data);
+    }
     /* Event-response state and GetLocalPlayer() selection are independent.
      * Nested TriggerExecute/ExecuteFunc calls inherit the event response from
      * their parent coroutine, while local-player branches inherit only the
@@ -1096,6 +1110,8 @@ void jass_runevents(jass_t *j) {
  * ========================================================================= */
 
 static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
+    /* Maps can pass a never-created trigger to ConditionalTriggerExecute; null cannot evaluate true. */
+    if (!params->trigger) return false;
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     if (!tmp_state) return false;
@@ -1109,6 +1125,8 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.eventValue = params->value;
         tmp_state->context.dialog_id = params->dialog_id;
         tmp_state->context.dialog_button_id = params->dialog_button_id;
+        tmp_state->context.sync_data = (string_t)(params->sync_data ? params->sync_data : jass_getcontext(j)->sync_data);
+        tmp_state->context.sync_player = params->sync_player ? params->sync_player : jass_getcontext(j)->sync_player;
         tmp_state->context.point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f };
         tmp_state->context.hasPoint = params->has_point;
         tmp_state->context.playerState = player;
@@ -1214,6 +1232,8 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
                                   .eventValue = params->value,
                                   .dialog_id = params->dialog_id,
                                   .dialog_button_id = params->dialog_button_id,
+                                  .sync_data = (string_t)params->sync_data,
+                                  .sync_player = params->sync_player,
                                   .point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f },
                                   .hasPoint = params->has_point,
                                   .playerState = player,
@@ -1278,8 +1298,10 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
     return jass_calltriggercontext(j, &(jassTriggerContextParams_t){
         .trigger = trigger, .unit = event->edict, .source = event->source, .value = event->value,
         .dialog_id = event->dialog_id, .dialog_button_id = event->button_id,
-        .event_player = event->dialog_player
-            ? jass_getplayerbyindex(event->dialog_player - 1) : NULL,
+        .sync_data = event->sync_data,
+        .sync_player = event->sync_player ? jass_getplayerbyindex(event->sync_player - 1) : NULL,
+        .event_player = event->sync_player ? jass_getplayerbyindex(event->sync_player - 1)
+            : event->dialog_player ? jass_getplayerbyindex(event->dialog_player - 1) : NULL,
         .point = event->has_point ? &event->point : NULL, .has_point = event->has_point,
         .region = event->responseTo && (event->type == EVENT_GAME_ENTER_REGION || event->type == EVENT_GAME_LEAVE_REGION)
             ? event->responseTo->region : NULL });
@@ -1792,15 +1814,16 @@ uint32_t VM_EvalBoolean(jass_t *j, token_t const *token) {
 uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassVar_t const *v = NULL;
+    /* JASS locals and parameters shadow globals, including stock BJ names used by optimized maps. */
     if (token->flags & TF_FUNCTION) {
         if ((f = find_function(j, token->primary))) {
             return jass_pushfunction(j, f);
         } else {
             return jass_pushnull(j);
         }
-    } else if ((v = find_global(j, token->primary))) {
-        return jass_pushvalue(j, v);
     } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary))) {
+        return jass_pushvalue(j, v);
+    } else if ((v = find_global(j, token->primary))) {
         return jass_pushvalue(j, v);
     } else {
         return jass_pushnull(j);
@@ -1823,8 +1846,8 @@ uint32_t VM_EvalArrayAccess(jass_t *j, token_t const *token) {
     uint32_t count = jass_dotoken(j, token->index);
     if (count != 1) { jass_pushnull(j); }
     uint32_t index_val = jass_popinteger(j);
-    jassVar_t *var = find_global(j, token->primary);
-    if (!var) var = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary);
+    jassVar_t *var = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary);
+    if (!var) var = find_global(j, token->primary);
     if (!var) return jass_pushnull(j);
     jassVar_t null_value = { .type = var->type };
     jassVar_t const *item = find_array_value(var, index_val);
@@ -2029,17 +2052,18 @@ TOKENFUNC(IF) {
 
 TOKENFUNC(SET) {
     jassVar_t *v = NULL;
-    if ((v = find_global(j, token->secondary))) {
-        if (token->index) {
-            return jass_set_array_value(j, v, token, token->init);
-        } else {
-            return jass_set_value(j, v, token->init, token->secondary);
-        }
-    } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->secondary))) {
+    /* Resolve assignments with the same local-first scope as identifier reads. */
+    if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->secondary))) {
         if (token->index) {
             return jass_set_array_value(j, v, token, token->init);
         } else {
             return jass_set_value(j, v, token->init, NULL);
+        }
+    } else if ((v = find_global(j, token->secondary))) {
+        if (token->index) {
+            return jass_set_array_value(j, v, token, token->init);
+        } else {
+            return jass_set_value(j, v, token->init, token->secondary);
         }
     } else {
         fprintf(stderr, "Can't find variable %s\n",
@@ -2730,8 +2754,10 @@ static bool jass_snapshot_writecontext(jassSnapshot_t *snapshot, jassContext_t c
         { "unit", context->source },
         { "player", context->playerState }, { "player", context->localPlayerState },
         { "timer", context->timer }, { "region", context->region },
+        { "player", context->sync_player },
     };
     if (!jass_snapshot_writestr(snapshot, jass_functionname(context->func)) ||
+        !jass_snapshot_writestr(snapshot, context->sync_data) ||
         !jass_snapshot_io(snapshot, (void *)&context->eventValue, sizeof(context->eventValue)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_button_id, sizeof(context->dialog_button_id)) ||
@@ -2751,6 +2777,7 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
         { "player", (handle_t *)&context->playerState },
         { "player", (handle_t *)&context->localPlayerState }, { "timer", &context->timer },
         { "region", &context->region },
+        { "player", (handle_t *)&context->sync_player },
     };
     string_t func = NULL;
     bool has_func;
@@ -2759,6 +2786,7 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
     context->func = func ? find_function(j, func) : NULL;
     SAFE_DELETE(func, jass_free);
     if (has_func && !context->func) return false;
+    if (!jass_snapshot_readstr(snapshot, &context->sync_data)) return false;
     if (!jass_snapshot_io(snapshot, &context->eventValue, sizeof(context->eventValue)) ||
         !jass_snapshot_io(snapshot, &context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, &context->dialog_button_id, sizeof(context->dialog_button_id)) ||

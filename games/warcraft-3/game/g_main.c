@@ -716,6 +716,7 @@ static void G_ShutdownGame(void) {
     G_BotShutdown();
     if (level.vm) { jass_close(level.vm); level.vm = NULL; }
     G_ClearJassGroupRegistry();
+    G_ClearSyncEvents();
     G_ClearRegionRegistry();
     G_FowShutdown();
     G_BlightShutdown();
@@ -1327,6 +1328,7 @@ static void G_RunFrame(void) {
     jass_runevents(level.vm);
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
+    G_DzFramesUpdate();
 
     /* A result action may call RemovePlayer() and then PauseGame(true) from
      * the JASS work above.  The pause takes effect immediately at the server

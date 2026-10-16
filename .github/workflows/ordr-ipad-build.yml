@@ -43,6 +43,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Trust the checked out workspace in the job container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Test ORDR diagnostic tools
         run: python3 -m unittest discover -s tools -p 'test_ordr_*.py'
       - name: Test Warcraft III map auditor

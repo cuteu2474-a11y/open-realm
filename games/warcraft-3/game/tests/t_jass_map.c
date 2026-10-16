@@ -517,6 +517,39 @@ TEST(wc3_jass_map, forgroup_snapshot_survives_nested_mutation) {
         "endfunction\n"));
 }
 
+/* A map can retain ConditionalTriggerExecute calls for never-created triggers. */
+TEST(wc3_jass_map, trigger_evaluate_null_returns_false) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(null), \"null trigger cannot satisfy a condition\")\n"
+        "endfunction\n"));
+}
+
+/* Stock BJ local names can collide with the short globals in optimized map scripts. */
+TEST(wc3_jass_map, locals_and_parameters_shadow_globals) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer shadowed = 17\n"
+        "endglobals\n"
+        "function ShadowParameter takes integer shadowed returns integer\n"
+        "  call BJassAssert(shadowed == 29, \"read the parameter before the global\")\n"
+        "  set shadowed = 31\n"
+        "  return shadowed\n"
+        "endfunction\n"
+        "function ShadowLocal takes nothing returns nothing\n"
+        "  local integer shadowed = 23\n"
+        "  call BJassAssert(shadowed == 23, \"read the local before the global\")\n"
+        "  set shadowed = 37\n"
+        "  call BJassAssert(shadowed == 37, \"write the local before the global\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  call ShadowLocal()\n"
+        "  call BJassAssert(shadowed == 17, \"local assignment preserved global state\")\n"
+        "  call BJassAssert(ShadowParameter(29) == 31, \"parameter assignment is local\")\n"
+        "  call BJassAssert(shadowed == 17, \"parameter assignment preserved global state\")\n"
+        "endfunction\n"));
+}
+
 TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
     T_ASSERT(run_test_jass(
         "globals\n"

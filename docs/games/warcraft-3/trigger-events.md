@@ -67,6 +67,11 @@ OrcX01 armory regression in `t_items.c` exercises the player sell-item value.
 
 ## Explicit trigger execution
 
+`TriggerEvaluate(null)` returns false. This permits maps to retain a
+`ConditionalTriggerExecute` call for a trigger that was never created; it must
+not dereference a null trigger. The regression is
+`wc3_jass_map.trigger_evaluate_null_returns_false`.
+
 Event dispatch evaluates conditions, then queues action coroutines for the JASS
 scheduler. A direct `TriggerExecute()` call instead starts each action and runs
 it immediately until it finishes or reaches its first wait. A waiting action
