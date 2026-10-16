@@ -29,6 +29,27 @@ jobs:
             '-DBZ_GAME="warcraft-3"' \
             games/warcraft-3/game/api/api_module.c
 
+  ordr-synthetic-runtime:
+    name: Run native ORDR-sized JASS startup stress tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/corepunch/open-realm-ci:ubuntu-24.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build full headless Warcraft III JASS host and test data
+        run: make -j4 openwarcraft3-tests test-assets
+      - name: Execute synthetic startup stress and event pool saturation
+        run: |
+          timeout 180 build/bin/openwarcraft3-tests \
+            -data build/tests +dedicated 1 +test 'wc3_api.ordr_startup_*'
+
   compile-ipad:
     runs-on: macos-15
     timeout-minutes: 90
