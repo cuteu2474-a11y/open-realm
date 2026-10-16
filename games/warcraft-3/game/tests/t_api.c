@@ -9269,4 +9269,59 @@ TEST(wc3_api, ordr_offline_sync_payloads_and_game_ui_root) {
 }
 
 
+
+/*
+ * ORDR S2 startup workload approximation (NO proprietary map script):
+ * static private-map call-graph inspection found ~201 Bcx registrations.
+ * Each Bcx creates one trigger and registers four player chat handlers.
+ * Exercise that nested interpreter path followed by 1,078 additional
+ * triggers, near the map's ~1,279 statically reachable CreateTrigger calls.
+ * This checks scheduler/registry stability, not full ORDR functionality.
+ */
+TEST(wc3_api, ordr_startup_trigger_stress_201_chat_registration_loops) {
+    player_t *previous = currentplayer;
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(
+        "function no_action takes nothing returns nothing\n"
+        "endfunction\n"
+        "function synthetic_chat_registration takes string prefix, boolean exactMatch, code action returns nothing\n"
+        "  local integer playerIndex = 0\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, action)\n"
+        "  loop\n"
+        "    exitwhen playerIndex >= 4\n"
+        "    call TriggerRegisterPlayerChatEvent(t, Player(playerIndex), prefix, exactMatch)\n"
+        "    set playerIndex = playerIndex + 1\n"
+        "  endloop\n"
+        "  set t = null\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 201\n"
+        "    call synthetic_chat_registration(\"-synthetic\", false, function no_action)\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1078\n"
+        "    call CreateTrigger()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(level.num_triggers, (uint32_t)1279);
+    currentplayer = previous;
+}
+
+/* Saturating the fixed event pool must report a clean allocation failure. */
+TEST(wc3_api, ordr_startup_event_capacity_fails_without_memory_corruption) {
+    setup_test_world();
+    FOR_LOOP(i, MAX_EVENTS)
+        T_NOT_NULL(G_MakeEvent(EVENT_PLAYER_CHAT));
+    T_ASSERT(G_MakeEvent(EVENT_PLAYER_CHAT) == NULL);
+}
+
 #endif /* BZ_TESTS */
