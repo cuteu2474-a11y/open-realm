@@ -634,7 +634,9 @@ static void dirname_of(const char *path, char *out, size_t out_size) {
 static void path_join(char *out, size_t out_size, const char *dir, const char *name) {
     size_t len = strlen(dir);
     const char *sep = (len > 0 && dir[len - 1] == '/') ? "" : "/";
-    snprintf(out, out_size, "%s%s%s", dir, sep, name);
+    SDL_strlcpy(out, dir, out_size);
+    SDL_strlcat(out, sep, out_size);
+    SDL_strlcat(out, name, out_size);
 }
 
 static void shell_quote_append(char *out, size_t out_size, const char *s) {

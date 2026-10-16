@@ -754,7 +754,7 @@ static wow_target_t *get_wow_target(wow_target_t *targets, size_t *count, char c
 
     wow_target_t *target = &targets[(*count)++];
     memset(target, 0, sizeof(*target));
-    strncpy(target->container, container, sizeof(target->container) - 1);
+    strlcpy(target->container, container, sizeof(target->container));
     output_path_for_container(target->path, sizeof(target->path), out_dir, container);
     if (ensure_parent_dir(target->path) != 0) {
         fprintf(stderr, "Cannot create output directory for %s\n", target->path);
@@ -940,8 +940,8 @@ static int    data_archive_count;
 static void data_collect_archive(cstring_t path, void *ud) {
     (void)ud;
     if (data_archive_count >= DATA_MAX_ARCHIVES) return;
-    strncpy(data_archive_paths[data_archive_count], path,
-            sizeof(data_archive_paths[0]) - 1);
+    strlcpy(data_archive_paths[data_archive_count], path,
+            sizeof(data_archive_paths[0]));
     data_archive_count++;
 }
 

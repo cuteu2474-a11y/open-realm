@@ -271,7 +271,7 @@ static bool DialogApplyBackdrop(frameDef_t *root, frameDef_t *backdrop) {
 void UI_JassDialogShow(edict_t *ent, jassDialog_t const *dialog) {
     frameDef_t *root = NULL, *message, *source, *previous = NULL;
     ScriptDialog_t dialog_frames, clone_frames;
-    ScriptDialogButton_t button_template, button_frames;
+    ScriptDialogButton_t button_template, button_frames = {0};
     bool stock_dialog, stock_button;
     float content_height;
     uint32_t n = 0, omitted = 0;

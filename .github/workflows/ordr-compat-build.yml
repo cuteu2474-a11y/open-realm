@@ -31,7 +31,7 @@ jobs:
           for binary in "$app/warcraft3" "$app"/Frameworks/*.framework/*; do
             case "$binary" in */Info.plist) continue ;; esac
             test -x "$binary"
-            xcrun lipo -verify_arch arm64 "$binary"
+            xcrun lipo "$binary" -verify_arch arm64
           done
       - name: Archive unsigned app preserving executable permissions
         run: |
