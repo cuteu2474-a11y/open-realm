@@ -4607,6 +4607,34 @@ TEST(wc3_api, model_effects_are_rendered_but_not_world_selectable) {
     T_EQ(unit_team_color(target_effect), 6);
 }
 
+/* ORDR S2 creates a 1024-handle timer pool during script startup, in
+ * addition to timer globals. A 1024-slot engine registry aborts main(). */
+TEST(wc3_api, ordr_timer_pool_fits_alongside_global_timers) {
+    setup_test_world();
+    /* Reserve 32 extra slots to stand in for map global timers. */
+    FOR_LOOP(i, 1024 + 32) {
+        gtimer_t *timer = G_AllocJassTimer();
+        T_NOT_NULL(timer);
+        if (!timer) return;
+    }
+    T_EQ(level.num_timers, 1056);
+}
+
+/* Warcraft's GetAbilityEffectById is a STRING query for ability art; unlike
+ * AddSpellEffectById it must not spawn an entity or return an effect handle. */
+TEST(wc3_api, ability_effect_art_query_natives_return_strings) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local string a = GetAbilityEffectById('AHhb', EFFECT_TYPE_TARGET, 0)\n"
+        "  local string b = GetAbilityEffect(\"AHhb\", EFFECT_TYPE_TARGET, 0)\n"
+        "  call BJassAssert(a == b, \"ability id and string art queries disagree\")\n"
+        "  call BJassAssert(a != \"\", \"known ability target art is missing\")\n"
+        "  call BJassAssert(GetAbilityEffectById('ZZZZ', EFFECT_TYPE_TARGET, 0) == \"\", \"unknown ability art must be empty\")\n"
+        "  call BJassAssert(GetAbilityEffectById('AHhb', EFFECT_TYPE_TARGET, -1) == \"\", \"negative art index must be empty\")\n"
+        "endfunction\n"));
+}
+
 TEST(wc3_api, effect_natives_return_independent_handles) {
     setup_test_world();
     T_ASSERT(run_test_jass(
