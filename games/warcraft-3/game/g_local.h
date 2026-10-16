@@ -2499,6 +2499,7 @@ typedef struct {
 player_t *G_GetPlayerByNumber(uint32_t);
 void G_InitJassHost(void);
 void G_JassDiagnosticReset(cstring_t map);
+void G_JassPlayerChat(player_t *player, cstring_t message);
 void G_JassDiagnosticNote(cstring_t stage);
 void G_JassDiagnosticError(cstring_t stage);
 void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations);
