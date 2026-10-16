@@ -9476,4 +9476,18 @@ TEST(wc3_api, ordr_startup_null_trigger_evaluation_safe) {
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+
+/* A non-null rawcode is not a trigger. Previous TriggerEvaluate dereferenced
+ * it as a condition-list pointer and crashed (SIGSEGV) in a private map replay. */
+TEST(wc3_api, ordr_startup_invalid_trigger_pointer_safe) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(123456789), \"invalid trigger pointer should be false\")\n"
+        "  call TriggerExecute(123456789)\n"
+        "  call TriggerExecuteWait(123456789)\n"
+        "endfunction\n"
+    ));
+}
+
 #endif /* BZ_TESTS */
