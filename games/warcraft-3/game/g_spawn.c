@@ -148,6 +148,7 @@ void G_InitJassHost(void) {
         .LoadHandle = G_LoadJassHandle,
         .CoroutineTrace = G_JassCoroutineTrace,
         .FunctionTrace = G_JassFunctionTrace,
+        .ExecutionProgress = G_JassExecutionProgress,
         .VariableChanged = G_JassVariableChanged,
     ));
 }
