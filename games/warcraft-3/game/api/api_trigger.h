@@ -56,6 +56,17 @@ static void QuestPeonStageLogRegistration(trigger_t *trigger, EVENTTYPE type,
             trigger ? (int)trigger->disabled : -1);
 }
 
+/* An invalid JASS handle may be non-null (e.g. a rawcode interpreted as a
+ * trigger). Validate against the map's fixed trigger registry before a VM
+ * callback dereferences linked condition/action lists. */
+static bool WC3_ValidTriggerPointer(trigger_t const *trigger) {
+    uintptr_t base = (uintptr_t)level.triggers;
+    uintptr_t ptr = (uintptr_t)trigger;
+    uintptr_t used = (uintptr_t)level.num_triggers * sizeof(*trigger);
+    return ptr >= base && ptr - base < used &&
+        ((ptr - base) % sizeof(*trigger) == 0);
+}
+
 uint32_t CreateTrigger(jass_t *j) {
     trigger_t *trigger = G_AllocJassTrigger();
     if (!trigger) { jass_rterror(j, "CreateTrigger: trigger registry is full"); return 0; }
@@ -588,6 +599,7 @@ uint32_t TriggerWaitForSound(jass_t *j) {
 }
 uint32_t TriggerEvaluate(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return jass_pushboolean(j, false);
     jassContext_t const *context = jass_getcontext(j);
     bool result = jass_evaluatetrigger(j, whichTrigger, context ? context->unit : NULL);
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
@@ -617,6 +629,7 @@ uint32_t TriggerEvaluate(jass_t *j) {
 }
 uint32_t TriggerExecute(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return 0;
     jassContext_t const *context = jass_getcontext(j);
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         jassContext_t const *ctx = jass_getcontext(j);
@@ -647,6 +660,7 @@ uint32_t TriggerExecute(jass_t *j) {
 uint32_t TriggerExecuteWait(jass_t *j) {
     /* TODO: Execute and yield until the trigger finishes once the coroutine scheduler supports waits. */
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return 0;
     if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
         fprintf(stderr,
                 "WC3_TUTORIAL_FLOW direct trigger=%ld op=execute-wait caller=\"%s\" implementation=stub\n",
