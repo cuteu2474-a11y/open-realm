@@ -168,8 +168,19 @@ void G_UpdateTimerDialogs(void) {
     }
 }
 
-/* Timer callbacks enter the same coroutine/event path as authored map triggers. */
+/* Timer callbacks enter the same coroutine/event path as authored map triggers.
+ * Native callers can present an invalid non-null handle; never forward it to
+ * jass_calltriggerwithtimer(), which dereferences action/condition lists.
+ * Compare integer address ranges to avoid undefined pointer subtraction. */
+static bool G_TimerTriggerValid(trigger_t const *trigger) {
+    uintptr_t base = (uintptr_t)level.triggers, address = (uintptr_t)trigger;
+    uintptr_t used = (uintptr_t)level.num_triggers * sizeof(*trigger);
+    return address >= base && address - base < used &&
+           ((address - base) % sizeof(*trigger) == 0);
+}
+
 void G_RunTimers(void) {
+    static uint32_t invalid_timer_trigger_reports = 0;
     FOR_LOOP(i, level.num_timers) {
         gtimer_t *timer = &level.timers[i];
         if (!timer->running || timer->paused) continue;
@@ -185,8 +196,17 @@ void G_RunTimers(void) {
                 .timer_generation = timer->generation, .timer_pending = true));
         jass_settimercontext(timer);
         FOR_EACH_EVENT(event)
-            if (event->type == EVENT_GAME_TIMER_EXPIRED && event->timer == timer)
+            if (event->type == EVENT_GAME_TIMER_EXPIRED && event->timer == timer) {
+                if (!G_TimerTriggerValid(event->trigger)) {
+                    if (invalid_timer_trigger_reports++ < 8) {
+                        fprintf(stderr, "WC3 invalid timer-trigger callback: timer=%u event=%u trigger=%p\n",
+                                (unsigned)i, (unsigned)event_index, (void *)event->trigger);
+                        G_JassDiagnosticNote("invalid timer trigger callback blocked");
+                    }
+                    continue;
+                }
                 jass_calltriggerwithtimer(level.vm, event->trigger, timer);
+            }
         jass_settimercontext(NULL);
     }
 }
