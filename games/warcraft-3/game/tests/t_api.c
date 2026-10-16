@@ -26,6 +26,7 @@
 edict_t *alloc_test_unit(uint32_t class_id, float x, float y);
 void reset_entities(void);
 void setup_test_world(void);
+bool setup_ordr_private_world(void);
 void CM_SetupTestPathmap(uint32_t width, uint32_t height, uint8_t const *cells);
 void CM_SetupTestWorldBounds(box2_t const *bounds);
 bool run_test_jass(cstring_t src);
@@ -9436,7 +9437,7 @@ TEST(wc3_api, ordr_private_main_from_script) {
     if (read_count != (size_t)size) { free(source); T_ASSERT(false); return; }
     source[size] = '\0';
     fprintf(stderr, "ORDR_PRIVATE_MAIN script_size=%ld bytes\n", size);
-    setup_test_world();
+    T_ASSERT(setup_ordr_private_world());
     currentplayer = G_GetPlayerByNumber(0);
     ran = run_test_jass(source);
     fprintf(stderr, "ORDR_PRIVATE_MAIN %s triggers=%u timers=%u error=%s\n",
@@ -9672,5 +9673,23 @@ TEST(wc3_api, ordr_chat_registration_and_dispatch_sender_and_text) {
     T_ASSERT(!jass_rterror_pending(level.vm));
     currentplayer = previous;
 }
+
+
+/* Headless ORDR-private fixture covers map coordinates used by CUN's unit
+ * selector. Previously the +/-1024 fixture silently rejected distant spawns.
+ * This check uses a stock fixture unit; it does NOT prove a custom ORDR unit
+ * definition, animation or iPad screen rendering is available.
+ */
+TEST(wc3_api, ordr_large_private_world_accepts_selection_coordinates) {
+    T_ASSERT(setup_ordr_private_world());
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit difficulty = CreateUnit(Player(15), 'hfoo', -6640.0, -8464.0, 270.0)\n"
+        "  call BJassAssert(difficulty != null, \"selection position outside fixture world\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 
 #endif /* BZ_TESTS */
