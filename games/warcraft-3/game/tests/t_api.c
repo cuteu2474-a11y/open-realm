@@ -9325,4 +9325,74 @@ TEST(wc3_api, ordr_startup_event_capacity_fails_without_memory_corruption) {
     T_ASSERT(G_MakeEvent(EVENT_PLAYER_CHAT) == NULL);
 }
 
+
+/*
+ * Map-scale script smoke: roughly 3,381 separate JASS functions and ~80,000
+ * statements. This is synthetic (not the user's copyrighted war3map.j).
+ * Exercises parser, dispatch and native allocations in the headless WC3 host.
+ */
+TEST(wc3_api, ordr_startup_map_sized_parser_and_registry_stress) {
+    enum { MAP_STUB_FUNCTIONS = 3381, SYNTHETIC_CAPACITY = 6 * 1024 * 1024 };
+    char *source = malloc(SYNTHETIC_CAPACITY);
+    size_t written = 0;
+    player_t *previous = currentplayer;
+    uint32_t k;
+
+#define ORDR_APPEND(...) do {                                                  \
+    int n = snprintf(source + written, SYNTHETIC_CAPACITY - written, __VA_ARGS__); \
+    if (n < 0 || (size_t)n >= SYNTHETIC_CAPACITY - written) {                    \
+        free(source); T_ASSERT(false); return;                                   \
+    }                                                                          \
+    written += (size_t)n;                                                       \
+} while (0)
+
+    T_NOT_NULL(source);
+    if (!source) return;
+    ORDR_APPEND(
+        "function no_action takes nothing returns nothing\n"
+        "endfunction\n"
+        "function synthetic_chat_registration takes nothing returns nothing\n"
+        "  local integer p = 0\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerAddAction(t, function no_action)\n"
+        "  loop\n"
+        "    exitwhen p >= 4\n"
+        "    call TriggerRegisterPlayerChatEvent(t, Player(p), \"-synthetic\", false)\n"
+        "    set p = p + 1\n"
+        "  endloop\n"
+        "endfunction\n");
+    for (k = 0; k < MAP_STUB_FUNCTIONS; ++k) {
+        ORDR_APPEND("function ordr_dummy_%04u takes nothing returns nothing\n", k);
+        FOR_LOOP(v, 12) ORDR_APPEND("  local integer v%02u = %u\n", v, v);
+        FOR_LOOP(v, 12) ORDR_APPEND("  set v%02u = v%02u + 1\n", v, v);
+        ORDR_APPEND("endfunction\n");
+    }
+    ORDR_APPEND(
+        "function main takes nothing returns nothing\n"
+        "  local integer i = 0\n"
+        "  local trigger t = null\n"
+        "  loop\n"
+        "    exitwhen i >= 201\n"
+        "    call synthetic_chat_registration()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1078\n"
+        "    set t = CreateTrigger()\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "endfunction\n");
+    fprintf(stderr, "ORDR_SYNTHETIC_MAP script_bytes=%zu functions=%u\n",
+        written, (unsigned)(MAP_STUB_FUNCTIONS + 3));
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(source));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(level.num_triggers, (uint32_t)1279);
+    currentplayer = previous;
+    free(source);
+#undef ORDR_APPEND
+}
+
 #endif /* BZ_TESTS */
