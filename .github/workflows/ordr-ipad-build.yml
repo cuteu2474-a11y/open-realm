@@ -48,7 +48,7 @@ jobs:
       - name: Execute synthetic startup stress and event pool saturation
         run: |
           timeout 180 build/bin/openwarcraft3-tests \
-            -data build/tests +dedicated 1 +test 'wc3_api.ordr_startup_*'
+            -data build/tests +dedicated 1 +test 'wc3_api.ordr_*'
       - name: Upload self-contained Linux headless runtime for private-map tests
         uses: actions/upload-artifact@v4
         with:
