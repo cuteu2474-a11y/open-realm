@@ -53,6 +53,18 @@ jobs:
           test -d "$APP/Frameworks"
           find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d -print
           test "$(find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d | wc -l | tr -d ' ')" -ge 6
+      - name: Package diagnostic unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app Payload/
+          zip -qry OpenWarcraft3-ORDR-Diagnostics-unsigned.ipa Payload
+      - name: Upload IPA for SideStore signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordr-openrealm-diagnostic-ipa
+          path: OpenWarcraft3-ORDR-Diagnostics-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload unsigned app for diagnostics only
         uses: actions/upload-artifact@v4
         with:
