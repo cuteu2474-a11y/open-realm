@@ -2376,8 +2376,8 @@ typedef struct {
     int32_t relative_point;
     uint32_t relative_frame;
     int32_t anchor;
-    float x, y, width, height;
-    int32_t alpha, priority, text_alignment;
+    float x, y, width, height, font_height;
+    int32_t alpha, priority, text_alignment, font_flags;
     bool visible, enabled, focused, absolute;
     char type[24], name[96], template_name[96];
     char text[512], texture[256], font[128], model[256];
