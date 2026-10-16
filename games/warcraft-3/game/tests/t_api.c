@@ -9395,4 +9395,52 @@ TEST(wc3_api, ordr_startup_map_sized_parser_and_registry_stress) {
 #undef ORDR_APPEND
 }
 
+
+/*
+ * Run a private extracted war3map.j from an explicit local path:
+ *   ORDR_JASS_PATH=/private/war3map.j build/bin/openwarcraft3-tests \
+ *      -data build/tests +dedicated 1 +test 'wc3_api.ordr_private_main_from_script'
+ *
+ * The proprietary script is never checked into GitHub, attached to CI or
+ * emitted to logs. The headless fixture is NOT the complete retail MPQ data
+ * set; a missing rawcode or native can still fail independently of iPadOS.
+ */
+TEST(wc3_api, ordr_private_main_from_script) {
+    cstring_t filename = getenv("ORDR_JASS_PATH");
+    FILE *in;
+    long size;
+    char *source;
+    size_t read_count;
+    player_t *previous = currentplayer;
+    bool ran;
+    if (!filename || !*filename) {
+        fprintf(stderr, "ORDR_PRIVATE_MAIN SKIP: ORDR_JASS_PATH not provided\n");
+        return;
+    }
+    in = fopen(filename, "rb");
+    if (!in) { T_ASSERT(false); return; }
+    if (fseek(in, 0, SEEK_END) != 0 || (size = ftell(in)) < 0 ||
+        size > (long)(8 * 1024 * 1024) || fseek(in, 0, SEEK_SET) != 0) {
+        fclose(in); T_ASSERT(false); return;
+    }
+    source = malloc((size_t)size + 1);
+    if (!source) { fclose(in); T_ASSERT(false); return; }
+    read_count = fread(source, 1, (size_t)size, in);
+    fclose(in);
+    if (read_count != (size_t)size) { free(source); T_ASSERT(false); return; }
+    source[size] = '\0';
+    fprintf(stderr, "ORDR_PRIVATE_MAIN script_size=%ld bytes\n", size);
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    ran = run_test_jass(source);
+    fprintf(stderr, "ORDR_PRIVATE_MAIN %s triggers=%u timers=%u error=%s\n",
+        ran ? "PASS" : "FAIL", (unsigned)level.num_triggers,
+        (unsigned)level.num_timers,
+        level.vm && jass_rterror_pending(level.vm)
+            ? jass_rterror_message(level.vm) : "(none)");
+    currentplayer = previous;
+    free(source);
+    T_ASSERT(ran);
+}
+
 #endif /* BZ_TESTS */
