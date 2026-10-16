@@ -220,9 +220,13 @@ uint32_t TriggerRegisterTimerEvent(jass_t *j) {
     bool periodic = jass_checkboolean(j, 3);
     gtimer_t *timer;
     event_t *evt;
-    if (!whichTrigger || !(timer = G_AllocJassTimer())) return jass_pushnullhandle(j, "event");
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !(timer = G_AllocJassTimer()))
+        return jass_pushnullhandle(j, "event");
     G_TimerStart(timer, (uint32_t)(MAX(0.0f, timeout) * 1000.0f), periodic, NULL);
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) { G_TimerDestroy(timer); return jass_pushnullhandle(j, "event"); }
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer");
     return jass_pushlighthandle(j, evt, "event");
 }
@@ -230,8 +234,19 @@ uint32_t TriggerRegisterTimerExpireEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     gtimer_t *timer = jass_checkhandle(j, 2, "timer");
     event_t *evt;
-    if (!whichTrigger || !timer) return jass_pushnullhandle(j, "event");
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !timer)
+        return jass_pushnullhandle(j, "event");
+    {
+        uintptr_t start = (uintptr_t)level.timers, address = (uintptr_t)timer;
+        uintptr_t used = (uintptr_t)level.num_timers * sizeof(*timer);
+        if (address < start || address - start >= used ||
+            (address - start) % sizeof(*timer) != 0)
+            return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer-expire");
     return jass_pushlighthandle(j, evt, "event");
 }
