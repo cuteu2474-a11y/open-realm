@@ -32,6 +32,56 @@
 #include "jass/jass.h"
 #include <stdarg.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+/*
+ * JASS startup diagnostics for custom maps.  On iPad, HOME/Documents is the
+ * Files-visible Documents directory, including when hosted by LiveContainer.
+ * Keep diagnostics in the data container rather than modifying the map.
+ */
+static char g_last_jass_error[512];
+
+static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    char path[MAX_PATHLEN];
+    cstring_t home = getenv("HOME");
+    FILE *fp;
+    if (!home || !*home) return;
+    if (snprintf(path, sizeof(path), "%s/Documents/OpenRealm-JASS.log", home) >= (int)sizeof(path))
+        return;
+    fp = fopen(path, reset ? "w" : "a");
+    if (!fp) return;
+    fprintf(fp, "%s: %s\n", stage, detail ? detail : "(none)");
+    fclose(fp);
+#else
+    (void)stage;
+    (void)detail;
+    (void)reset;
+#endif
+}
+
+void G_JassDiagnosticReset(cstring_t map) {
+    g_last_jass_error[0] = '\0';
+    G_WriteJassDiagnostic("map", map ? map : "(unknown)", true);
+}
+
+void G_JassDiagnosticNote(cstring_t stage) {
+    G_WriteJassDiagnostic("stage", stage, false);
+}
+
+void G_JassDiagnosticError(cstring_t stage) {
+    cstring_t message;
+    if (!level.vm || !jass_rterror_pending(level.vm)) return;
+    message = jass_rterror_message(level.vm);
+    if (!message || !*message) message = "(unspecified JASS runtime error)";
+    if (!strcmp(g_last_jass_error, message)) return;
+    snprintf(g_last_jass_error, sizeof(g_last_jass_error), "%s", message);
+    fprintf(stderr, "WC3_JASS_ERROR stage=%s error=%s\n", stage, message);
+    G_WriteJassDiagnostic(stage, message, false);
+}
+
 struct game_export globals;
 struct game_import gi;
 struct game_locals game;
@@ -449,6 +499,7 @@ static bool G_LoadMap(cstring_t mapFilename) {
      * paths do not parse FDF on first use. */
     UI_LoadHud();
     gi.LoadingFrame();
+    G_JassDiagnosticReset(mapFilename);
     G_SpawnEntities();
     gi.LoadingFrame();
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
@@ -1178,9 +1229,12 @@ static void G_StartScripts(void) {
      */
     G_SetDestructableScriptBinding(true);
 
+    G_JassDiagnosticNote("calling main");
     jass_callbyname(level.vm, "main", true);
     level.scriptsStarted = true;
     jass_runevents(level.vm);
+    G_JassDiagnosticError("main");
+    if (!jass_rterror_pending(level.vm)) G_JassDiagnosticNote("main initial events processed");
 
     G_SetDestructableScriptBinding(false);
 }
@@ -1325,6 +1379,7 @@ static void G_RunFrame(void) {
     G_RunTimers();
     G_RunEvents();
     jass_runevents(level.vm);
+    G_JassDiagnosticError("simulation frame");
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 
