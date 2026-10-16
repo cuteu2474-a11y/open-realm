@@ -1060,6 +1060,8 @@ jassModule_t jass_funcs[] = {
     { "AddSpecialEffectLoc", AddSpecialEffectLoc },
     { "AddSpecialEffectTarget", AddSpecialEffectTarget },
     { "DestroyEffect", DestroyEffect },
+    { "GetAbilityEffect", GetAbilityEffect },
+    { "GetAbilityEffectById", GetAbilityEffectById },
     { "AddSpellEffect", AddSpellEffect },
     { "AddSpellEffectLoc", AddSpellEffectLoc },
     { "AddSpellEffectById", AddSpellEffectById },
