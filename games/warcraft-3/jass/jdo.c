@@ -2209,7 +2209,12 @@ static void jass_remove_comments(string_t buf) {
     char *src = buf, *dst = buf;
     while (*src) {
         if (!in_line && !in_block) {
-            if (*src == '"') { quotes++; *dst++ = *src++; }
+            /* Backslash-escaped quotes must not terminate a JASS string;
+             * otherwise // inside the literal is mistaken for a comment. */
+            if ((quotes & 1) && *src == '\\' && src[1]) {
+                *dst++ = *src++;
+                *dst++ = *src++;
+            } else if (*src == '"') { quotes++; *dst++ = *src++; }
             else if (quotes & 1) { *dst++ = *src++; }
             else if (src[0] == '/' && src[1] == '/') { in_line  = true;  src += 2; }
             else if (src[0] == '/' && src[1] == '*') { in_block = true;  src += 2; }

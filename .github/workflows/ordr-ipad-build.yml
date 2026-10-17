@@ -6,7 +6,29 @@ on:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
       - '.github/workflows/ordr-ipad-build.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  jass-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build standalone JASS interpreter
+        run: make -j2 jass-tool
+      - name: Validate ORDR parser and compiled regex semantics
+        run: python3 -m unittest discover -s tests -p 'test_ordr_*.py' -v
+      - name: Check Warcraft native registration module syntax
+        run: |
+          cc -fsyntax-only -std=gnu11 -I. -Ishared -Ishared/types \
+            -Igames/warcraft-3 -Igames/warcraft-3/common \
+            -Igames/warcraft-3/game -Igames/warcraft-3/game/api \
+            -Igames/warcraft-3/game/skills -DWC3 -DUSE_FOGOFWAR \
+            '-DBZ_GAME="warcraft-3"' \
+            games/warcraft-3/game/api/api_module.c
+
   compile-ipad:
     runs-on: macos-15
     timeout-minutes: 90
@@ -23,6 +45,14 @@ jobs:
         run: |
           test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
           find build/ipad -maxdepth 5 -name '*.app' -print
+      - name: Verify device executable and embedded frameworks
+        run: |
+          APP=build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          test -f "$APP/Warcraft3"
+          xcrun lipo -info "$APP/Warcraft3" | grep -q arm64
+          test -d "$APP/Frameworks"
+          find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d -print
+          test "$(find "$APP/Frameworks" -maxdepth 1 -name '*.framework' -type d | wc -l | tr -d ' ')" -ge 6
       - name: Upload unsigned app for diagnostics only
         uses: actions/upload-artifact@v4
         with:

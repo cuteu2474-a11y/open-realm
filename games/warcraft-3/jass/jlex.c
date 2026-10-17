@@ -3,6 +3,15 @@
 
 #define MAX_SEGMENT_SIZE 16384  /* Galaxy scripts contain long string literals */
 
+/* Skip escaped characters when finding the end of a JASS quoted literal. */
+static cstring_t ordr_closing_quote(cstring_t start, char quote) {
+    for (cstring_t it = start; *it; ++it) {
+        if (*it == '\\' && it[1]) { ++it; continue; }
+        if (*it == quote) return it;
+    }
+    return NULL;
+}
+
 bool eat_token(wordExtractor_t *p, cstring_t value) {
     cstring_t tok = peek_token(p);
     if (!strcmp(tok, value)) {
@@ -15,10 +24,10 @@ bool eat_token(wordExtractor_t *p, cstring_t value) {
 
 cstring_t parse_token(wordExtractor_t *p) {
     static char word[MAX_SEGMENT_SIZE];
-    while (isspace(*p->buffer)) ++p->buffer;
+    while (isspace((unsigned char)*p->buffer)) ++p->buffer;
     if (*p->buffer == '\"' || *p->buffer == '\'') {
         char quote = *p->buffer;
-        cstring_t closingQuote = strchr(p->buffer + 1, quote);
+        cstring_t closingQuote = ordr_closing_quote(p->buffer + 1, quote);
         size_t stringLength;
         if (!closingQuote) {
             strlcpy(word, p->buffer, MAX_SEGMENT_SIZE);
@@ -72,7 +81,7 @@ cstring_t parse_token(wordExtractor_t *p) {
         /* Stop at quotes: minified JASS glues return"" and 'Hpal'or(x) without space.
          * Quotes are not jdo delimiters; the quote branches above read the literal. */
         while (*p->buffer &&
-           (!isspace(*p->buffer) && *p->buffer != '"' && *p->buffer != '\'' && strchr(p->delimiters, *p->buffer) == NULL) &&
+           (!isspace((unsigned char)*p->buffer) && *p->buffer != '"' && *p->buffer != '\'' && strchr(p->delimiters, *p->buffer) == NULL) &&
                segmentLength < MAX_SEGMENT_SIZE - 1) {
             word[segmentLength++] = *(p->buffer++);
         }
@@ -95,7 +104,7 @@ cstring_t parse_segment(wordExtractor_t *p) {
     memset(segment, 0, MAX_SEGMENT_SIZE);
     if (*p->buffer == '\0')
         return NULL;
-    while (isspace(*p->buffer))
+    while (isspace((unsigned char)*p->buffer))
         ++p->buffer;
     cstring_t start = p->buffer;
     if (*p->buffer == '"') {
@@ -104,7 +113,7 @@ cstring_t parse_segment(wordExtractor_t *p) {
         size_t seglen;
 
         ++start;
-        closingQuote = strchr(start, '"');
+        closingQuote = ordr_closing_quote(start, '"');
         if (!closingQuote) {
             seglen = MIN(strlen(start), MAX_SEGMENT_SIZE - 1);
             memcpy(segment, start, seglen);
@@ -145,7 +154,7 @@ cstring_t parse_segment2(wordExtractor_t *p) {
     memset(segment, 0, MAX_SEGMENT_SIZE);
     if (*p->buffer == '\0')
         return NULL;
-    while (isspace(*p->buffer))
+    while (isspace((unsigned char)*p->buffer))
         ++p->buffer;
     uint32_t num_quotes = 0;
     string_t out = segment;
@@ -154,6 +163,13 @@ cstring_t parse_segment2(wordExtractor_t *p) {
         if (*p->buffer == ',' && (num_quotes & 1) == 0) {
             ++p->buffer;
             break;
+        }
+        /* Escaped quotes are literal characters, not CSV-style field boundaries. */
+        if (*p->buffer == '\\' && p->buffer[1]) {
+            if (out < out_end) *out++ = *p->buffer;
+            ++p->buffer;
+            if (out < out_end) *out++ = *p->buffer;
+            continue;
         }
         if (*p->buffer == '"')
             ++num_quotes;

@@ -1,0 +1,35 @@
+name: ORDR compatibility build
+on:
+  workflow_dispatch:
+  push:
+    branches: [ordr-compat-01]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test ORDR audit logic
+        run: python3 -m unittest discover -s tools -p 'test_ordr_*.py'
+      - name: Audit ORDR native coverage (informational)
+        run: python3 tools/ordr_native_audit.py tools/ordr_native_usage.json | tee ordr-native-audit.json
+      - name: Upload native coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordr-native-coverage
+          path: ordr-native-audit.json
+      - name: Build unsigned iPad app
+        run: make ipad
+      - name: Verify iPad app exists
+        run: test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+      - name: Upload diagnostic app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordr-openrealm-ipad-unsigned
+          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          if-no-files-found: error
+          retention-days: 7

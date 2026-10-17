@@ -18,8 +18,15 @@
 #include "api_quest.h"
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
+#include "api_ordr.h"
+#include "api_ordr_strings.h"
 
 jassModule_t jass_funcs[] = {
+    { "DzLoadToc", DzLoadToc },
+    { "JNStringCount", JNStringCount },
+    { "JNStringSplit", JNStringSplit },
+    { "JNStringReplace", JNStringReplace },
+    { "JNStringRegex", JNStringRegex },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },
@@ -506,6 +513,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitPosition", SetUnitPosition },
     { "SetUnitPositionLoc", SetUnitPositionLoc },
     { "SetUnitFacing", SetUnitFacing },
+    { "EXSetUnitFacing", SetUnitFacing },
     { "SetUnitFacingTimed", SetUnitFacingTimed },
     { "SetUnitMoveSpeed", SetUnitMoveSpeed },
     { "SetUnitFlyHeight", SetUnitFlyHeight },
@@ -566,6 +574,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitExploded", SetUnitExploded },
     { "SetUnitInvulnerable", SetUnitInvulnerable },
     { "PauseUnit", PauseUnit },
+    { "EXPauseUnit", PauseUnit },
     { "IsUnitPaused", IsUnitPaused },
     { "SetUnitPathing", SetUnitPathing },
     { "ClearSelection", ClearSelection },
