@@ -108,6 +108,8 @@ cstring_t jass_functionname(jassFunc_t const *func);
 cstring_t jass_currentfunctionname(jass_t *j);
 uint32_t jass_formatcallchain(jass_t *j, string_t buffer, uint32_t size);
 jassFunc_t const *jass_functionbyname(jass_t *j, cstring_t name);
+/* Read-only bitmask of ORDR world-difficulty initialization milestones. */
+uint32_t jass_ordr_flow_mask(jass_t *j);
 void jass_settimercontext(handle_t timer);
 bool jass_triggerdisabled(trigger_t *trigger);
 JASSTYPEID jass_gettype(jass_t *j, int index);
