@@ -454,7 +454,7 @@ static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
     if (!find_function(jass_root(j), "CUO") || !find_function(jass_root(j), "CUW"))
         return;
     ++count;
-    fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\\n",
+    fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\n",
             name, via, (unsigned)jass_gettime());
 }
 
