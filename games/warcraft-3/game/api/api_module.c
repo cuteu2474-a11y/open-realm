@@ -22,6 +22,9 @@
 #include "api_ordr_singleplayer_extra.h"
 
 jassModule_t jass_funcs[] = {
+    { "SetTextTagPos", SetTextTagPos },
+    { "GetAbilityEffectById", GetAbilityEffectById },
+    { "DecUnitAbilityLevel", DecUnitAbilityLevel },
     { "DzFrameSetPoint", DzFrameSetPoint },
     { "DzGetTriggerUIEventFrame", DzGetTriggerUIEventFrame },
     { "DzFrameSetScriptByCode", DzFrameSetScriptByCode },
