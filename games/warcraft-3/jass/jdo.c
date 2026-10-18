@@ -477,7 +477,19 @@ static void jass_ordr_log_open(void) {
  * framework. Entries are flushed immediately so a process crash preserves
  * the last observed JASS stage. */
 void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail) {
-    if (!j || jass_root(j) != ordr_flow_vm || !ordr_flow_vm) return;
+    if (!j) return;
+    /* The map loader identifies ORDR from its source even if the JASS
+     * parser rejected it and never registered CUO/CUW. */
+    if (event && !strcmp(event, "MAP_PARSE")) {
+        if (ordr_flow_vm != jass_root(j)) {
+            if (ordr_jass_log) { fclose(ordr_jass_log); ordr_jass_log = NULL; }
+            ordr_jass_log_open_attempted = false;
+            ordr_jass_log_lines = 0;
+            ordr_flow_vm = jass_root(j);
+            ordr_flow_mask = 0;
+        }
+    }
+    if (jass_root(j) != ordr_flow_vm || !ordr_flow_vm) return;
     jass_ordr_log_open();
     if (!ordr_jass_log) return;
     fprintf(ordr_jass_log, "%u ms  [%-16s]  %s\n",
