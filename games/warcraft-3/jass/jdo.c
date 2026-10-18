@@ -439,23 +439,37 @@ static void jass_free_coroutine(jasscoroutine_t *co) {
  * main -> BJG (2s trigger) -> BB4 -> CUa/CUX (2s timer) -> CUW -> CUN.
  * UI picks: CUK / CUL; game start: CUM -> CT9.
  */
+static jass_t *ordr_flow_vm;
+static uint32_t ordr_flow_mask;
+
+uint32_t jass_ordr_flow_mask(jass_t *j) {
+    return j && jass_root(j) == ordr_flow_vm ? ordr_flow_mask : 0;
+}
+
 static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
     static unsigned count;
     static cstring_t const watched[] = {
         "main", "BJG", "BB4", "CUO", "CUa", "CUX", "CUW",
         "CUN", "CUK", "CUL", "CUM", "CT9"
     };
-    bool watched_name = false;
-    if (!j || !name || count >= 160) return;
-    FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
-        if (!strcmp(name, watched[i])) { watched_name = true; break; }
+    jass_t *root;
+    if (!j || !name) return;
+    root = jass_root(j);
+    if (root != ordr_flow_vm) {
+        ordr_flow_vm = root;
+        ordr_flow_mask = 0;
+        count = 0;
     }
-    if (!watched_name) return;
-    if (!find_function(jass_root(j), "CUO") || !find_function(jass_root(j), "CUW"))
+    /* The map shape guard ensures non-ORDR games retain normal output. */
+    if (!find_function(root, "CUO") || !find_function(root, "CUW")) return;
+    FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
+        if (strcmp(name, watched[i])) continue;
+        ordr_flow_mask |= 1u << i;
+        if (count++ < 160)
+            fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\n",
+                    name, via, (unsigned)jass_gettime());
         return;
-    ++count;
-    fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\n",
-            name, via, (unsigned)jass_gettime());
+    }
 }
 
 static jassCoroutineframe_t *jass_coroutine_pushframe(jasscoroutine_t *co,
