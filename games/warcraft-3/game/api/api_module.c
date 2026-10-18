@@ -506,6 +506,8 @@ jassModule_t jass_funcs[] = {
     { "SetUnitPosition", SetUnitPosition },
     { "SetUnitPositionLoc", SetUnitPositionLoc },
     { "SetUnitFacing", SetUnitFacing },
+    /* ORDR EX compatibility: preserve the native Warcraft III behavior. */
+    { "EXSetUnitFacing", SetUnitFacing },
     { "SetUnitFacingTimed", SetUnitFacingTimed },
     { "SetUnitMoveSpeed", SetUnitMoveSpeed },
     { "SetUnitFlyHeight", SetUnitFlyHeight },
@@ -566,6 +568,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitExploded", SetUnitExploded },
     { "SetUnitInvulnerable", SetUnitInvulnerable },
     { "PauseUnit", PauseUnit },
+    { "EXPauseUnit", PauseUnit },
     { "IsUnitPaused", IsUnitPaused },
     { "SetUnitPathing", SetUnitPathing },
     { "ClearSelection", ClearSelection },
