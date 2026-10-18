@@ -337,8 +337,11 @@ uint32_t UnitSetUsesAltIcon(jass_t *j) {
     return 0;
 }
 uint32_t QueueUnitAnimation(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //cstring_t whichAnimation = jass_checkstring(j, 2);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    cstring_t animation = jass_checkstring(j, 2);
+    if (unit && animation) {
+        strlcpy(unit->queued_animation, animation, sizeof(unit->queued_animation));
+    }
     return 0;
 }
 uint32_t SetUnitAnimation(jass_t *j) {
