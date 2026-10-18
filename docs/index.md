@@ -6,6 +6,8 @@ contains build, installation, and project-overview information.
 
 ## Start Here
 
+- [ORDR iPad handoff](games/warcraft-3/ordr-handoff.md): existing progress,
+  active branch, verification commands and the next implementation steps.
 - [Architecture](architecture/runtime.md): runtime modules, client/server boundaries,
   networking, rendering, sound, UI, and fog of war.
 - [Coordinate-System Contract](../AXIS.md): native game axes, current WoW conversions,

@@ -9318,6 +9318,89 @@ TEST(wc3_api, ordr_startup_trigger_stress_201_chat_registration_loops) {
     currentplayer = previous;
 }
 
+/* The private ORDR map attempts 1054 startup registrations. Its 804 chat
+ * handlers alone fit the old pool, but later timer handlers were discarded. */
+TEST(wc3_api, ordr_startup_mixed_events_preserve_late_timer_after_save) {
+    cstring_t filename = Test_TempPath("ordr-mixed-events.sav");
+    uint32_t events = 0;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer calls = 0\n"
+        "  event tail = null\n"
+        "endglobals\n"
+        "function on_late_timer takes nothing returns nothing\n"
+        "  set calls = calls + 1\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        "  call BJassAssert(tail != null, \"late registration was dropped\")\n"
+        "  call BJassAssert(calls == 1, \"late timer did not fire exactly once\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer i = 0\n"
+        "  local integer p = 0\n"
+        "  local trigger t = null\n"
+        "  loop\n"
+        "    exitwhen i >= 201\n"
+        "    set t = CreateTrigger()\n"
+        "    set p = 0\n"
+        "    loop\n"
+        "      exitwhen p >= 4\n"
+        "      call TriggerRegisterPlayerChatEvent(t, Player(p), \"-synthetic\", false)\n"
+        "      set p = p + 1\n"
+        "    endloop\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 250\n"
+        "    set t = CreateTrigger()\n"
+        "    set tail = TriggerRegisterTimerEvent(t, 0.1, false)\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  call BJassAssert(tail != null, \"ORDR-sized startup exhausted event slots\")\n"
+        "  call TriggerAddAction(t, function on_late_timer)\n"
+        "endfunction\n"));
+    FOR_EACH_EVENT(event) ++events;
+    T_EQ(events, (uint32_t)1054);
+    if (events != 1054) return;
+    /* Persist the event handle above the previous limit before it fires. */
+    T_ASSERT(WriteGame(filename));
+    T_ASSERT(ReadGame(filename));
+    level.started = level.scriptsStarted = true;
+    globals.RunFrame();
+    globals.RunFrame();
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    remove(filename);
+}
+
+/* Region event tokens pack the slot and generation separately. New high slots
+ * must neither alias low slots nor lose their generation through persistence. */
+TEST(wc3_api, ordr_high_event_slot_keeps_region_token_identity) {
+    event_t *event;
+    handle_t handle;
+    uint32_t slot = 0, generation = 0, saved = 0;
+    setup_test_world();
+    FOR_LOOP(i, 1054) {
+        event = G_MakeEvent(EVENT_PLAYER_CHAT);
+        if (!event) { T_NOT_NULL(event); return; }
+    }
+    event = G_MakeEvent(EVENT_GAME_ENTER_REGION);
+    T_NOT_NULL(event);
+    if (!event) return;
+    event->handle_generation = EVENT_HANDLE_GENERATION_MAX;
+    handle = G_EventHandle(event);
+    T_ASSERT(G_EventHandleParts(handle, &slot, &generation));
+    T_EQ(slot, (uint32_t)1054);
+    T_EQ(generation, EVENT_HANDLE_GENERATION_MAX);
+    T_ASSERT(G_EventFromHandle(handle) == event);
+    T_ASSERT(G_SaveJassHandle("event", handle, &saved));
+    T_ASSERT(G_LoadJassHandle("event", saved) == handle);
+    event->inuse = false;
+    T_NULL(G_EventFromHandle(handle));
+}
+
 /* Saturating the fixed event pool must report a clean allocation failure. */
 TEST(wc3_api, ordr_startup_event_capacity_fails_without_memory_corruption) {
     setup_test_world();

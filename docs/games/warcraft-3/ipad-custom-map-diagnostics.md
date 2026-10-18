@@ -46,6 +46,14 @@ incomplete placeholder.
 
 ## For engine developers
 
+`DzLoadToc: failed FDF <path>` records a missing or unparseable template in
+stderr and the iPad stage log. `UI_EnsureFDF` returns false after parse errors
+and only caches successful loads. A later call can retry the file. This does
+not make unsupported properties renderable or make parsing transactional.
+`menu_fdf.failed_template_parse_is_not_cached_as_loaded` covers failure,
+successful retry and successful caching in ROC/TFT settings.
+See [the handoff](ordr-handoff.md) for the current continuation point.
+
 Startup phases are in `games/warcraft-3/game/g_spawn.c` and
 `games/warcraft-3/game/g_main.c`; the JASS runtime error API is in
 `games/warcraft-3/jass/jass.h`. Missing built-in registrations are listed

@@ -1,5 +1,7 @@
 # ORDR Season 2 2.323[C] — iPad offline compatibility checkpoint
 
+Historical initial checkpoint. Current progress is in [the handoff](games/warcraft-3/ordr-handoff.md).
+
 ## Scope
 
 - **Single-player, offline iPad gameplay only.** No matchmaking, multiplayer networking, or account system.

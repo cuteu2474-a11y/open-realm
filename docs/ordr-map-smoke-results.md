@@ -1,5 +1,7 @@
 # ORDR 2.323[C] private-map smoke test — 2026-10-15
 
+Historical parser-only results. Current full-host investigations are in [the handoff](games/warcraft-3/ordr-handoff.md).
+
 ## Reproducible observation
 
 The original user-supplied `ORDR_S2_2.323[C].w3x` was available in a local private workspace. Its `war3map.j` was extracted with OpenRealm's MPQ reader (not copied into GitHub).

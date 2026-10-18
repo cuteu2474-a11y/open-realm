@@ -402,7 +402,7 @@ FRAMEDEF frames[MAX_UI_CLASSES] = { 0 };
 /* -------------------------------------------------------------------------- */
 bool UI_EnsureFDF(cstring_t filename);
 void UI_ParseFDF(cstring_t filename);
-void UI_ParseFDF_Buffer(cstring_t filename, string_t buffer);
+bool UI_ParseFDF_Buffer(cstring_t filename, string_t buffer);
 void UI_ClearTemplates(void);
 void UI_ClearTextures(void);
 
@@ -1965,7 +1965,7 @@ void FDF_ParseScene(wordExtractor_t *parser) {
     }
 }
 
-void UI_ParseFDF_Buffer(cstring_t fileName, string_t buffer2) {
+bool UI_ParseFDF_Buffer(cstring_t fileName, string_t buffer2) {
     string_t buffer = buffer2;
     UI_RemoveBom(buffer);
     wordExtractor_t parser = {
@@ -1977,6 +1977,7 @@ void UI_ParseFDF_Buffer(cstring_t fileName, string_t buffer2) {
     if (parser.error) {
         fprintf(stderr, "Failed to parse %s\n", fileName);
     }
+    return !parser.error;
 }
 
 static bool UI_FDFLoaded(cstring_t fileName) {
@@ -2030,10 +2031,9 @@ bool UI_EnsureFDF(cstring_t fileName) {
                 memcpy(text, buffer, (size_t)size);
                 text[size] = '\0';
             }
-            UI_ParseFDF_Buffer(fileName, text);
+            loaded = UI_ParseFDF_Buffer(fileName, text);
             UI_FdfFree(text);
-            UI_MarkFDFLoaded(fileName);
-            loaded = true;
+            if (loaded) UI_MarkFDFLoaded(fileName);
         }
         UI_FdfFreeFile(buffer);
     }

@@ -8,6 +8,15 @@ bridge rather than map-specific checks.
 
 ## Player save/load game events
 
+The registration pool has 2048 slots. ORDR startup needs 1054 and its early
+timers reach 1066. The previous 1024-slot pool dropped 30 registrations even
+though `main()` returned without a JASS error. Check exhaustion diagnostics
+as well as VM errors. Region-event tokens use 11 slot bits plus a two-bit tag
+and 17 generation bits; their GetHandleId payload stays within 28 bits.
+Save format 90 records the expanded handler array. The event queue and network
+wire format are unchanged. The mixed-event and high-region-slot ORDR regressions
+run in both ROC and TFT suites. See [the ORDR handoff](ordr-handoff.md).
+
 `TriggerRegisterGameEvent` registers `EVENT_GAME_SAVE` (`259`) and
 `EVENT_GAME_LOADED` (`256`) using the normal bounded event registry. Other game
 IDs remain unsupported and return null event handles. The global registrations

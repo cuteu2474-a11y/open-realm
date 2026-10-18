@@ -3710,6 +3710,40 @@ TEST(menu_fdf, utf16le_fdf_is_parsed_correctly) {
     T_FEQ(frame->Height, 0.50f, 0.01f);
 }
 
+/* A private-map FDF with unsupported properties exposed a false cache hit:
+ * loading reported success even though parsing had stopped before later frames. */
+TEST(menu_fdf, failed_template_parse_is_not_cached_as_loaded) {
+    menuImport_t saved = mi;
+    FOR_LOOP(edition, 2) {
+        reset_ui_state();
+        UI_ClearTemplates();
+        test_fs_expansion = edition != 0;
+        mi.FS_ReadFile = utf16le_fs_read;
+        mi.FS_FreeFile = utf16le_fs_free;
+        mi.MemAlloc = test_ui_mem_alloc;
+        mi.MemFree = test_ui_mem_free;
+        mi.Cvar_String = test_cvar_string;
+        utf16le_src_ascii =
+            "Frame \"BACKDROP\" \"BrokenTemplate\" { UnsupportedProperty 1, }";
+        T_ASSERT(!UI_EnsureFDF("template_retry.fdf"));
+        utf16le_src_ascii =
+            "Frame \"BACKDROP\" \"RecoveredTemplate\" { Width 0.37, Height 0.19, }";
+        T_ASSERT(UI_EnsureFDF("template_retry.fdf"));
+        frameDef_t *recovered = UI_FindFrame("RecoveredTemplate");
+        T_NOT_NULL(recovered);
+        if (recovered) {
+            T_FEQ(recovered->Width, 0.37f, 0.001f);
+            T_FEQ(recovered->Height, 0.19f, 0.001f);
+        }
+        /* A successful load still uses the cache rather than reparsing. */
+        utf16le_src_ascii = "ThisIsNotFDF";
+        T_ASSERT(UI_EnsureFDF("template_retry.fdf"));
+        T_ASSERT(UI_FindFrame("RecoveredTemplate") == recovered);
+    }
+    test_fs_expansion = false;
+    mi = saved;
+}
+
 /* Parsing a template must not fetch art that an instantiated frame overrides. */
 TEST(menu_fdf, unused_template_texture_stays_unloaded) {
     reset_ui_state();

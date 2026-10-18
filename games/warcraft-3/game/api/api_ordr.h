@@ -45,8 +45,14 @@ static void ORDR_ProcessTocLine(char *line) {
         fprintf(stderr, "ORDR DzLoadToc: rejected unsafe FDF path\n");
         return;
     }
-    /* UI_EnsureFDF caches parsed files, so repeated DzLoadToc calls are safe. */
-    UI_ParseFDF(start);
+    /* Only successfully parsed files enter the template cache. Keep failures
+     * in the iPad diagnostic log even when the map ignores DzLoadToc. */
+    if (!UI_EnsureFDF(start)) {
+        char detail[ORDR_TOC_MAX_PATH + 64];
+        snprintf(detail, sizeof(detail), "DzLoadToc: failed FDF %s", start);
+        fprintf(stderr, "ORDR %s\n", detail);
+        G_JassDiagnosticNote(detail);
+    }
 }
 
 static uint32_t DzLoadToc(jass_t *j) {
