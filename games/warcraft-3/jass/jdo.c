@@ -128,6 +128,8 @@ jassType_t jass_types[] = {
  * ========================================================================= */
 
 static void jass_missingcall(jass_t *j, cstring_t name, bool native);
+/* Flush notable ORDR runtime diagnostics into the Files-visible JASS log. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail);
 static jassVar_t *jass_stackvalue(jass_t *j, int index);
 static jassVar_t *jass_topvalue(jass_t *j);
 static JASSTYPEID jass_getvarbasetype(jassVar_t const *var);
@@ -470,6 +472,21 @@ static void jass_ordr_log_open(void) {
 #endif
 }
 
+/* Public to the server game module: timer/heartbeat information is written
+ * into the same map-specific log without reopening the file from a different
+ * framework. Entries are flushed immediately so a process crash preserves
+ * the last observed JASS stage. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail) {
+    if (!j || jass_root(j) != ordr_flow_vm || !ordr_flow_vm) return;
+    jass_ordr_log_open();
+    if (!ordr_jass_log) return;
+    fprintf(ordr_jass_log, "%u ms  [%-16s]  %s\n",
+            (unsigned)jass_gettime(),
+            event ? event : "EVENT",
+            detail ? detail : "");
+    fflush(ordr_jass_log);
+}
+
 static void jass_ordr_log_function(cstring_t name, cstring_t via, uint32_t now) {
     if (ordr_jass_log_lines >= 20000) return;
     jass_ordr_log_open();
@@ -755,6 +772,7 @@ static void jass_setruntimeerror(jass_t *j, cstring_t message) {
     jass_t *root = jass_root(j);
     root->rterror_pending = true;
     snprintf(root->rterror_message, sizeof(root->rterror_message), "%s", message ? message : "(nil)");
+    jass_ordr_log_event(root, "RUNTIME_ERROR", root->rterror_message);
     jass_host.RuntimeError(root->rterror_message);
 }
 
@@ -771,6 +789,7 @@ static void jass_missingcall(jass_t *j, cstring_t name, bool native) {
         root->missing = item;
     }
     snprintf(message, sizeof(message), "%s: %s", native ? "unimplemented native" : "unknown function", name);
+    jass_ordr_log_event(j, native ? "MISSING_NATIVE" : "UNKNOWN_FUNCTION", name);
 #ifdef WC3_TRACE_AI
     if (native && (!strcmp(name, "AddAssault") || !strcmp(name, "SuicidePlayer") ||
                    !strcmp(name, "CommandsWaiting") || !strcmp(name, "GetLastCommand")))
