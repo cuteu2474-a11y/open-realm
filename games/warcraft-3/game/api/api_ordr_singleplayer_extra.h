@@ -397,6 +397,21 @@ uint32_t JNObjectCharacterSave(jass_t *j){
 
 /* POSIX extended regex: preserves character classes and capture groups,
  * e.g. ^[a-z0-9]+$ and [A-Za-z0-9]$, used by the ORDR login UI. */
+/* ORDR uses JNStringCount with regular-expression character classes
+ * (e.g. "[forbidden]"), not just fixed substring matching. */
+uint32_t ORDR_JNStringCount(jass_t *j) {
+    cstring_t input=jass_checkstring(j,1),pattern=jass_checkstring(j,2);
+    if(!input||!pattern||!*pattern)return jass_pushinteger(j,0);
+    regex_t re;
+    if(regcomp(&re,pattern,REG_EXTENDED)!=0)return jass_pushinteger(j,0);
+    int count=0;const char *cursor=input;regmatch_t match;
+    while(*cursor && regexec(&re,cursor,1,&match,0)==0) {
+        if(match.rm_so<0||match.rm_eo<=match.rm_so)break;
+        ++count;cursor+=match.rm_eo;
+    }
+    regfree(&re);
+    return jass_pushinteger(j,count);
+}
 uint32_t JNStringRegex(jass_t *j){
     cstring_t input=jass_checkstring(j,1),pattern=jass_checkstring(j,2);
     int index=jass_checkinteger(j,3);
