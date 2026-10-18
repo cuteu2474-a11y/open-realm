@@ -63,7 +63,7 @@ jassModule_t jass_funcs[] = {
     { "DzFrameSetAlpha", DzFrameSetAlpha },
     { "DzFrameFindByName", DzFrameFindByName },
     { "DzFrameSetFocus", DzFrameSetFocus },
-    { "JNStringCount", JNStringCount },
+    { "JNStringCount", ORDR_JNStringCount },
     { "JNStringSplit", JNStringSplit },
     { "JNStringReplace", JNStringReplace },
     { "DisplayText", DisplayText },
