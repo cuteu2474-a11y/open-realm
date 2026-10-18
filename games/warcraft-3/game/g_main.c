@@ -1178,8 +1178,14 @@ static void G_StartScripts(void) {
      */
     G_SetDestructableScriptBinding(true);
 
-    jass_callbyname(level.vm, "main", true);
-    jass_ordr_log_event(level.vm, "START_SCRIPTS", "main queued; event scheduler starting");
+    if (jass_hasfunction(level.vm, "main")) {
+        jass_callbyname(level.vm, "main", true);
+        jass_ordr_log_event(level.vm, "START_SCRIPTS", "main queued; event scheduler starting");
+    } else {
+        jass_ordr_log_event(level.vm, "START_BLOCKED",
+                            "main not registered: inspect MAP_PARSE for script parse failure");
+        fprintf(stderr, "WC3: main not registered; JASS map initialization blocked\n");
+    }
     level.scriptsStarted = true;
     jass_runevents(level.vm);
 
