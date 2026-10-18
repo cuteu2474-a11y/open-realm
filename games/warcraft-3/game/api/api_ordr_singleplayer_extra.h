@@ -41,6 +41,7 @@ static char ordr_tocs[32][260];
 /* Callable by the game UI adapter when a frame receives input. */
 void ORDR_DispatchFrameEvent(jass_t *j,int id,int event) {
     if(!j || !ordr_frame(id) || event<0 || event>=8)return;
+    ordr_frame_trace("dispatch-event",id,ordr_frame(id)->name);
     jassFunc_t const *callback=ordr_frame_extra[id].callbacks[event];
     if(!callback)return;
     ordr_last_ui_frame=id;
@@ -117,6 +118,7 @@ uint32_t DzFrameSetModel(jass_t *j) {
 }
 uint32_t DzLoadToc(jass_t *j) {
     cstring_t toc=jass_checkstring(j,1);
+    if(toc && *toc)ordr_frame_trace("load-toc",0,toc);
     if(toc && *toc && ordr_toc_count<32)
         snprintf(ordr_tocs[ordr_toc_count++],sizeof(ordr_tocs[0]),"%s",toc);
     /* TOC parsing and materializing frame templates require the renderer
@@ -128,6 +130,7 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
     jassFunc_t const *callback=jass_checkcode(j,3);
     bool sync=jass_checkboolean(j,4);
     if(ordr_frame(id) && event>=0 && event<8){
+        ordr_frame_trace("register-callback",id,ordr_frame(id)->name);
         ordr_frame_extra[id].callbacks[event]=callback;
         ordr_frame_extra[id].callback_sync[event]=(unsigned char)sync;
     }
