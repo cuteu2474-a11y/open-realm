@@ -324,4 +324,33 @@ uint32_t JNStringRegex(jass_t *j){
     memcpy(out,input+match[index].rm_so,len);out[len]=0;
     regfree(&re);uint32_t ret=jass_pushstring(j,out);free(out);return ret;
 }
+/* Three stock Warcraft III natives referenced by ORDR but previously absent
+ * from this OpenRealm native registry. */
+uint32_t SetTextTagPos(jass_t *j) {
+    texttag_t *tag=jass_checkhandle(j,1,"texttag");
+    float x=jass_checknumber(j,2),y=jass_checknumber(j,3);
+    float height=jass_checknumber(j,4);
+    if(tag && tag->inuse) {
+        tag->unit=NULL;tag->x=x;tag->y=y;
+        tag->height_offset=height;tag->has_position=true;
+        G_TextTagPresentation(tag,false);
+    }
+    return 0;
+}
+uint32_t GetAbilityEffectById(jass_t *j) {
+    uint32_t id=(uint32_t)jass_checkinteger(j,1);
+    uint32_t *type=jass_checkhandle(j,2,"effecttype");
+    int32_t index=jass_checkinteger(j,3);
+    if(!type || index<0)return jass_pushstring(j,"");
+    return jass_pushstring(j,G_AbilityEffectArt(id,(wc3EffectType_t)*type,(uint32_t)index));
+}
+uint32_t DecUnitAbilityLevel(jass_t *j) {
+    edict_t *unit=jass_checkhandle(j,1,"unit");
+    uint32_t ability=(uint32_t)jass_checkinteger(j,2);
+    if(!unit)return jass_pushinteger(j,0);
+    uint32_t current=G_UnitAbilityLevel(unit,ability);
+    if(current<=1)return jass_pushinteger(j,0);
+    return jass_pushinteger(j,(int32_t)G_UnitSetAbilityLevel(unit,ability,(int32_t)current-1));
+}
+
 #endif
