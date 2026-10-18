@@ -1179,6 +1179,7 @@ static void G_StartScripts(void) {
     G_SetDestructableScriptBinding(true);
 
     jass_callbyname(level.vm, "main", true);
+    jass_ordr_log_event(level.vm, "START_SCRIPTS", "main queued; event scheduler starting");
     level.scriptsStarted = true;
     jass_runevents(level.vm);
 
@@ -1325,6 +1326,7 @@ static void G_ORDRShowFlowStatus(void) {
              (unsigned)((mask & (1u << 6)) != 0),
              (unsigned)((mask & (1u << 7)) != 0),
              (unsigned)globals.num_edicts);
+    jass_ordr_log_event(level.vm, "STATE", message);
     FOR_LOOP(i, game.max_clients) {
         gameClient_t *client = &game.clients[i];
         edict_t *ent;
