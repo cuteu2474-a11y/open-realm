@@ -1306,6 +1306,35 @@ void G_RequestCampaignSelect(void) {
     level.campaign_select_on_end = true;
 }
 
+/* Temporary, map-specific iPad diagnosis. The VM's ORDR milestone mask
+ * separates missing script/timer execution from missing world rendering.
+ * Surface it in the running game because iPad app logs may omit stderr. */
+static void G_ORDRShowFlowStatus(void) {
+    uint32_t mask;
+    char message[224];
+    if (!level.vm || level.framenum % (5000 / FRAMETIME) != 0 ||
+        !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN")) return;
+    mask = jass_ordr_flow_mask(level.vm);
+    snprintf(message, sizeof(message),
+             "ORDR DEBUG: main=%u init=%u timerReg=%u timerFire=%u choice=%u worldEnt=%u",
+             (unsigned)((mask & (1u << 0)) != 0),
+             (unsigned)((mask & (1u << 3)) != 0),
+             (unsigned)((mask & (1u << 5)) != 0),
+             (unsigned)((mask & (1u << 6)) != 0),
+             (unsigned)((mask & (1u << 7)) != 0),
+             (unsigned)globals.num_edicts);
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        edict_t *ent;
+        if (!client->connected) continue;
+        ent = G_GetPlayerEntityByNumber(client->ps.number);
+        if (ent && ent->client)
+            UI_ShowTransientText(ent, &MAKE(vec2_t, 0.03f, 0.12f), message, 4.7f);
+    }
+}
+
 /* One complete server-frame simulation step.
  * Skipped until the first map has been started; on the very first frame after
  * a map loads, the JASS "main" function is invoked to run map initialization
@@ -1325,6 +1354,7 @@ static void G_RunFrame(void) {
     G_RunTimers();
     G_RunEvents();
     jass_runevents(level.vm);
+    G_ORDRShowFlowStatus();
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 
