@@ -38,18 +38,19 @@ static char ordr_tocs[32][260];
 
 /* The entry points are deliberately usable from a future game/client UI
  * adapter. Merely registering callbacks does not synthesize player input. */
-static void ordr_frame_notify(jass_t *j,int id,int event) {
-    ordr_frame_extra_t *e;
-    jassFunc_t const *callback;
-    if(!ordr_frame(id) || event<0 || event>=8) return;
-    e=&ordr_frame_extra[id];
-    callback=e->callbacks[event];
-    if (!callback) return;
-    /* Persist event data while the callback runs. The JASS VM callback
-     * execution adapter must invoke callback in its coroutine context. */
+/* Callable by the game UI adapter when a frame receives input. */
+void ORDR_DispatchFrameEvent(jass_t *j,int id,int event) {
+    if(!j || !ordr_frame(id) || event<0 || event>=8)return;
+    jassFunc_t const *callback=ordr_frame_extra[id].callbacks[event];
+    if(!callback)return;
     ordr_last_ui_frame=id;
     ordr_last_ui_player=currentplayer;
-    (void)j;(void)callback;
+    jassContext_t context={0};
+    context.func=callback;
+    context.playerState=currentplayer;
+    context.localPlayerState=currentplayer;
+    jasscoroutine_t *co=jass_startcoroutine(j,&context);
+    if(co)jass_resume(jass_getroot(j),co);
 }
 
 uint32_t DzFrameSetPoint(jass_t *j) {
@@ -210,6 +211,26 @@ uint32_t DzTriggerRegisterKeyEventByCode(jass_t *j){
         *e=(ordr_key_binding_t){t,callback,key,status,sync};
     }
     return 0;
+}
+
+/* The platform input path can forward physical and touch-mapped key actions
+ * here. This entry point does not invent events without actual player input. */
+void ORDR_DispatchKeyEvent(jass_t *j,int key,int status) {
+    if(!j)return;
+    ordr_last_key_player=currentplayer;
+    for(int i=0;i<ordr_key_binding_count;i++){
+        ordr_key_binding_t *e=&ordr_key_bindings[i];
+        if(e->key!=key||e->status!=status)continue;
+        if(e->trigger&&!e->trigger->disabled)jass_executetrigger(j,e->trigger,NULL);
+        if(e->callback){
+            jassContext_t ctx={0};
+            ctx.func=e->callback;
+            ctx.playerState=currentplayer;
+            ctx.localPlayerState=currentplayer;
+            jasscoroutine_t *co=jass_startcoroutine(j,&ctx);
+            if(co)jass_resume(jass_getroot(j),co);
+        }
+    }
 }
 uint32_t DzGetTriggerKeyPlayer(jass_t *j){
     return jass_pushlighthandle(j,ordr_last_key_player?ordr_last_key_player:currentplayer,"player");
