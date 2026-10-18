@@ -953,8 +953,25 @@ void G_SpawnEntities(void) {
 //    jass_dofilenative(level.vm, "/Users/igor/Desktop/war3map.j");
     G_DumpPrologue02BurrowHandoffSource(level.mapinfo->mapscript);
     if (level.mapinfo->mapscript) {
+        bool parsed;
+        char detail[256];
+        size_t const bytes = strlen(level.mapinfo->mapscript);
+        bool const ordr = strstr(level.mapinfo->mapscript, "function CUO") &&
+                          strstr(level.mapinfo->mapscript, "function CUW");
         G_FixOrc07BridgeRestoreScript(level.mapinfo->mapscript);
-        jass_dobuffer(level.vm, level.mapinfo->mapscript);
+        parsed = jass_dobuffer(level.vm, level.mapinfo->mapscript);
+        snprintf(detail, sizeof(detail),
+                 "script_bytes=%u parse_ok=%u config=%u main=%u CUO=%u CUW=%u error=%.80s",
+                 (unsigned)bytes, (unsigned)parsed,
+                 (unsigned)jass_hasfunction(level.vm, "config"),
+                 (unsigned)jass_hasfunction(level.vm, "main"),
+                 (unsigned)jass_hasfunction(level.vm, "CUO"),
+                 (unsigned)jass_hasfunction(level.vm, "CUW"),
+                 jass_rterror_pending(level.vm) ? jass_rterror_message(level.vm) : "none");
+        if (ordr) {
+            fprintf(stderr, "ORDR-PARSE: %s\n", detail);
+            jass_ordr_log_event(level.vm, "MAP_PARSE", detail);
+        }
     } else
         fprintf(stderr, "G_SpawnEntities: missing mapscript; skipping jass_dobuffer\n");
     gi.LoadingFrame();
