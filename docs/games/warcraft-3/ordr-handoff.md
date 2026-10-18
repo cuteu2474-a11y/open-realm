@@ -1,6 +1,6 @@
 # 원랜디 iPad 포팅 인수인계
 
-갱신: **2026-10-18**. 목표는 사용자 소유 **ORDR S2 2.323[C]의 오프라인 단일 플레이**다.
+갱신: **2026-10-19**. 목표는 사용자 소유 **ORDR S2 2.323[C]의 오프라인 단일 플레이**다.
 현재는 초기화와 일부 런타임을 검증한 단계이며 iPad 플레이 완료 상태가 아니다.
 
 ## 이어받을 위치
@@ -35,7 +35,7 @@ git status --short
 | 이번 FDF 수정 | 파싱 실패를 성공 캐시에 넣던 결함 수정. 실패 경로를 DzLoadToc 진단에 기록 |
 | 이번 FDF 속성 | LayerStyle 클릭 통과, SpriteScale 구문·기본값·로컬 메뉴/MDX 크기 적용. 실제 ORDR FDF 5개 템플릿 검증 |
 
-네트워크 패킷은 변경하지 않았다. 저장 형식 90은 이전 저장을 거부하며 마이그레이션하지 않는다.
+네트워크 패킷은 변경하지 않았다. 저장 형식 91은 이전 저장을 거부하며 마이그레이션하지 않는다.
 [저장 계약](save-load.md), [이벤트 구조](trigger-events.md), [기기 진단](ipad-custom-map-diagnostics.md)을 참고한다.
 
 ## 검증 증거
@@ -168,6 +168,35 @@ War3.mpq SHA-256: `b08095c003f657fdc3d82a2f5c1cd1abc8fd4a7c27d428a225a48489012f0
 Drive 커넥터의 256 MiB 제한은 `include_base64=false`로도 해결되지 않았다.
 War3.mpq는 사용자 Drive 웹 다운로드로 해결했다. 완료 이벤트만 믿지 말고
 실제 파일 존재·크기·MPQ 읽기를 확인한다. 임시 경로에 의존하지 말고 이름과 해시로 복구한다.
+
+## 2026-10-19 저장·복원 후속 수정
+
+출발 커밋은 `ee07e70c`다. `g_save.c`의 명시적 `level_fields` 목록에 ORDR 프레임과
+동기화 등록이 빠져 있었다. 새 VM을 만들고 두 레지스트리를 비운 뒤 기존 저장을 읽으면
+`ReadGame`은 성공하지만 UI 이름·텍스트·콜백과 동기화 등록을 복구하지 못했다.
+수정 전 재현은 8개 assertions 중 5개 실패, 수정 후 같은 재현은 8/8 통과했다.
+
+현재 저장 형식은 **91**이다. 프레임 속성은 값으로, 콜백은 `F_FUNCTION` 함수 이름으로,
+동기화 대상은 `F_TRIGGER` 슬롯으로 복원한다. 각 레지스트리와 콜백 개수는 기존 counted
+schema로 한도를 검사한다. 네트워크 형식과 JASS snapshot 버전은 바꾸지 않았다.
+구 버전 저장은 거부하며 변환하지 않는다. 원랜디 온라인 계정 저장 기능과는 별개다.
+
+재현 및 회귀 이름:
+- `wc3_api.ordr_frame_and_sync_registries_survive_reload`
+- `wc3_api.ordr_frame_attributes_and_empty_registries_roundtrip`
+- `wc3_api.ordr_invalid_registry_counts_do_not_replace_valid_save`
+
+첫 검사는 VM을 다시 파싱하고 저장 파일을 읽은 뒤 `DzSyncData`를 호출해
+실제 `globals.RunFrame()`으로 콜백 1회 실행을 확인한다. 나머지는 속성 보존,
+null 콜백, 빈 등록 복구, 잘못된 개수·trigger 포인터 거부와 이전 저장 보존을 확인한다.
+검증: `make -j4 test TEST_JOBS=4` 완료, JUnit 32개 보고서 **6,744 tests / 0 failures / 0 errors**
+(ROC/TFT 엔진 포함). `make -j4 openwarcraft3`, `menu_boundary_audit.py`, `git diff --check`도 통과했다.
+상용 맵 재실행과 iPad 빌드는 이번 로컬 검사에 포함하지 않았다.
+이 수정은 **동적 UI 표시·터치 연결을 구현한 것이 아니다**. 다음 순서는 그대로다.
+
+새 작업 환경에 SDL/GL 개발 패키지가 없으면 기본 빌드부터 실패한다.
+이번에는 APT 캐시를 쓰기 가능한 별도 디렉터리로 지정해 개발 패키지 설치를 완료했다.
+저장소 테스트 데이터는 `make test-assets`로 생성하며 상용 파일 없이 회귀를 실행했다.
 
 ## 다음 순서
 

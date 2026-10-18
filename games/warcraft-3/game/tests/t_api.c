@@ -9775,4 +9775,118 @@ TEST(wc3_api, ordr_large_private_world_accepts_selection_coordinates) {
 }
 
 
-#endif /* BZ_TESTS */
+/* Recreate the VM before loading: a same-process read can hide missing registry persistence. */
+TEST(wc3_api, ordr_frame_and_sync_registries_survive_reload) {
+    cstring_t filename = Test_TempPath("ordr-ui-sync.sav");
+    cstring_t source =
+        "native DzCreateFrameByTagName takes string kind, string name, integer parent, string template, integer context returns integer\n"
+        "native DzFrameFindByName takes string name, integer context returns integer\n"
+        "native DzFrameSetText takes integer frame, string text returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer eventId, code action, boolean sync returns nothing\n"
+        "native DzTriggerRegisterSyncData takes trigger t, string prefix, boolean server returns nothing\n"
+        "native DzSyncData takes string prefix, string data returns nothing\n"
+        "native DzGetTriggerSyncData takes nothing returns string\n"
+        "globals\n integer frame = 0\n integer received = 0\nendglobals\n"
+        "function callback takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerSyncData() == \"after-load\", \"payload changed\")\n"
+        " set received = received + 1\nendfunction\n"
+        "function send takes nothing returns nothing\n"
+        " call BJassAssert(DzFrameFindByName(\"SavedFrame\", 37) == frame, \"frame identity lost\")\n"
+        " call BJassAssert(DzFrameGetText(frame) == \"saved text\", \"frame text lost\")\n"
+        " call DzSyncData(\"saved-channel\", \"after-load\")\nendfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(received == 1, \"saved sync registration did not execute\")\nendfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local trigger t = CreateTrigger()\n"
+        " set frame = DzCreateFrameByTagName(\"TEXT\", \"SavedFrame\", 1, \"\", 37)\n"
+        " call DzFrameSetText(frame, \"saved text\")\n"
+        " call DzFrameSetScriptByCode(frame, 1, function callback, false)\n"
+        " call TriggerAddAction(t, function callback)\n"
+        " call DzTriggerRegisterSyncData(t, \"saved-channel\", false)\nendfunction\n";
+    setup_test_world();
+    T_ASSERT(run_test_jass(source));
+    T_ASSERT(WriteGame(filename));
+    jass_close(level.vm);
+    level.vm = jass_newstate();
+    jass_dofile(level.vm, "Scripts\\common.j");
+    jass_dofile(level.vm, "Scripts\\Blizzard.j");
+    char *buffer = strdup(source);
+    jass_dobuffer(level.vm, buffer);
+    free(buffer);
+    /* Clear only ORDR registries to model a load before UI startup reconstructs them. */
+    memset(level.ordr_frames, 0, sizeof(level.ordr_frames));
+    memset(level.ordr_sync_registrations, 0, sizeof(level.ordr_sync_registrations));
+    level.ordr_num_frames = level.ordr_num_sync_registrations = 0;
+    T_ASSERT(ReadGame(filename));
+    T_EQ(level.ordr_num_frames, (uint32_t)1);
+    T_EQ(level.ordr_num_sync_registrations, (uint32_t)1);
+    T_EQ(level.ordr_frames[0].callback_count, (uint32_t)1);
+    T_ASSERT(level.ordr_frames[0].callbacks[0].func == jass_functionbyname(level.vm, "callback"));
+    jass_callbyname(level.vm, "send", false);
+    level.started = level.scriptsStarted = true;
+    globals.RunFrame();
+    globals.RunFrame();
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    remove(filename);
+}
+
+TEST(wc3_api, ordr_frame_attributes_and_empty_registries_roundtrip) {
+    cstring_t filename = Test_TempPath("ordr-attributes.sav");
+    ordrFrame_t expected = {0};
+    setup_test_world();
+    T_ASSERT(run_test_jass("function main takes nothing returns nothing\nendfunction\n"));
+    expected.handle_id = 2; expected.parent = 1; expected.create_context = 42;
+    expected.relative_point = 8; expected.relative_frame = 1; expected.anchor = 4;
+    expected.x = .13f; expected.y = -.07f; expected.width = .31f; expected.height = .17f;
+    expected.font_height = .012f; expected.alpha = 127; expected.priority = 3;
+    expected.text_alignment = 5; expected.font_flags = 2;
+    expected.visible = true; expected.enabled = false; expected.focused = true; expected.absolute = true;
+    strcpy(expected.type, "TEXT"); strcpy(expected.name, "Attributes");
+    strcpy(expected.template_name, "Template"); strcpy(expected.text, "복구 테스트");
+    strcpy(expected.texture, "TestUI\\Backdrop.blp"); strcpy(expected.font, "Fonts\\FRIZQT__.TTF");
+    strcpy(expected.model, "TestUI\\Sprite.mdx");
+    expected.callback_count = 1;
+    expected.callbacks[0].event_id = 2; expected.callbacks[0].sync = true; /* unbound callback */
+    level.ordr_num_frames = 1;
+    level.ordr_frames[0] = expected;
+    T_ASSERT(WriteGame(filename));
+    memset(level.ordr_frames, 0, sizeof(level.ordr_frames));
+    level.ordr_num_frames = 0;
+    T_ASSERT(ReadGame(filename));
+    T_EQ(level.ordr_num_frames, (uint32_t)1);
+    T_ASSERT(!memcmp(&expected, &level.ordr_frames[0], sizeof(expected)));
+    /* Loading an empty registry must discard frames created after the save. */
+    level.ordr_num_frames = 0;
+    T_ASSERT(WriteGame(filename));
+    level.ordr_num_frames = level.ordr_num_sync_registrations = 1;
+    T_ASSERT(ReadGame(filename));
+    T_EQ(level.ordr_num_frames, (uint32_t)0);
+    T_EQ(level.ordr_num_sync_registrations, (uint32_t)0);
+    remove(filename);
+}
+
+TEST(wc3_api, ordr_invalid_registry_counts_do_not_replace_valid_save) {
+    cstring_t filename = Test_TempPath("ordr-counts.sav");
+    setup_test_world();
+    T_ASSERT(run_test_jass("function main takes nothing returns nothing\nendfunction\n"));
+    T_ASSERT(WriteGame(filename));
+    level.ordr_num_frames = MAX_ORDR_FRAMES + 1;
+    T_ASSERT(!WriteGame(filename));
+    level.ordr_num_frames = 1;
+    level.ordr_frames[0].callback_count = MAX_ORDR_FRAME_SCRIPT_EVENTS + 1;
+    T_ASSERT(!WriteGame(filename));
+    level.ordr_num_frames = 0;
+    level.ordr_num_sync_registrations = MAX_ORDR_SYNC_REGISTRATIONS + 1;
+    T_ASSERT(!WriteGame(filename));
+    level.ordr_num_sync_registrations = 1;
+    level.ordr_sync_registrations[0].trigger = (trigger_t *)(uintptr_t)1;
+    T_ASSERT(!WriteGame(filename));
+    level.ordr_num_sync_registrations = 0;
+    T_ASSERT(ReadGame(filename));
+    T_EQ(level.ordr_num_frames, (uint32_t)0);
+    T_EQ(level.ordr_num_sync_registrations, (uint32_t)0);
+    remove(filename);
+}
+#endif

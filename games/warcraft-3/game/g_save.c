@@ -118,7 +118,8 @@ static uint32_t const save_commit = MAKEFOURCC('W', '3', 'O', 'K');
 /* Version 88 stores a single creep guard lifecycle phase. */
 /* Version 89 retains entity identity for ability-owned point-spell approaches. */
 /* Version 90 expands event registrations to 2048 and rebalances region-event token bits. */
-static uint32_t const save_version = 90;
+/* Version 91 persists ORDR logical frames, callbacks and offline sync registrations. */
+static uint32_t const save_version = 91;
 #define SAVE_STREAM_BUFFER (1u << 20) // bytes; save files are several MB of field writes, so a large stdio buffer avoids per-4 KB syscalls
 #define MAX_SAVE_STRING (1u << 20) // bytes; bounds quest-string allocations from corrupt saves
 #define MAX_SAVE_GROUP_HANDLES 65536u // corrupt-save bound only; runtime group registry itself grows dynamically
@@ -516,6 +517,53 @@ static fieldRing_t const game_event_ring = {
     FOFS(level_locals, events.write) - (handle_t)NULL
 };
 
+/* ORDR stores map-local IDs by value, JASS code by name and triggers by registry index. */
+static field_t const ordr_frame_event_fields[] = {
+    TF(ordrFrameEvent_t, event_id, F_INT),
+    TF(ordrFrameEvent_t, func, F_FUNCTION),
+    TF(ordrFrameEvent_t, sync, F_INT),
+    { NULL, 0, 0, 0, 0, 0 }
+};
+
+static field_t const ordr_frame_fields[] = {
+    TF(ordrFrame_t, handle_id, F_INT),
+    TF(ordrFrame_t, parent, F_INT),
+    TF(ordrFrame_t, create_context, F_INT),
+    TF(ordrFrame_t, relative_point, F_INT),
+    TF(ordrFrame_t, relative_frame, F_INT),
+    TF(ordrFrame_t, anchor, F_INT),
+    TF(ordrFrame_t, x, F_FLOAT),
+    TF(ordrFrame_t, y, F_FLOAT),
+    TF(ordrFrame_t, width, F_FLOAT),
+    TF(ordrFrame_t, height, F_FLOAT),
+    TF(ordrFrame_t, font_height, F_FLOAT),
+    TF(ordrFrame_t, alpha, F_INT),
+    TF(ordrFrame_t, priority, F_INT),
+    TF(ordrFrame_t, text_alignment, F_INT),
+    TF(ordrFrame_t, font_flags, F_INT),
+    TF(ordrFrame_t, visible, F_INT),
+    TF(ordrFrame_t, enabled, F_INT),
+    TF(ordrFrame_t, focused, F_INT),
+    TF(ordrFrame_t, absolute, F_INT),
+    TF(ordrFrame_t, type, F_INT),
+    TF(ordrFrame_t, name, F_INT),
+    TF(ordrFrame_t, template_name, F_INT),
+    TF(ordrFrame_t, text, F_INT),
+    TF(ordrFrame_t, texture, F_INT),
+    TF(ordrFrame_t, font, F_INT),
+    TF(ordrFrame_t, model, F_INT),
+    { "callbacks", offsetof(ordrFrame_t, callbacks), F_STRUCT, sizeof(((ordrFrame_t *)0)->callbacks),
+      MAX_ORDR_FRAME_SCRIPT_EVENTS, (uintptr_t)ordr_frame_event_fields, offsetof(ordrFrame_t, callback_count) },
+    { NULL, 0, 0, 0, 0, 0 }
+};
+
+static field_t const ordr_sync_fields[] = {
+    TF(ordrSyncRegistration_t, trigger, F_TRIGGER, 0, FIELD_NONE),
+    TF(ordrSyncRegistration_t, prefix, F_INT),
+    TF(ordrSyncRegistration_t, server, F_INT),
+    { NULL, 0, 0, 0, 0, 0 }
+};
+
 static field_t const level_fields[] = {
     F(level_locals, framenum, F_INT),
     F(level_locals, time, F_INT),
@@ -556,6 +604,8 @@ static field_t const level_fields[] = {
     F(level_locals, quests, F_STRUCT, MAX_QUESTS, quest_fields),
     FC(level_locals, triggers, F_STRUCT, MAX_TRIGGERS, trigger_fields, num_triggers),
     FC(level_locals, timers, F_STRUCT, MAX_TIMERS, timer_fields, num_timers),
+    FC(level_locals, ordr_frames, F_STRUCT, MAX_ORDR_FRAMES, ordr_frame_fields, ordr_num_frames),
+    FC(level_locals, ordr_sync_registrations, F_STRUCT, MAX_ORDR_SYNC_REGISTRATIONS, ordr_sync_fields, ordr_num_sync_registrations),
     F(level_locals, timer_dialogs, F_STRUCT, MAX_TIMERDIALOGS, timer_dialog_fields),
     F(level_locals, dialog_count, F_INT),
     F(level_locals, dialog_button_count, F_INT),

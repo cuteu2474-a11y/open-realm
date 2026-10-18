@@ -6,7 +6,7 @@ The WC3 game module owns save/load. `GetGameAPI()` exposes `SaveGame` and `LoadG
 
 `WriteGame()` writes the current game state to a versioned binary file. The file contains:
 
-- `W3SV` magic, format version 90, canonical map path, the current `sizeof(edict_t)`, entity count, client count, script identity, and native-handle registry counts;
+- `W3SV` magic, format version 91, canonical map path, the current `sizeof(edict_t)`, entity count, client count, script identity, and native-handle registry counts;
 - level frame/time, authoritative Warcraft time-of-day state, map-global camera bounds, and started/script-started flags;
 - each client `GAMECLIENT` state, including its `PLAYER` state, JASS settings and dynamically sized `SetPlayerAbilityAvailable` rawcode list, runtime removed/result-presentation state, researched tech, text storage, camera values, messages, and HUD caches;
 - each camera target as an entity index;
@@ -18,7 +18,7 @@ The WC3 game module owns save/load. `GetGameAPI()` exposes `SaveGame` and `LoadG
 - group membership, trigger enabled state, timer state, weather-effect registry state, unread gameplay events, and a semantic JASS VM snapshot;
 - a `W3OK` commit footer and a checksum over the complete preceding payload. Since version 74 the checksum folds native 64-bit words into four FNV-style lanes. The previous byte-wise FNV-1a dominated save/load time at about 6 MB per file.
 
-`WriteGame()` removes the destination when any record or footer write fails. `ReadGame()` validates the commit footer, checksum, format, script identity, and quest/group/trigger/timer/event registry counts before mutating clients or entities. A truncated or rejected partial write therefore cannot become a loadable artifact or clear the live world. A header mismatch names the failing field and prints saved versus live counts; do not treat a generic `header mismatch` line as complete.
+`WriteGame()` writes to a temporary file and atomically replaces the destination only after the complete save succeeds. A rejected write removes the temporary file and preserves the previous destination. `ReadGame()` validates the commit footer, checksum, format, script identity, and quest/group/trigger/timer/event registry counts before mutating clients or entities. A truncated or rejected partial write therefore cannot become a loadable artifact or clear the live world. A header mismatch names the failing field and prints saved versus live counts; do not treat a generic `header mismatch` line as complete.
 Quest objects and items are restored in place so the running JASS VM's light handles keep their object identity. Events use `MAX_EVENTS` fixed slots, quests use `MAX_QUESTS` slots, and each quest owns `MAX_QUESTITEMS` item slots; `inuse` marks lifecycle state without moving live pointers during removal. Event references use physical slot IDs, so retired region-event slots may leave holes; the loader checks that a referenced slot is in use instead of assuming active slots form a dense prefix. Map startup can recreate a region registration that the saved state had removed, and the saved event table restores that removal. Quest state is restored from its fixed slots even when the pre-load active quest count differs. Loading completely reloads the saved map first, then applies state.
 
 The versioned layout retains the authoritative `level.timeofday` record and game-state event condition fields (`state`, `limitop`, `limitval`) and the client removal/pending-result fields used by victory/defeat presentation. Quest and event records are written by the recursive field schema. Counted descriptors write the count followed by the array prefix. Since version 13 the dynamic JASS group registry is written immediately after the level-field stream: every handle ordinal through `level.num_groups` writes `ggroup_t.inuse`, `num_units`, and that many `F_EDICT` indexes. Inactive holes remain serialized so higher live handle ordinals do not shift. Version 14 adds `GAMEEVENT.value`, the scalar callback payload used by research events, and pairs it with JASS snapshot format 3 so a sleeping callback preserves `JASSCONTEXT.eventValue` across save/load. Version 17 adds `GAMEEVENT.point` / `has_point` and pairs it with JASS snapshot format 4 so point-target spell response context survives unread event queues and yielded trigger coroutines. Version 60 appends a disabled-ability count and that many rawcodes after each client record and camera-target index. The list stores `SetPlayerAbilityAvailable(..., false)` state; capacity and pointer remain runtime allocations. The version-59 layout cannot be read by version 60 because its client-record boundary has no list count; version 60 saves are likewise rejected by older exact-version readers.
@@ -26,6 +26,19 @@ The versioned layout retains the authoritative `level.timeofday` record and game
 ### Save compatibility policy
 
 Save compatibility is deliberately unsupported. Load only the current format version and serialized layout, and reject older or otherwise mismatched saves with a diagnostic. Bump the format version when the serialized layout, callback identity, or meaning changes, including changes that leave `sizeof(edict_t)` unchanged. Do not retain legacy layouts, migration defaults, compatibility aliases, or optional extension records.
+
+Version 91 persists the ORDR logical frame and offline sync registries in `level_fields`.
+Frame handles, parent/anchor IDs, text, media paths, layout and interaction flags are values;
+callback code uses `F_FUNCTION` name lookup in the new VM, and sync triggers use `F_TRIGGER`
+registry indexes. Counted schemas bound frames, callbacks and registrations before traversal.
+An empty saved registry restores a zero count, hiding any later live entries. No native process
+pointers are written. These are logical objects; this does not add dynamic HUD rendering or touch.
+The regression reloads a freshly parsed VM, restores frame lookup/text/callback identity, then
+sends `DzSyncData` and advances `globals.RunFrame()` to check the restored action executes once.
+Other tests cover non-default frame attributes, unbound callbacks, empty registries, oversized
+counts, invalid trigger pointers and preservation of the previous file after a rejected save.
+Network packets and the JASS snapshot version are unchanged; version-90 saves are rejected.
+See [ORDR handoff](ordr-handoff.md).
 
 Version 90 expands the event registry from 1024 to 2048 slots and rebalances
 region-event token bits. Older saves are rejected. The ORDR mixed-event test

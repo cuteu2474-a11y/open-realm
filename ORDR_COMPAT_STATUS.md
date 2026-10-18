@@ -9,7 +9,7 @@ This is not yet a verified playable iPad release.
 - Prior work from `8b14d6d6` is retained: parser/native fixes, offline sync,
   logical DzFrame state, chat routing, timer safety and iPad diagnostics.
 - Event capacity is now 2048. The private map needs 1054 registrations during
-  startup and reaches 1066 after early timers. Save format is now 90.
+  startup and reaches 1066 after early timers. Save format is now 91 (including logical DzFrame and offline sync registry persistence).
 - High-slot events survive save/load and run through the actual scheduler;
   both ROC and TFT regression suites cover this.
 - Failed FDF parses return failure, stay out of the successful-load cache,
