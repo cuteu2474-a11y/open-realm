@@ -272,6 +272,70 @@ static ordr_profile_field_t *ordr_get_field(ordr_profile_t *p,const char *field,
     memset(f,0,sizeof(*f));snprintf(f->field,sizeof(f->field),"%s",field);
     return f;
 }
+
+/* The engine chooses a private writable save path appropriate for iOS,
+ * Windows and Linux. No login password or secret is written to disk. */
+static uint64_t ordr_profile_hash(const char *value,uint64_t hash){
+    if(!value)value="";
+    for(const unsigned char *p=(const unsigned char*)value;*p;p++){
+        hash^=(uint64_t)*p;hash*=UINT64_C(1099511628211);
+    }
+    hash^=255;hash*=UINT64_C(1099511628211);
+    return hash;
+}
+static bool ordr_profile_disk_path(ordr_profile_t const *p,char *out,size_t size,bool write){
+    uint64_t h=UINT64_C(14695981039346656037);
+    h=ordr_profile_hash(p->map,h);
+    h=ordr_profile_hash(p->user,h);
+    h=ordr_profile_hash(p->character,h);
+    char name[64];
+    snprintf(name,sizeof(name),"ordr-local-%016llx.dat",(unsigned long long)h);
+    if(write)return gi.ScriptCachePath && gi.ScriptCachePath(name,out,(uint32_t)size);
+    return gi.ScriptCacheReadPath && gi.ScriptCacheReadPath(name,out,(uint32_t)size);
+}
+static bool ordr_profile_disk_load(ordr_profile_t *p){
+    char path[MAX_PATHLEN],magic[8];
+    unsigned int count=0;
+    if(!ordr_profile_disk_path(p,path,sizeof(path),false))return false;
+    FILE *file=fopen(path,"rb");
+    if(!file)return false;
+    bool ok=fread(magic,1,sizeof(magic),file)==sizeof(magic) &&
+        memcmp(magic,"ORDRSP01",sizeof(magic))==0 &&
+        fread(&count,sizeof(count),1,file)==1 && count<=256;
+    if(ok){
+        memset(p->fields,0,sizeof(p->fields));
+        p->count=0;
+        for(unsigned int i=0;i<count;i++){
+            ordr_profile_field_t field;
+            if(fread(&field,sizeof(field),1,file)!=1 ||
+               !memchr(field.field,0,sizeof(field.field)) ||
+               !memchr(field.value,0,sizeof(field.value))){
+                ok=false;break;
+            }
+            p->fields[p->count++]=field;
+        }
+    }
+    if(!ok){p->count=0;memset(p->fields,0,sizeof(p->fields));}
+    fclose(file);
+    return ok;
+}
+static bool ordr_profile_disk_save(ordr_profile_t const *p){
+    char path[MAX_PATHLEN],tmp[MAX_PATHLEN];
+    if(!ordr_profile_disk_path(p,path,sizeof(path),true))return false;
+    if(snprintf(tmp,sizeof(tmp),"%s.tmp",path)>=(int)sizeof(tmp))return false;
+    FILE *f=fopen(tmp,"wb");if(!f)return false;
+    const char magic[8]={'O','R','D','R','S','P','0','1'};
+    unsigned int n=(unsigned int)p->count;
+    bool ok=fwrite(magic,1,sizeof(magic),f)==sizeof(magic) &&
+        fwrite(&n,sizeof(n),1,f)==1;
+    for(unsigned int i=0;ok&&i<n;i++)
+        ok=fwrite(&p->fields[i],sizeof(p->fields[i]),1,f)==1;
+    if(fflush(f)!=0)ok=false;
+    if(fclose(f)!=0)ok=false;
+    if(!ok){remove(tmp);return false;}
+    if(rename(tmp,path)!=0){remove(tmp);return false;}
+    return true;
+}
 uint32_t JNUse(jass_t *j){
     /* JN server services unavailable in local mode. The character object
      * functions still work through the in-memory profile backend. */
@@ -291,6 +355,10 @@ uint32_t JNObjectCharacterInit(jass_t *j){
     if(!ordr_current_profile)return jass_pushinteger(j,-1);
     snprintf(ordr_current_profile->map,sizeof(ordr_current_profile->map),"%s",map?map:"");
     snprintf(ordr_current_profile->character,sizeof(ordr_current_profile->character),"%s",character?character:"");
+    /* A fresh identity starts with its saved data, or an empty local profile. */
+    ordr_current_profile->count=0;
+    memset(ordr_current_profile->fields,0,sizeof(ordr_current_profile->fields));
+    (void)ordr_profile_disk_load(ordr_current_profile);
     return jass_pushinteger(j,0);
 }
 uint32_t JNObjectCharacterSetString(jass_t *j){
@@ -321,10 +389,10 @@ uint32_t JNObjectCharacterSave(jass_t *j){
     cstring_t user=jass_checkstring(j,2);
     (void)jass_checkstring(j,3);
     (void)jass_checkstring(j,4);
-    /* A successful save here means in-memory state has been updated.
-     * Disk persistence must be provided by the platform save adapter. */
-    return jass_pushstring(j,ordr_get_profile(user,0)?
-       "저장이 성공적으로 되었습니다.":"저장 실패 : 사용자 정보 없음");
+    ordr_profile_t *profile=ordr_get_profile(user,0);
+    if(!profile)return jass_pushstring(j,"저장 실패 : 사용자 정보 없음");
+    return jass_pushstring(j,ordr_profile_disk_save(profile)?
+        "저장이 성공적으로 되었습니다.":"저장 실패 : 로컬 파일 쓰기 실패");
 }
 
 /* POSIX extended regex: preserves character classes and capture groups,
