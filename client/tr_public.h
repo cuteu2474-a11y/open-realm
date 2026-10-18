@@ -255,6 +255,7 @@ typedef struct {
     model_t const *model;
     cstring_t anim;
     float x, y;
+    float scale; /* Uniform model scale; zero keeps the default size (1). */
     texture_t const *skin; /* Optional model replacement texture. */
     uint32_t skin_slot;
     uint32_t start_time; /* Animation epoch; zero keeps the shared scene clock. */

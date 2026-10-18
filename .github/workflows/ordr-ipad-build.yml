@@ -5,6 +5,8 @@ on:
     paths:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
+      - 'client/tr_public.h'
+      - 'tests/test_mdx_ui.c'
       - '.github/workflows/ordr-ipad-build.yml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,6 +51,10 @@ jobs:
         run: |
           timeout 180 build/bin/openwarcraft3-tests \
             -data build/tests +dedicated 1 +test 'wc3_api.ordr_*'
+          timeout 180 build/bin/openwarcraft3-tests \
+            -tft -data build/tests +dedicated 1 +test 'wc3_api.ordr_*'
+      - name: Verify FDF parsing, input and sprite rendering
+        run: make -j2 test-menu test-mdx-ui
       - name: Upload self-contained Linux headless runtime for private-map tests
         uses: actions/upload-artifact@v4
         with:

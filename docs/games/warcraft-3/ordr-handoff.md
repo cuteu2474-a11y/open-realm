@@ -33,6 +33,7 @@ git status --short
 | 초기화 진단 | 잘못된 trigger/timer 핸들 방어, 큰 테스트 월드, iPad 첫 120프레임 진단 구현 |
 | 이번 이벤트 수정 | 1024 → 2048 슬롯. region-event 토큰 비트 조정. 저장 형식 89 → 90 |
 | 이번 FDF 수정 | 파싱 실패를 성공 캐시에 넣던 결함 수정. 실패 경로를 DzLoadToc 진단에 기록 |
+| 이번 FDF 속성 | LayerStyle 클릭 통과, SpriteScale 구문·기본값·로컬 메뉴/MDX 크기 적용. 실제 ORDR FDF 5개 템플릿 검증 |
 
 네트워크 패킷은 변경하지 않았다. 저장 형식 90은 이전 저장을 거부하며 마이그레이션하지 않는다.
 [저장 계약](save-load.md), [이벤트 구조](trigger-events.md), [기기 진단](ipad-custom-map-diagnostics.md)을 참고한다.
@@ -61,6 +62,19 @@ git status --short
 `war3mapImported\ORDR.fdf`의 `LayerStyle` 파싱 실패가 드러났다. 종료 코드 0이나
 `MAIN PASS`만으로 호환성 성공을 선언하면 안 된다.
 
+후속 수정은 이 실패를 공개 합성 FDF에서 먼저 재현했다. `IGNORETRACKEVENTS`는 기존
+passthrough 입력 플래그로 연결했고, `NOSHADING`은 기존 UI의 무조명 렌더링과 일치한다.
+`SpriteScale`은 고전 FDF의 3수 구문을 소비하되 첫 값을 균일 배율로 사용한다. 생략 시 1,
+명시적 0이면 로컬 메뉴의 모델 그리기를 생략한다. 렌더러가 항상 1로 고정하던 것도 수정했다.
+지원하지 않는 `SETSVIEWPORT`는 여전히 실패를 보고한다.
+
+원본 맵에서 추출한 1382바이트 `ORDR.fdf`는 선택형 테스트로 ROC/TFT 설정 모두
+5개 템플릿이 생성되고 `0.0005` 배율이 로컬 그리기 호출에 전달됨을 확인했다(18 assertions).
+공개 테스트는 입력 판정, 뒤따르는 템플릿, 기본/0 배율, 실제 MDX render entity의 크기를 검사한다.
+이는 **동적 DzFrame의 게임 HUD 표시·터치 완료를 뜻하지 않는다**. 추가된 `drawSprite_t.scale`은
+이미 계산된 크기를 전달하는 로컬 렌더러 인자이며 네트워크 구조는 바꾸지 않는다. FDF 해석과
+MDX 적용은 WC3 디렉터리에 유지한다. 템플릿은 저장 파일에 직렬화되지 않아 추가 저장 버전 변경은 없다.
+
 FDF 캐시 회귀도 수정 전 ROC/TFT 설정 모두 실패를 재현했다. 수정 후 실패 반환,
 같은 경로의 올바른 데이터로 재시도, 성공한 파일만 캐시하는 동작을 검증했다.
 파싱 실패 시 이미 생성된 프레임의 전체 롤백은 아직 지원하지 않는다.
@@ -70,6 +84,17 @@ FDF 캐시 회귀도 수정 전 ROC/TFT 설정 모두 실패를 재현했다. �
 원본 경로를 제공한 Python ORDR 테스트는 3개 모두 통과했다. 오후 작업공간 정리 후에는
 동일 패치를 GitHub 기준 커밋 위에 복구했고 전체 `make test`가 다시 성공했다.
 이전 임시 커밋 ID를 재사용하지 않는다.
+
+UI 속성 수정 뒤 전체 `make -j4 test TEST_JOBS=4`는 **32 보고서, 6738 테스트,
+실패/오류 0**을 기록했다. 메뉴 115개/1473 assertions, MDX UI 19개/99 assertions다.
+선택형 원본 FDF 검사는 별도로 실행해 18/18 assertions를 확인했다. 공유 로컬 렌더러
+인자가 바뀌므로 `make -j4 openwarcraft3 openwow opensc2`도 모두 빌드했다.
+메뉴 테스트는 `WC3_DEBUG_GLUE=1`로 강제 재빌드한 변형도 115개/1473 assertions를 통과했다.
+`engine_boundary_audit.py --base HEAD`, `menu_boundary_audit.py`, `git diff --check`도 통과했다.
+새 합성 FDF 테스트의 수정 전 실패(8 assertions)와 MDX 크기 테스트의 수정 전 실패(1 assertion)를
+확인한 뒤 구현했다. 저녁 작업공간 자동 정리 후 GitHub 체크포인트 위에 같은 수정을 복구하고
+전체 테스트·원본 FDF 검사를 다시 통과시켰다. 정리 중 남은 0바이트 `openwow-tests`는 재빌드했다.
+복구 전에 시작한 빌드의 완료 여부를 추정하지 말고, 실제 종료 결과를 확인한다.
 
 ## 재실행
 
@@ -108,8 +133,19 @@ rg -n 'event slot limit|Failed to parse|DzLoadToc|WC3_JASS_ERROR|Unknown token' 
   "$ORDR_DATA/map-smoke.log"
 ```
 
-현재 알려진 FDF 오류가 남아 있다. 실제 TFT 자료 확보 후 `-tft`로도 검증한다.
+해당 ORDR FDF 오류는 재현 테스트에서 해결했다. 그 이후 전체 맵의 다음 장애는 별도로 확인한다.
+실제 TFT 자료 확보 후 `-tft`로도 검증한다.
 합성 ROC/TFT 테스트와 실제 TFT 맵 실행을 구분한다.
+
+원본 FDF 오류는 게임 실행 없이 아래 명령으로 재검증한다. 비공개 파일이 없는 CI에서는
+선택형 테스트만 명시적으로 생략하며 공개 합성 FDF 회귀는 항상 실행한다.
+
+```sh
+build/bin/mpqtool -mpq "$ORDR_DATA/Maps/ORDR_S2_2.323[C].w3x" \
+  cat war3mapImported/ORDR.fdf > "$ORDR_DATA/ORDR.fdf"
+ORDR_FDF_PATH="$ORDR_DATA/ORDR.fdf" \
+  build/bin/test_openwarcraft3_ui menu_fdf.ordr_private_fdf_from_file
+```
 
 ## 원본 자료·대용량 다운로드
 
@@ -135,12 +171,11 @@ War3.mpq는 사용자 Drive 웹 다운로드로 해결했다. 완료 이벤트�
 
 ## 다음 순서
 
-1. 원본 FDF의 `LayerStyle "IGNORETRACKEVENTS"`와 3성분 `SpriteScale`을 실제 의미와
-   함께 구현한다. 공개 합성 FDF로 먼저 재현하고 입력 통과·크기 적용을 검증한다.
-2. 기존 논리 DzFrame 상태를 템플릿 인스턴스와 HUD 출력에 연결한다. 터치 → 콜백 →
+1. 기존 논리 DzFrame 상태를 템플릿 인스턴스와 HUD 출력에 연결한다. 터치 → 콜백 →
    로컬 DzSyncData를 실제 JASS 스케줄러로 검증한다. 논리 프레임 생성부터 다시 작성하지 않는다.
-3. War3x.mpq 전달을 완료하고 전체 TFT 데이터로 비교한다.
-4. 최신 IPA로 실제 iPad의 난이도 선택·첫 웨이브·전투·터치·장시간 실행을 확인한다.
+   공유 네트워크 형식 확장이 필요하면 AGENTS.md의 승인 규칙을 먼저 확인한다.
+2. War3x.mpq 전달을 완료하고 전체 TFT 데이터로 비교한다.
+3. 최신 IPA로 실제 iPad의 난이도 선택·첫 웨이브·전투·터치·장시간 실행을 확인한다.
    큰 테스트 월드는 이미 수정됐으므로 과거 작은 월드의 CUN CreateUnit null을 기기 결함으로 단정하지 않는다.
 
 핵심 파일은 `games/warcraft-3/` 아래의 `game/g_local.h`, `game/g_utils.c`, `game/g_save.c`,
@@ -149,5 +184,8 @@ War3.mpq는 사용자 Drive 웹 다운로드로 해결했다. 완료 이벤트�
 
 기존 `.github/workflows/ordr-ipad-build.yml`의 최신 PR 실행에서
 `ordr-openrealm-diagnostic-ipa`를 확인한다. 서명·프로비저닝은 별도다.
+이벤트·FDF 캐시 체크포인트 `54e5b3c4`는 JASS 회귀, Linux 합성 런타임, arm64 iPad 빌드와
+진단 IPA 패키징을 모두 통과했다([실행 101](https://github.com/cuteu2474-a11y/open-realm/actions/runs/39107574199)).
+후속 CI는 TFT ORDR 회귀와 `test-menu`, `test-mdx-ui`도 실행한다.
 작업 종료마다 이 문서의 검증 결과·남은 첫 장애를 코드와 함께 커밋·푸시한다.
 비공개 맵·추출 스크립트·상용 MPQ·자격 증명은 커밋하지 않는다.

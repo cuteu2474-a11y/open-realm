@@ -893,7 +893,8 @@ static void UI_DrawSprite(frameDef_t const *frame, rect_t const *rect) {
         return;
     }
 
-    if (!frame->Portrait.model) {
+    /* A zero FDF scale hides the model; omitted SpriteScale defaults to one. */
+    if (!frame->Portrait.model || frame->Portrait.scale == 0) {
         return;
     }
 
@@ -912,7 +913,7 @@ static void UI_DrawSprite(frameDef_t const *frame, rect_t const *rect) {
      * instead of pretending that enlarging its FDF frame scales the MDX. */
     if (anim && anim[0] == '#' && anim[1] == '!' && rect->w > UI_BASE_WIDTH)
         x += (rect->w - UI_BASE_WIDTH) * 0.5f;
-    renderer->DrawSprite(&MAKE(drawSprite_t, .model = model, .anim = anim, .x = x, .y = rect->y, .id = frame));
+    renderer->DrawSprite(&MAKE(drawSprite_t, .model = model, .anim = anim, .x = x, .y = rect->y, .scale = frame->Portrait.scale, .id = frame));
 }
 
 static void UI_DrawFrameOne(frameDef_t const *frame) {

@@ -7,6 +7,7 @@ refImport_t ri;
 mat4_t node_matrices[MDX_MAX_NODES];
 static viewDef_t drawn;
 static uint32_t drawn_frame, drawn_skin_slot;
+static float drawn_scale;
 static texture_t const *drawn_skin;
 static handle_t calloc_test(long size) { return calloc(1, size); }
 
@@ -17,7 +18,7 @@ static handle_t calloc_test(long size) { return calloc(1, size); }
 #include "games/warcraft-3/renderer/mdx/r_mdx_render.c"
 #include "games/warcraft-3/renderer/r_weather.c"
 
-void R_RenderView(void) { drawn = tr.viewDef; drawn_frame = tr.viewDef.entities[0].frame; drawn_skin = tr.viewDef.entities[0].skin; drawn_skin_slot = tr.viewDef.entities[0].skin_slot; R_UpdateParticles(); }
+void R_RenderView(void) { drawn = tr.viewDef; drawn_frame = tr.viewDef.entities[0].frame; drawn_skin = tr.viewDef.entities[0].skin; drawn_skin_slot = tr.viewDef.entities[0].skin_slot; drawn_scale = tr.viewDef.entities[0].scale; R_UpdateParticles(); }
 
 mdlx_state_t mdlx;
 rect_t R_UISceneRect(void) { return (rect_t){0, 0, 0.8f, 0.6f}; }
@@ -294,6 +295,19 @@ TEST(mdx_ui, sprite_animation_epoch) {
     MDLX_DrawSpriteInstance(&sprite, COLOR32_WHITE);
     T_EQ(drawn_frame, 4883);
     T_EQ(tr.viewDef.time, 1484);
+}
+
+/* Capture the actual submitted entity: parsing a size without rendering it is not support. */
+TEST(mdx_ui, sprite_scale_reaches_render_entity) {
+    mdxSequence_t seq = { .name = "Stand", .interval = {0, 1000} };
+    mdxModel_t mdx = { .sequences = &seq, .num_sequences = 1 };
+    model_t model = { .mdx = &mdx };
+    drawSprite_t sprite = { .model = &model, .anim = "Stand", .scale = 0.037f };
+    MDLX_DrawSpriteInstance(&sprite, COLOR32_WHITE);
+    T_FEQ(drawn_scale, 0.037f, 0.000001f);
+    sprite.scale = 0;
+    MDLX_DrawSpriteInstance(&sprite, COLOR32_WHITE);
+    T_FEQ(drawn_scale, 1.0f, 0.000001f);
 }
 
 /* Maiev's authored portrait has numbered idle/talk variants, never exact names. */

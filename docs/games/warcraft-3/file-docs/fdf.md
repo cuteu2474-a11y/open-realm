@@ -184,6 +184,10 @@ LayerStyle "NOSHADING|IGNORETRACKEVENTS",
 LayerStyle "SETSVIEWPORT",            -- clips visuals to this frame's rect
 ```
 
+OpenRealm maps `IGNORETRACKEVENTS` to the local FDF hit-test passthrough flag.
+`NOSHADING` matches the existing unlit UI sprite renderer. `SETSVIEWPORT` is not
+implemented and reports a parse failure; it is not silently cached as supported.
+
 ### Font Actions
 
 ```fdf
@@ -255,6 +259,14 @@ Frame "SPRITE" "MySprite" {
 Code: `BlzFrameSetModel(frame, "path.mdl", cameraIndex)`, `BlzFrameSetSpriteAnimate(frame, animIndex, flags)`.
 
 Models ignore frame size; scale with `BlzFrameSetScale`.
+
+For classic FDF `SpriteScale`, OpenRealm consumes the three-number syntax and
+uses the first component as the uniform model scale (the common `scale 0 0`
+form must not flatten the model). Omission means 1; an explicit 0 suppresses the
+local sprite draw. The menu passes that resolved size through `drawSprite_t` to
+the MDX render entity. This is a local renderer API, not a network payload change.
+Dynamic DzFrame-to-HUD materialization and its size/input transport remain
+unimplemented; see [the ORDR handoff](../ordr-handoff.md).
 
 OpenRealm's WC3 MDX UI selector accepts an explicit normalized frame suffix: `#0@0.5` selects sequence 0 and scrubs it to the
 midpoint instead of advancing from render time. Named sequences use the same form (`Stand@0.5`). Server-authored `FT_SPRITE`

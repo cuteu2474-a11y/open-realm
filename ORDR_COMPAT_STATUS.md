@@ -14,7 +14,10 @@ This is not yet a verified playable iPad release.
   both ROC and TFT regression suites cover this.
 - Failed FDF parses return failure, stay out of the successful-load cache,
   and their paths are recorded in DzLoadToc diagnostics.
-- Next: LayerStyle/SpriteScale semantics, template materialization, rendering,
+- LayerStyle click passthrough and SpriteScale parsing/local model rendering now
+  have ROC/TFT regression coverage. The private ORDR FDF's five templates parse,
+  and its 0.0005 scale reaches the local sprite draw call.
+- Next: dynamic DzFrame template materialization, HUD rendering,
   touch/callback delivery, complete retail TFT data and actual iPad testing.
 
 Keep private W3X, extracted scripts/FDFs and commercial MPQs outside Git.

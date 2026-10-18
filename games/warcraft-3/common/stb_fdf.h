@@ -203,6 +203,7 @@ struct uiFrameDef_s {
     frameDef_t const *DialogBackdrop;
     struct {
         uint32_t model;
+        float scale;
     } Portrait;
     struct {
         UIFRAMEPOINT corner;
@@ -774,6 +775,7 @@ void UI_InitFrame(frameDef_t *frame, FRAMETYPE type) {
     frame->Type = type;
     frame->Color = COLOR32_WHITE;
     frame->Text = frame->TextStorage;
+    frame->Portrait.scale = 1.0f;
     switch (type) {
         case FT_TEXTURE:
         case FT_SIMPLESTATUSBAR:
@@ -1367,6 +1369,12 @@ FDF_MAKE_PARSER(Integer) { *((int32_t *)out) = atoi(token); }
 FDF_MAKE_PARSER(Vector2) { FDF_ParseFloatList(token, out, 2); }
 FDF_MAKE_PARSER(Vector3) { FDF_ParseFloatList(token, out, 3); }
 FDF_MAKE_PARSER(Vector4) { FDF_ParseFloatList(token, out, 4); }
+/* Classic FDF accepts three components, but SpriteScale uses the first as a uniform scale. */
+FDF_MAKE_PARSER(SpriteScale) {
+    float values[3] = {1, 0, 0};
+    FDF_ParseFloatList(token, values, 3);
+    *((float *)out) = values[0];
+}
 FDF_MAKE_PARSER(Color) {
     float values[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
     FDF_ParseFloatList(token, values, 4);
@@ -1564,6 +1572,28 @@ FDF_MAKE_PARSERCALL(Layer) {
     FDF_ParseFrame(parser, UI_Spawn(FT_LAYER, frame));
 }
 
+/* Decorative layers must not intercept controls beneath them. Unsupported
+ * styles remain errors so a partially implemented template is not cached. */
+FDF_MAKE_PARSERCALL(LayerStyle) {
+    PATHSTR flags = {0};
+    cstring_t value = parse_segment2(parser);
+    if (!frame || !value || sscanf(value, PATHSTR_FMT, flags) != 1) {
+        parser_error(parser);
+        return;
+    }
+    for (string_t s = flags; *s; s++)
+        if (*s == '|') *s = ',';
+    wordExtractor_t styles = { .buffer = flags, .delimiters = "" };
+    for (cstring_t flag = parse_segment(&styles); flag && *flag; flag = parse_segment(&styles)) {
+        if (!strcmp(flag, "IGNORETRACKEVENTS")) frame->ui_flags |= UIFLAG_PASSTHROUGH;
+        else if (!strcmp(flag, "NOSHADING")) { /* UI sprites already submit RF_NO_LIGHTING. */ }
+        else {
+            fprintf(stderr, "Unsupported LayerStyle '%s'\n", flag);
+            parser_error(parser);
+        }
+    }
+}
+
 FDF_MAKE_PARSERCALL(String) {
     FDF_ParseFrame(parser, UI_Spawn(FT_STRING, frame));
 }
@@ -1626,6 +1656,7 @@ static fdf_parse_class_t classes[] = {
     { "Texture", Texture },
     { "String", String },
     { "Layer", Layer },
+    { "LayerStyle", LayerStyle },
     { "StringList", StringList },
     { "IncludeFile", IncludeFile },
     FDF_F_END,
@@ -1648,6 +1679,7 @@ static fdf_parseItem_t items[] = {
     { "File", { FDF_F(Texture.Image, TextureFile), FDF_F_END } },
     { "TexCoord", { FDF_F(Texture.TexCoord.min.x, Float), FDF_F(Texture.TexCoord.max.x, Float), FDF_F(Texture.TexCoord.min.y, Float), FDF_F(Texture.TexCoord.max.y, Float), FDF_F_END } },
     { "BackgroundArt", { FDF_F(Portrait.model, ModelPath), FDF_F_END } },
+    { "SpriteScale", { FDF_F(Portrait.scale, SpriteScale), FDF_F_END } },
     { "AlphaMode", { FDF_F(AlphaMode, AlphaMode), FDF_F_END } },
     { "Anchor", { FDF_F(Anchor.corner, FramePointType), FDF_F(Anchor.x, Float), FDF_F(Anchor.y, Float), FDF_F_END }, Anchor },
     { "Font", { FDF_F(Font.Name, Name), FDF_F(Font.Size, Float), FDF_F_END }, Font },
