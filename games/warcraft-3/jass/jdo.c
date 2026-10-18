@@ -480,7 +480,7 @@ void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail) {
     if (!j) return;
     /* The map loader identifies ORDR from its source even if the JASS
      * parser rejected it and never registered CUO/CUW. */
-    if (event && !strcmp(event, "MAP_PARSE")) {
+    if (event && (!strcmp(event, "MAP_PARSE") || !strcmp(event, "PARSE_POSITION"))) {
         if (ordr_flow_vm != jass_root(j)) {
             if (ordr_jass_log) { fclose(ordr_jass_log); ordr_jass_log = NULL; }
             ordr_jass_log_open_attempted = false;
