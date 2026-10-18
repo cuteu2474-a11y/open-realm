@@ -430,6 +430,34 @@ static void jass_free_coroutine(jasscoroutine_t *co) {
     jass_free(co);
 }
 
+/* ORDR's difficulty selector is world-unit based, not a DzFrame popup.
+ * Keep this trace limited to exact milestones on maps exposing both CUO and CUW,
+ * so other maps do not get verbose interpreter logging.  It never changes
+ * script execution or emits synthetic events.
+ *
+ * Expected path:
+ * main -> BJG (2s trigger) -> BB4 -> CUa/CUX (2s timer) -> CUW -> CUN.
+ * UI picks: CUK / CUL; game start: CUM -> CT9.
+ */
+static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
+    static unsigned count;
+    static cstring_t const watched[] = {
+        "main", "BJG", "BB4", "CUO", "CUa", "CUX", "CUW",
+        "CUN", "CUK", "CUL", "CUM", "CT9"
+    };
+    bool watched_name = false;
+    if (!j || !name || count >= 160) return;
+    FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
+        if (!strcmp(name, watched[i])) { watched_name = true; break; }
+    }
+    if (!watched_name) return;
+    if (!find_function(jass_root(j), "CUO") || !find_function(jass_root(j), "CUW"))
+        return;
+    ++count;
+    fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\\n",
+            name, via, (unsigned)jass_gettime());
+}
+
 static jassCoroutineframe_t *jass_coroutine_pushframe(jasscoroutine_t *co,
                                                      JASSFRAMETYPE type,
                                                      jassFunc_t const *func,
@@ -445,6 +473,8 @@ static jassCoroutineframe_t *jass_coroutine_pushframe(jasscoroutine_t *co,
     frame->return_boolean = false;
     frame->negate_condition = false;
     frame->condition_result = false;
+    if (type == JASS_FRAME_FUNCTION && func)
+        jass_ordr_milestone(co->state, func->name, "coroutine");
     ADD_TO_LIST(frame, co->frames);
     return frame;
 }
@@ -3008,6 +3038,7 @@ static uint32_t jass_call_impl(jass_t *j, uint32_t args) {
         jassFunc_t const *func = root->value;
         jassdict_t *locals = NULL;
         uint32_t argnum = 1;
+        if (func) jass_ordr_milestone(j, func->name, "synchronous");
 #ifdef DEBUG_JASS
         printf("%s\n", func->name);
 #endif
