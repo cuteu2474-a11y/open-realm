@@ -1257,55 +1257,107 @@ uint32_t GetRandomReal(jass_t *j) {
     float t = (float)rand() / (float)RAND_MAX;
     return jass_pushnumber(j, lowBound + t * (highBound - lowBound));
 }
-uint32_t CreateUnitPool(jass_t *j) {
-    return jass_pushnullhandle(j, "unitpool");
+/* Weighted pools are native JASS handles. Keep their entries in the game's
+ * VM allocator, and select by the authored weights rather than uniformly. */
+typedef struct {
+    uint32_t id;
+    float weight;
+} ordr_pool_entry_t;
+typedef struct {
+    bool destroyed;
+    int count;
+    ordr_pool_entry_t entries[512];
+} ordr_weighted_pool_t;
+static ordr_weighted_pool_t *ordr_pool_new(jass_t *j,const char *type){
+    ordr_weighted_pool_t *pool=jass_newhandle(j,sizeof(*pool),type);
+    if(pool)memset(pool,0,sizeof(*pool));
+    return pool;
 }
-uint32_t DestroyUnitPool(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
+static void ordr_pool_add(ordr_weighted_pool_t *pool,uint32_t id,float weight){
+    if(!pool||pool->destroyed||!id||!(weight>0.0f)||weight>100000000.0f)return;
+    for(int i=0;i<pool->count;i++)if(pool->entries[i].id==id){
+        pool->entries[i].weight=weight;return;
+    }
+    if(pool->count>=512)return;
+    pool->entries[pool->count++]=(ordr_pool_entry_t){id,weight};
+}
+static void ordr_pool_remove(ordr_weighted_pool_t *pool,uint32_t id){
+    if(!pool||pool->destroyed)return;
+    for(int i=0;i<pool->count;i++)if(pool->entries[i].id==id){
+        memmove(&pool->entries[i],&pool->entries[i+1],
+                (size_t)(pool->count-i-1)*sizeof(pool->entries[0]));
+        pool->count--;return;
+    }
+}
+static uint32_t ordr_pool_choose(ordr_weighted_pool_t *pool){
+    if(!pool||pool->destroyed)return 0;
+    double total=0;
+    for(int i=0;i<pool->count;i++)total+=pool->entries[i].weight;
+    if(total<=0)return 0;
+    double t=(double)rand()/((double)RAND_MAX+1.0)*total;
+    for(int i=0;i<pool->count;i++){
+        t-=pool->entries[i].weight;
+        if(t<0)return pool->entries[i].id;
+    }
+    return pool->count?pool->entries[pool->count-1].id:0;
+}
+uint32_t CreateUnitPool(jass_t *j){
+    ordr_weighted_pool_t *pool=ordr_pool_new(j,"unitpool");
+    return jass_pushlighthandle(j,pool,"unitpool");
+}
+uint32_t DestroyUnitPool(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    if(pool){pool->destroyed=true;pool->count=0;}
     return 0;
 }
-uint32_t UnitPoolAddUnitType(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //int32_t unitId = jass_checkinteger(j, 2);
-    //float weight = jass_checknumber(j, 3);
+uint32_t UnitPoolAddUnitType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    float weight=jass_checknumber(j,3);
+    ordr_pool_add(pool,id,weight);return 0;
+}
+uint32_t UnitPoolRemoveUnitType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    ordr_pool_remove(pool,id);return 0;
+}
+uint32_t PlaceRandomUnit(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    player_t *owner=jass_checkhandle(j,2,"player");
+    vec2_t location=MAKE(vec2_t,jass_checknumber(j,3),jass_checknumber(j,4));
+    float facing=jass_checknumber(j,5);
+    uint32_t id=ordr_pool_choose(pool);
+    if(!owner||!id)return jass_pushnullhandle(j,"unit");
+    edict_t *unit=unit_create(PLAYER_NUM(owner),id,&location,facing);
+    return jass_pushlighthandle(j,unit,"unit");
+}
+uint32_t CreateItemPool(jass_t *j){
+    ordr_weighted_pool_t *pool=ordr_pool_new(j,"itempool");
+    return jass_pushlighthandle(j,pool,"itempool");
+}
+uint32_t DestroyItemPool(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    if(pool){pool->destroyed=true;pool->count=0;}
     return 0;
 }
-uint32_t UnitPoolRemoveUnitType(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //int32_t unitId = jass_checkinteger(j, 2);
-    return 0;
+uint32_t ItemPoolAddItemType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    float weight=jass_checknumber(j,3);
+    ordr_pool_add(pool,id,weight);return 0;
 }
-uint32_t PlaceRandomUnit(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //mapPlayer_t *forWhichPlayer = jass_checkhandle(j, 2, "player");
-    //float x = jass_checknumber(j, 3);
-    //float y = jass_checknumber(j, 4);
-    //float facing = jass_checknumber(j, 5);
-    return jass_pushnullhandle(j, "unit");
+uint32_t ItemPoolRemoveItemType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    ordr_pool_remove(pool,id);return 0;
 }
-uint32_t CreateItemPool(jass_t *j) {
-    return jass_pushnullhandle(j, "itempool");
-}
-uint32_t DestroyItemPool(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    return 0;
-}
-uint32_t ItemPoolAddItemType(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //int32_t itemId = jass_checkinteger(j, 2);
-    //float weight = jass_checknumber(j, 3);
-    return 0;
-}
-uint32_t ItemPoolRemoveItemType(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //int32_t itemId = jass_checkinteger(j, 2);
-    return 0;
-}
-uint32_t PlaceRandomItem(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //float x = jass_checknumber(j, 2);
-    //float y = jass_checknumber(j, 3);
-    return jass_pushnullhandle(j, "item");
+uint32_t PlaceRandomItem(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    float x=jass_checknumber(j,2),y=jass_checknumber(j,3);
+    uint32_t id=ordr_pool_choose(pool);
+    if(!id||!G_ItemData(id))return jass_pushnullhandle(j,"item");
+    edict_t *item=SP_SpawnAtLocation((int32_t)id,0,&MAKE(vec2_t,x,y));
+    return jass_pushlighthandle(j,item,"item");
 }
 uint32_t ChooseRandomCreep(jass_t *j) {
     //int32_t level = jass_checkinteger(j, 1);
