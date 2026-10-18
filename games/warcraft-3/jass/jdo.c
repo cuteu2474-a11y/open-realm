@@ -441,9 +441,46 @@ static void jass_free_coroutine(jasscoroutine_t *co) {
  */
 static jass_t *ordr_flow_vm;
 static uint32_t ordr_flow_mask;
+static FILE *ordr_jass_log;
+static unsigned ordr_jass_log_lines;
+static bool ordr_jass_log_open_attempted;
 
 uint32_t jass_ordr_flow_mask(jass_t *j) {
     return j && jass_root(j) == ordr_flow_vm ? ordr_flow_mask : 0;
+}
+
+/* The iPad bundle opts into iOS Files document sharing. Keep the trace in
+ * Documents so users can share it without Xcode or a debugger. Never store
+ * JASS arguments (which can contain player names or chat messages). */
+static void jass_ordr_log_open(void) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    char path[1024];
+    char const *home = getenv("HOME");
+    if (ordr_jass_log_open_attempted) return;
+    ordr_jass_log_open_attempted = true;
+    if (!home || !*home ||
+        snprintf(path, sizeof(path), "%s/Documents/ordr-jass.log", home) >= (int)sizeof(path))
+        return;
+    ordr_jass_log = fopen(path, "w");
+    if (ordr_jass_log) {
+        setvbuf(ordr_jass_log, NULL, _IOLBF, 0);
+        fprintf(ordr_jass_log, "OpenRealm ORDR JASS execution log\n");
+        fprintf(ordr_jass_log, "Format: function entry, invocation mode, game time\n");
+    }
+#endif
+}
+
+static void jass_ordr_log_function(cstring_t name, cstring_t via, uint32_t now) {
+    if (ordr_jass_log_lines >= 20000) return;
+    jass_ordr_log_open();
+    if (!ordr_jass_log) return;
+    fprintf(ordr_jass_log, "%u ms  %-11s  %s\n",
+            (unsigned)now, via, name);
+    ++ordr_jass_log_lines;
+    if (ordr_jass_log_lines == 20000)
+        fprintf(ordr_jass_log, "TRACE LIMIT REACHED (20000 function entries)\n");
+    /* Periodic flush keeps most of the trace even if the app is terminated. */
+    if (ordr_jass_log_lines % 32 == 0) fflush(ordr_jass_log);
 }
 
 static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
@@ -456,18 +493,23 @@ static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
     if (!j || !name) return;
     root = jass_root(j);
     if (root != ordr_flow_vm) {
+        if (ordr_jass_log) { fclose(ordr_jass_log); ordr_jass_log = NULL; }
+        ordr_jass_log_open_attempted = false;
+        ordr_jass_log_lines = 0;
         ordr_flow_vm = root;
         ordr_flow_mask = 0;
         count = 0;
     }
     /* The map shape guard ensures non-ORDR games retain normal output. */
     if (!find_function(root, "CUO") || !find_function(root, "CUW")) return;
+    jass_ordr_log_function(name, via, jass_gettime());
     FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
         if (strcmp(name, watched[i])) continue;
         ordr_flow_mask |= 1u << i;
         if (count++ < 160)
             fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\n",
                     name, via, (unsigned)jass_gettime());
+        if (ordr_jass_log) fflush(ordr_jass_log);
         return;
     }
 }
