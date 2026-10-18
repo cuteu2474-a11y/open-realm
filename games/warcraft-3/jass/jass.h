@@ -110,6 +110,8 @@ uint32_t jass_formatcallchain(jass_t *j, string_t buffer, uint32_t size);
 jassFunc_t const *jass_functionbyname(jass_t *j, cstring_t name);
 /* Read-only bitmask of ORDR world-difficulty initialization milestones. */
 uint32_t jass_ordr_flow_mask(jass_t *j);
+/* iPad JASS execution file log: no-op for maps other than ORDR. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail);
 void jass_settimercontext(handle_t timer);
 bool jass_triggerdisabled(trigger_t *trigger);
 JASSTYPEID jass_gettype(jass_t *j, int index);
