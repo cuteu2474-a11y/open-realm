@@ -47,6 +47,8 @@ static bool g_tracking_jass_startup;
 static bool g_jass_progress_recorded;
 static clock_t g_jass_last_progress_cpu;
 static uint32_t g_jass_progress_samples;
+static uint32_t g_ordr_observed_frames;
+static bool g_ordr_map_loaded;
 
 static void G_WriteJassDiagnostic(cstring_t stage, cstring_t detail, bool reset) {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -73,6 +75,8 @@ void G_JassDiagnosticReset(cstring_t map) {
     g_jass_progress_recorded = false;
     g_jass_last_progress_cpu = 0;
     g_jass_progress_samples = 0;
+    g_ordr_observed_frames = 0;
+    g_ordr_map_loaded = map && (strstr(map, "ORDR") || strstr(map, "ordr"));
     G_WriteJassDiagnostic("map", map ? map : "(unknown)", true);
 }
 
@@ -1432,6 +1436,40 @@ static void G_RunFrame(void) {
     G_RunEvents();
     jass_runevents(level.vm);
     G_JassDiagnosticError("simulation frame");
+    /*
+     * iPad-only ORDR startup checkpoint. Distinguish a successfully parsed
+     * map from one that actually spawns difficulty-picker units on subsequent
+     * timer frames. Sample sparingly to avoid per-frame Documents writes.
+     * Counts are observational, not proof that a particular unit is visible.
+     */
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if (g_ordr_map_loaded && g_ordr_observed_frames < 120) {
+        ++g_ordr_observed_frames;
+        if (g_ordr_observed_frames == 1 || g_ordr_observed_frames == 5 ||
+            g_ordr_observed_frames == 20 || g_ordr_observed_frames == 60 ||
+            g_ordr_observed_frames == 120) {
+            uint32_t active_units = 0, player7 = 0, player15 = 0, events = 0;
+            char detail[256];
+            FOR_LOOP(i, globals.num_edicts) {
+                edict_t const *unit = &globals.edicts[i];
+                if (!unit->inuse) continue;
+                ++active_units;
+                if (unit->s.player == 7) ++player7;
+                if (unit->s.player == 15) ++player15;
+            }
+            FOR_LOOP(i, MAX_EVENTS)
+                if (level.events.handlers[i].inuse) ++events;
+            snprintf(detail, sizeof(detail),
+                "frame=%u units=%u p7=%u p15=%u triggers=%u timers=%u events=%u/%u dzframes=%u",
+                (unsigned)g_ordr_observed_frames, (unsigned)active_units,
+                (unsigned)player7, (unsigned)player15,
+                (unsigned)level.num_triggers, (unsigned)level.num_timers,
+                (unsigned)events, (unsigned)MAX_EVENTS,
+                (unsigned)level.ordr_num_frames);
+            G_WriteJassDiagnostic("ordr-frame", detail, false);
+        }
+    }
+#endif
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 
