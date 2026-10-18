@@ -2448,8 +2448,35 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
     token_t *program = syntax->parse(&parser);
     if (parser.error) {
         jass_t *root = jass_root(j);
+        char detail[256];
+        size_t line = 1, column = 1;
+        cstring_t cur = buffer;
+        cstring_t stop = parser.buffer ? parser.buffer : buffer;
+        size_t const bytes = strlen(buffer);
+        size_t offset;
+        char excerpt[96];
+        size_t n = 0;
+        if (stop < buffer || stop > buffer + bytes) stop = buffer;
+        offset = (size_t)(stop - buffer);
+        while (cur < stop) {
+            if (*cur++ == '\\n') { line++; column = 1; }
+            else column++;
+        }
+        cur = stop;
+        while (*cur && *cur != '\\n' && *cur != '\\r' && n < sizeof(excerpt) - 1) {
+            char ch = *cur++;
+            excerpt[n++] = (ch >= 32 && ch <= 126) ? ch : '?';
+        }
+        excerpt[n] = 0;
+        snprintf(detail, sizeof(detail),
+                 "line=%u column=%u offset=%u near=%.90s",
+                 (unsigned)line, (unsigned)column, (unsigned)offset, excerpt);
+        fprintf(stderr, "JASS-PARSE-ERROR: %s\\n", detail);
+        jass_ordr_log_event(j, "PARSE_POSITION", detail);
         root->rterror_pending = true;
-        snprintf(root->rterror_message, sizeof(root->rterror_message), "parse error");
+        snprintf(root->rterror_message, sizeof(root->rterror_message),
+                 "parse error line %u column %u offset %u",
+                 (unsigned)line, (unsigned)column, (unsigned)offset);
         return false;
     }
     jassprogram_t *owned = JASSALLOC(jassprogram_t);
