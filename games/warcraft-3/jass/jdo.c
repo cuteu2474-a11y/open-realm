@@ -2459,11 +2459,11 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
         if (stop < buffer || stop > buffer + bytes) stop = buffer;
         offset = (size_t)(stop - buffer);
         while (cur < stop) {
-            if (*cur++ == '\\n') { line++; column = 1; }
+            if (*cur++ == '\n') { line++; column = 1; }
             else column++;
         }
         cur = stop;
-        while (*cur && *cur != '\\n' && *cur != '\\r' && n < sizeof(excerpt) - 1) {
+        while (*cur && *cur != '\n' && *cur != '\r' && n < sizeof(excerpt) - 1) {
             char ch = *cur++;
             excerpt[n++] = (ch >= 32 && ch <= 126) ? ch : '?';
         }
@@ -2471,7 +2471,7 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
         snprintf(detail, sizeof(detail),
                  "line=%u column=%u offset=%u near=%.90s",
                  (unsigned)line, (unsigned)column, (unsigned)offset, excerpt);
-        fprintf(stderr, "JASS-PARSE-ERROR: %s\\n", detail);
+        fprintf(stderr, "JASS-PARSE-ERROR: %s\n", detail);
         jass_ordr_log_event(j, "PARSE_POSITION", detail);
         root->rterror_pending = true;
         snprintf(root->rterror_message, sizeof(root->rterror_message),
