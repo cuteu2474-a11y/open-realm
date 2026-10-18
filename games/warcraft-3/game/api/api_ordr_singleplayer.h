@@ -8,19 +8,35 @@
 typedef struct { int used,parent,id,visible,enabled,alpha; float width,height; char name[128],text[1024],texture[512]; } ordr_frame_t;
 static ordr_frame_t ordr_frames[4096];
 static int ordr_next_frame=2;
+static int ordr_frame_trace_count=0;
+static void ordr_frame_root_init(void) {
+    if (!ordr_frames[1].used) {
+        ordr_frames[1].used=1;
+        ordr_frames[1].visible=1;
+        ordr_frames[1].enabled=1;
+        ordr_frames[1].alpha=255;
+        snprintf(ordr_frames[1].name,sizeof(ordr_frames[1].name),"GAME_UI");
+    }
+}
+static void ordr_frame_trace(const char *action,int handle,const char *detail) {
+    if (ordr_frame_trace_count++ < 200)
+        fprintf(stderr,"ORDR-UI: %s handle=%d %s\n",action,handle,detail?detail:"");
+}
+
 static int ordr_frame_new(const char *name,int parent,int id) {
-    if(ordr_next_frame>=4096) return 0;
+    ordr_frame_root_init();
+    if(ordr_next_frame>=4096) { ordr_frame_trace("registry-full",0,name);return 0; }
     int n=ordr_next_frame++; ordr_frame_t *f=&ordr_frames[n];
     memset(f,0,sizeof(*f)); f->used=1;f->parent=parent;f->id=id;f->visible=1;f->enabled=1;f->alpha=255;
-    snprintf(f->name,sizeof(f->name),"%s",name?name:"");return n;
+    snprintf(f->name,sizeof(f->name),"%s",name?name:"");ordr_frame_trace("create",n,f->name);return n;
 }
 static ordr_frame_t *ordr_frame(int id){return id>0&&id<ordr_next_frame&&ordr_frames[id].used?&ordr_frames[id]:NULL;}
-uint32_t DzGetGameUI(jass_t *j){return jass_pushinteger(j,1);}
+uint32_t DzGetGameUI(jass_t *j){ordr_frame_root_init();return jass_pushinteger(j,1);}
 uint32_t DzCreateFrame(jass_t *j){const char *s=jass_checkstring(j,1);int p=jass_checkinteger(j,2),id=jass_checkinteger(j,3);return jass_pushinteger(j,ordr_frame_new(s,p,id));}
 uint32_t DzCreateFrameByTagName(jass_t *j){const char *s=jass_checkstring(j,2);int p=jass_checkinteger(j,3),id=jass_checkinteger(j,5);return jass_pushinteger(j,ordr_frame_new(s,p,id));}
-uint32_t DzFrameShow(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f)f->visible=b;return 0;}
+uint32_t DzFrameShow(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f){f->visible=b;ordr_frame_trace(b?"show":"hide",(int)(f-ordr_frames),f->name);}return 0;}
 uint32_t DzFrameSetEnable(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f)f->enabled=b;return 0;}
-uint32_t DzFrameSetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f)snprintf(f->text,sizeof(f->text),"%s",s?s:"");return 0;}
+uint32_t DzFrameSetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f){snprintf(f->text,sizeof(f->text),"%s",s?s:"");ordr_frame_trace("text",(int)(f-ordr_frames),f->text);}return 0;}
 uint32_t DzFrameGetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));return jass_pushstring(j,f?f->text:"");}
 uint32_t DzFrameSetTexture(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f)snprintf(f->texture,sizeof(f->texture),"%s",s?s:"");return 0;}
 uint32_t DzFrameSetSize(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));float w=jass_checknumber(j,2),h=jass_checknumber(j,3);if(f){f->width=w;f->height=h;}return 0;}
