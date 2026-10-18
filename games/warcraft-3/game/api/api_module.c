@@ -19,8 +19,35 @@
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
 #include "api_ordr_singleplayer.h"
+#include "api_ordr_singleplayer_extra.h"
 
 jassModule_t jass_funcs[] = {
+    { "DzFrameSetPoint", DzFrameSetPoint },
+    { "DzGetTriggerUIEventFrame", DzGetTriggerUIEventFrame },
+    { "DzFrameSetScriptByCode", DzFrameSetScriptByCode },
+    { "DzFrameSetFont", DzFrameSetFont },
+    { "DzGetTriggerUIEventPlayer", DzGetTriggerUIEventPlayer },
+    { "DzSyncData", DzSyncData },
+    { "DzGetTriggerSyncPlayer", DzGetTriggerSyncPlayer },
+    { "DzGetTriggerSyncData", DzGetTriggerSyncData },
+    { "DzTriggerRegisterSyncData", DzTriggerRegisterSyncData },
+    { "DzFrameClearAllPoints", DzFrameClearAllPoints },
+    { "DzLoadToc", DzLoadToc },
+    { "JNStringRegex", JNStringRegex },
+    { "DzFrameSetAbsolutePoint", DzFrameSetAbsolutePoint },
+    { "DzFrameSetModel", DzFrameSetModel },
+    { "DzFrameSetPriority", DzFrameSetPriority },
+    { "DzFrameSetTextAlignment", DzFrameSetTextAlignment },
+    { "DzGetTriggerKeyPlayer", DzGetTriggerKeyPlayer },
+    { "DzTriggerRegisterKeyEventByCode", DzTriggerRegisterKeyEventByCode },
+    { "JNLogin", JNLogin },
+    { "JNObjectCharacterGetInt", JNObjectCharacterGetInt },
+    { "JNObjectCharacterGetString", JNObjectCharacterGetString },
+    { "JNObjectCharacterInit", JNObjectCharacterInit },
+    { "JNObjectCharacterSave", JNObjectCharacterSave },
+    { "JNObjectCharacterSetInt", JNObjectCharacterSetInt },
+    { "JNObjectCharacterSetString", JNObjectCharacterSetString },
+    { "JNUse", JNUse },
     { "DzGetGameUI", DzGetGameUI },
     { "DzCreateFrame", DzCreateFrame },
     { "DzCreateFrameByTagName", DzCreateFrameByTagName },
