@@ -1140,9 +1140,15 @@ uint32_t UnitWakeUp(jass_t *j) {
     return 0;
 }
 uint32_t UnitApplyTimedLife(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //int32_t buffId = jass_checkinteger(j, 2);
-    //float duration = jass_checknumber(j, 3);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    uint32_t buff_id = (uint32_t)jass_checkinteger(j, 2);
+    float duration = jass_checknumber(j, 3);
+    if (!unit || !unit->inuse || duration <= 0.0f) return 0;
+    /* OpenRealm already expires the BTLF lifecycle buff in its unit status
+     * update. Reuse it instead of creating an unrelated timer. The supplied
+     * buff rawcode labels the effect; BTLF owns the timed death lifecycle. */
+    (void)buff_id;
+    unit_addtimedstatus(unit, "BTLF", 1, duration);
     return 0;
 }
 uint32_t IssueImmediateOrder(jass_t *j) {
