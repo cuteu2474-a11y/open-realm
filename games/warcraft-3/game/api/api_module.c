@@ -18,8 +18,24 @@
 #include "api_quest.h"
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
+#include "api_ordr_singleplayer.h"
 
 jassModule_t jass_funcs[] = {
+    { "DzGetGameUI", DzGetGameUI },
+    { "DzCreateFrame", DzCreateFrame },
+    { "DzCreateFrameByTagName", DzCreateFrameByTagName },
+    { "DzFrameShow", DzFrameShow },
+    { "DzFrameSetEnable", DzFrameSetEnable },
+    { "DzFrameSetText", DzFrameSetText },
+    { "DzFrameGetText", DzFrameGetText },
+    { "DzFrameSetTexture", DzFrameSetTexture },
+    { "DzFrameSetSize", DzFrameSetSize },
+    { "DzFrameSetAlpha", DzFrameSetAlpha },
+    { "DzFrameFindByName", DzFrameFindByName },
+    { "DzFrameSetFocus", DzFrameSetFocus },
+    { "JNStringCount", JNStringCount },
+    { "JNStringSplit", JNStringSplit },
+    { "JNStringReplace", JNStringReplace },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },
