@@ -31,6 +31,14 @@ stage: calling main
 main: unimplemented native: ExampleNative
 ```
 
+For ORDR map filenames, the iPad log also includes five `ordr-frame`
+checkpoints (frames 1, 5, 20, 60, 120). These record the number of live
+entities (`units`), owner counts (`p7`, `p15`), registered triggers, timers,
+events, and logical DzFrame instances. If the difficulty-selection NPCs are
+missing, compare the counters between checkpoints. Unchanged counts indicate
+that the corresponding map callbacks may not have created new entities;
+nonzero counts alone do not prove that a model rendered on screen.
+
 **The example above is illustrative, not a verified error from a specific map.**
 A successful log without errors does **not** prove that a custom game works:
 an event handler may never fire, or an unimplemented native may use an
