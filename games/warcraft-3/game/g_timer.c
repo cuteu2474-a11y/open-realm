@@ -107,7 +107,7 @@ void G_TimerStart(gtimer_t *timer, uint32_t timeout, bool periodic, jassFunc_t c
     /* ORDR difficulty units appear after the CUW callback fires. */
     if (handler && jass_functionname(handler) &&
         !strcmp(jass_functionname(handler), "CUW"))
-        fprintf(stderr, "ORDR-FLOW: timer_start callback=CUW duration_ms=%u\\n",
+        fprintf(stderr, "ORDR-FLOW: timer_start callback=CUW duration_ms=%u\n",
                 (unsigned)timeout);
     FOR_LOOP(i, MAX_TIMERDIALOGS) if (level.timer_dialogs[i].inuse && level.timer_dialogs[i].timer == timer)
         WC3_TIMERDIALOG_LOG("start dialog=%d duration=%u periodic=%d visible=0x%08x\n",
@@ -186,7 +186,7 @@ void G_RunTimers(void) {
         timer->running = timer->periodic;
         if (timer->handler && jass_functionname(timer->handler) &&
             !strcmp(jass_functionname(timer->handler), "CUW"))
-            fprintf(stderr, "ORDR-FLOW: timer_expired callback=CUW time_ms=%u\\n",
+            fprintf(stderr, "ORDR-FLOW: timer_expired callback=CUW time_ms=%u\n",
                     (unsigned)level.time);
         if (timer->handler)
             jass_startcoroutine(level.vm, &MAKE(jassContext_t,
