@@ -1,0 +1,37 @@
+name: ORDR standalone JASS parser tool
+on:
+  push:
+    branches:
+      - test/ordr-original-jass-parser
+
+jobs:
+  parser:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/corepunch/open-realm-ci:ubuntu-24.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native JASS interpreter
+        run: make jass-tool
+      - name: JASS parser executable smoke test
+        run: |
+          build/bin/jass -v
+          test -s build/bin/jass
+          test -s build/lib/libjass.so
+      - name: Upload parser binary and runtime libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORDR-native-JASS-parser-linux
+          path: |
+            build/bin/jass
+            build/lib/libjass.so
+            build/lib/libsheet.so
+            build/lib/libshared.so
+          if-no-files-found: error
+          retention-days: 3
