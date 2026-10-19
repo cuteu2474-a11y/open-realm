@@ -3,6 +3,26 @@
 bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *event);
 bool jass_evaluateboolexpr(jass_t *j, jassFunc_t const *expr, edict_t *unit);
 
+/* WC3 TriggerRegisterPlayerChatEvent accepts an empty string as "any chat".
+ * Prefix matching is case-sensitive and does not consume the suffix. */
+static bool G_ChatMatches(cstring_t message, cstring_t pattern, bool exact) {
+    if (!message || !pattern) return false;
+    return exact ? strcmp(message, pattern) == 0 :
+                   strncmp(message, pattern, strlen(pattern)) == 0;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_chat, register_filter_exact_prefix_and_empty) {
+    T_ASSERT(G_ChatMatches("-help", "-help", true));
+    T_ASSERT(!G_ChatMatches("-help more", "-help", true));
+    T_ASSERT(G_ChatMatches("-help more", "-help", false));
+    T_ASSERT(!G_ChatMatches("help", "-help", false));
+    T_ASSERT(G_ChatMatches("-anything", "", false));
+    T_ASSERT(!G_ChatMatches("-anything", "", true));
+}
+#endif
+
 /* GetSaveBasicFilename is a short-lived context provided by the host save/load
  * operation, not a physical filesystem path or a script-selectable scope. */
 static char save_basic_filename[MAX_PATHLEN];
@@ -201,8 +221,7 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                 break;
             case EVENT_PLAYER_CHAT:
                 if (evt->type == EVENT_PLAYER_CHAT && subject && e->subject == subject &&
-                    (e->chat_exact ? !strcmp(evt->chat_text, e->chat_match) :
-                     !strncmp(evt->chat_text, e->chat_match, strlen(e->chat_match)))) {
+                    G_ChatMatches(evt->chat_text, e->chat_match, e->chat_exact)) {
                     /* Pass the matched registration to GetEventPlayerChatStringMatched.
                      * The full message is retained separately in the queued event. */
                     evt->responseTo = e;
