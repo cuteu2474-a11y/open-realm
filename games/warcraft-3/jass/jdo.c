@@ -499,24 +499,25 @@ void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail) {
     fflush(ordr_jass_log);
 }
 
+/* Sample routine calls rather than stopping after 20,000 entries. The first
+ * 96 calls describe startup, and later entries reveal continued progress
+ * without hiding a later crash behind a trace limit. */
 static void jass_ordr_log_function(cstring_t name, cstring_t via, uint32_t now) {
-    if (ordr_jass_log_lines >= 20000) return;
+    ++ordr_jass_log_lines;
+    if (ordr_jass_log_lines > 96 && (ordr_jass_log_lines % 2048) != 0) return;
     jass_ordr_log_open();
     if (!ordr_jass_log) return;
-    fprintf(ordr_jass_log, "%u ms  %-11s  %s\n",
-            (unsigned)now, via, name);
-    ++ordr_jass_log_lines;
-    if (ordr_jass_log_lines == 20000)
-        fprintf(ordr_jass_log, "TRACE LIMIT REACHED (20000 function entries)\n");
-    /* Periodic flush keeps most of the trace even if the app is terminated. */
-    if (ordr_jass_log_lines % 32 == 0) fflush(ordr_jass_log);
+    fprintf(ordr_jass_log, "%u ms  [FUNCTION_SAMPLE ]  call=%u via=%s name=%s\n",
+            (unsigned)now, ordr_jass_log_lines, via, name);
+    fflush(ordr_jass_log);
 }
 
 static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
-    static unsigned count;
+    static unsigned hits[18];
     static cstring_t const watched[] = {
-        "main", "BJG", "BB4", "CUO", "CUa", "CUX", "CUW",
-        "CUN", "CUK", "CUL", "CUM", "CT9"
+        "config", "main", "BJG", "BB4", "CUO", "CUa", "CUX", "CUW",
+        "CUN", "CUK", "CUL", "CUM", "CT9", "CCL", "CWd",
+        "CWv", "CWw", "CWz"
     };
     jass_t *root;
     if (!j || !name) return;
@@ -527,18 +528,21 @@ static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
         ordr_jass_log_lines = 0;
         ordr_flow_vm = root;
         ordr_flow_mask = 0;
-        count = 0;
+        memset(hits, 0, sizeof(hits));
     }
-    /* The map shape guard ensures non-ORDR games retain normal output. */
     if (!find_function(root, "CUO") || !find_function(root, "CUW")) return;
     jass_ordr_log_function(name, via, jass_gettime());
     FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
+        char detail[160];
         if (strcmp(name, watched[i])) continue;
-        ordr_flow_mask |= 1u << i;
-        if (count++ < 160)
-            fprintf(stderr, "ORDR-FLOW: function=%s via=%s time_ms=%u\n",
-                    name, via, (unsigned)jass_gettime());
-        if (ordr_jass_log) fflush(ordr_jass_log);
+        /* Preserve the original bitmask indices for the game/monitor. */
+        if (i == 1) ordr_flow_mask |= 1u << 0;  /* main */
+        if (i >= 2 && i <= 12) ordr_flow_mask |= 1u << (i - 1);
+        if (hits[i]++ < 8) {
+            snprintf(detail, sizeof(detail), "function=%s via=%s hit=%u calls=%u",
+                     name, via, hits[i], ordr_jass_log_lines);
+            jass_ordr_log_event(j, "FLOW_ENTER", detail);
+        }
         return;
     }
 }
@@ -568,6 +572,24 @@ static void jass_coroutine_popframe(jasscoroutine_t *co) {
     jassCoroutineframe_t *frame = co->frames;
     if (frame) {
         JASSFRAMETYPE type = frame->type;
+        if (type == JASS_FRAME_FUNCTION && frame->func &&
+            co->state && jass_root(co->state) == ordr_flow_vm) {
+            cstring_t name = jass_functionname(frame->func);
+            static cstring_t const tracked[] = {
+                "config", "main", "BJG", "BB4", "CUO", "CUa", "CUX",
+                "CUW", "CUN", "CCL", "CWd", "CWv", "CWw", "CWz"
+            };
+            static unsigned return_hits[14];
+            FOR_LOOP(i, sizeof(tracked) / sizeof(*tracked)) {
+                if (name && !strcmp(name, tracked[i]) && return_hits[i]++ < 8) {
+                    char detail[128];
+                    snprintf(detail, sizeof(detail), "function=%s hit=%u calls=%u",
+                             name, return_hits[i], ordr_jass_log_lines);
+                    jass_ordr_log_event(co->state, "FLOW_RETURN", detail);
+                    break;
+                }
+            }
+        }
         co->frames = frame->next;
         jass_free_frame(co, frame);
         /* Coroutine calls used as statements discard returned values.  The old path retained one value per return. */
@@ -992,7 +1014,20 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
     }
 
     co->yielded = false;
+    /* A large initial script can spend many interpreter steps at game
+     * time zero. This heartbeat identifies the active call chain without
+     * requiring a frame to return or the game clock to advance. */
+    uint64_t ordr_resume_steps = 0;
     while (co->frames && !co->yielded) {
+        if (++ordr_resume_steps % 16384 == 0 &&
+            jass_root(j) == ordr_flow_vm) {
+            char chain[192], detail[256];
+            jass_formatcallchain(j, chain, sizeof(chain));
+            snprintf(detail, sizeof(detail), "steps=%llu calls=%u chain=%s",
+                     (unsigned long long)ordr_resume_steps,
+                     ordr_jass_log_lines, chain);
+            jass_ordr_log_event(j, "INIT_PROGRESS", detail);
+        }
         jassCoroutineframe_t *frame = co->frames;
         token_t const *token = frame->pc;
         token_t const *next;
@@ -1099,6 +1134,14 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
     co->rterror_jmp_set = false;
     if (!co->yielded && !co->frames) {
         co->done = true;
+    }
+    if (jass_root(j) == ordr_flow_vm) {
+        char detail[160];
+        snprintf(detail, sizeof(detail), "steps=%llu yielded=%d done=%d remaining_frames=%d calls=%u",
+                 (unsigned long long)ordr_resume_steps,
+                 (int)co->yielded, (int)co->done, co->frames != NULL,
+                 ordr_jass_log_lines);
+        jass_ordr_log_event(j, "RESUME_EXIT", detail);
     }
 }
 
