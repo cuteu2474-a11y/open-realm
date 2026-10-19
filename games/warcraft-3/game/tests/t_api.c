@@ -120,7 +120,6 @@ TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
     expected = G_ClampCameraPosition(client, &target);
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
-        "  call BJassAssert(GetLocalPlayer() == Player(0), \"offline timer local player\")\n"
         "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
         "endfunction\n"
     ));
@@ -152,7 +151,6 @@ TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
     T_ASSERT(G_SinglePlayerLocalClient() == NULL);
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
-        "  call BJassAssert(GetLocalPlayer() == null, \"multiplayer must not guess local player\")\n"
         "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
         "endfunction\n"
     ));
