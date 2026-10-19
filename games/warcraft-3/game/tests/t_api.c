@@ -97,6 +97,60 @@ static void selection_native_test_write(pfWriteType_t type, void const *data) {
 
 static void selection_native_test_unicast(edict_t *ent) { (void)ent; }
 
+/* ORDR's 100ms BDk timer runs without currentplayer. In a single-player
+ * map GetLocalPlayer and camera natives must target the connected human,
+ * not silently ignore the camera pan. */
+TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
+    gameClient_t *client = &game.clients[0];
+    vec2_t target = { 256.0f, 192.0f };
+    vec2_t expected;
+    player_t *saved_currentplayer = currentplayer;
+
+    setup_test_world();
+    level.mapinfo->players[0].used = true;
+    level.mapinfo->players[0].playerType = kPlayerTypeHuman;
+    client->mapplayer = &level.mapinfo->players[0];
+    client->connected = true;
+    currentplayer = NULL;
+    expected = G_ClampCameraPosition(client, &target);
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(GetLocalPlayer() == Player(0), \"offline timer local player\")\n"
+        "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(fabsf(client->camera.state.position.x - expected.x) < 0.01f);
+    T_ASSERT(fabsf(client->camera.state.position.y - expected.y) < 0.01f);
+    currentplayer = saved_currentplayer;
+}
+
+TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
+    gameClient_t *client = &game.clients[0];
+    player_t *saved_currentplayer = currentplayer;
+    vec2_t old_position = { -120.0f, -80.0f };
+
+    setup_test_world();
+    level.mapinfo->players[0].used = true;
+    level.mapinfo->players[0].playerType = kPlayerTypeHuman;
+    level.mapinfo->players[1].used = true;
+    level.mapinfo->players[1].playerType = kPlayerTypeHuman;
+    client->mapplayer = &level.mapinfo->players[0];
+    client->connected = true;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+    game.clients[1].connected = true;
+    client->camera.state.position = old_position;
+    currentplayer = NULL;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(GetLocalPlayer() == null, \"multiplayer must not guess local player\")\n"
+        "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(client->camera.state.position.x == old_position.x);
+    T_ASSERT(client->camera.state.position.y == old_position.y);
+    currentplayer = saved_currentplayer;
+}
+
 TEST(wc3_api, revive_hero_location_native_restores_grom_style_death) {
     edict_t *hero;
 
