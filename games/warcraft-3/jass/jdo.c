@@ -1278,6 +1278,7 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
     }
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
+    bool all_true = true;
     if (!tmp_state) return false;
     FOR_EACH_LIST(gTriggerCondition_t, cond, params->trigger->conditions) {
         memcpy(tmp_state, j, sizeof(struct jass_s));
@@ -1300,13 +1301,22 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         currentunit = params->unit;
         uint32_t result_count = jass_call(tmp_state, 0);
         currentunit = previous_unit;
+        /* ORDR registers initialization procedures that return nothing as
+         * trigger conditions. They still have required side effects, so a
+         * missing boolean result must not suppress later registered
+         * procedures. Preserve the false outcome of a void condition but
+         * continue; an explicit boolean false retains short-circuiting. */
+        if (result_count == 0) {
+            all_true = false;
+            continue;
+        }
         if (result_count != 1 || !jass_popboolean(tmp_state)) {
             jass_free(tmp_state);
             return false;
         }
     }
     jass_free(tmp_state);
-    return true;
+    return all_true;
 }
 
 bool jass_evaluatetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
