@@ -199,6 +199,17 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                     (!e->button_id || evt->button_id == e->button_id))
                     jass_calltriggerevent(level.vm, e->trigger, evt);
                 break;
+            case EVENT_PLAYER_CHAT:
+                if (evt->type == EVENT_PLAYER_CHAT && subject && e->subject == subject &&
+                    (e->chat_exact ? !strcmp(evt->chat_text, e->chat_match) :
+                     !strncmp(evt->chat_text, e->chat_match, strlen(e->chat_match)))) {
+                    /* Pass the matched registration to GetEventPlayerChatStringMatched.
+                     * The full message is retained separately in the queued event. */
+                    evt->responseTo = e;
+                    jass_calltriggerevent(level.vm, e->trigger, evt);
+                    evt->responseTo = NULL;
+                }
+                break;
             case EVENT_GAME_SAVE:
             case EVENT_GAME_LOADED:
                 /* Game events are global, with no unit/player subject. */
