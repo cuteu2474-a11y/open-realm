@@ -39,9 +39,9 @@
 #define MAX_REGION_SIZE 16
 #define MAX_REGIONS 2048 // fixed region data slots; generation tokens let retired slots be reused safely
 #define REGION_TOKEN_SLOT_BITS 13 // 2048 slots plus a two-bit tag; upper uintptr_t bits carry a generation
-#define EVENT_TOKEN_SLOT_BITS 12 // 1024 slots plus a two-bit tag; upper bits carry a generation
+#define EVENT_TOKEN_SLOT_BITS 16 // 16384 slots plus a two-bit tag; upper bits carry a generation
 #define REGION_HANDLE_ID_GENERATION_BITS 17 // keeps region GetHandleId values unique in a positive 28-bit range
-#define EVENT_HANDLE_ID_GENERATION_BITS 18 // keeps region-event GetHandleId values unique in a positive 28-bit range
+#define EVENT_HANDLE_ID_GENERATION_BITS 14 // keep total slot + generation bits at 30 for 32-bit GetHandleId compatibility
 #define REGION_HANDLE_GENERATION_MAX ((1u << REGION_HANDLE_ID_GENERATION_BITS) - 1)
 #define EVENT_HANDLE_GENERATION_MAX ((1u << EVENT_HANDLE_ID_GENERATION_BITS) - 1)
 #define REGION_HANDLE_ID_BASE 0x10000000u
@@ -1055,7 +1055,7 @@ typedef struct {
 #define WC3_LAYER_TIMERDIALOG LAYER_GAME_0
 #define WC3_LAYER_LEADERBOARD LAYER_GAME_1
 #define WC3_LAYER_MULTIBOARD LAYER_GAME_3 // custom multiboard / Team Resources; LAYER_GAME_2 belongs to WC3_LAYER_COMMAND_ERROR
-#define MAX_EVENTS 1024 // handlers; region-event tokens allow safe reuse of retired handler slots
+#define MAX_EVENTS 16384 // ORDR startup registers >1024 player-unit events; retain stable handle slots
 #define MAX_QUESTS 256 // quests; fixed quest slots preserve stable pointers across removal
 #define MAX_QUESTITEMS 16 // items per quest; matches the practical quest objective display capacity
 #define MAX_WAYPOINTS 256 // entities; fixed g_edicts ring used by point-target movement
@@ -2133,6 +2133,7 @@ typedef struct {
 
 typedef struct {
     event_t handlers[MAX_EVENTS];
+    uint32_t next_handler_hint; /* first likely unused slot; reset alongside level.events */
     gameEvent_t queue[MAX_EVENT_QUEUE];
     uint32_t write, read;
 } levelEvents_t;
