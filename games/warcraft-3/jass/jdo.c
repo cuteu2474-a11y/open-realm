@@ -2536,11 +2536,11 @@ static bool ordr_enable_nightmare_isekai_autostart(string_t buffer) {
     char *cun, *cum, *cun_end, *cum_end;
     char *announcement, *first_guard, *second_guard;
     if (!buffer || strlen(buffer) != 2503677u) return false;
-    cun = strstr(buffer, "function CUN takes nothing returns nothing\n");
-    cum = strstr(buffer, "function CUM takes nothing returns nothing\n");
+    cun = strstr(buffer, "function CUN takes nothing returns nothing\r\n");
+    cum = strstr(buffer, "function CUM takes nothing returns nothing\r\n");
     if (!cun || !cum || cun <= cum) return false;
-    cun_end = strstr(cun, "\nendfunction");
-    cum_end = strstr(cum, "\nendfunction");
+    cun_end = strstr(cun, "\r\nendfunction");
+    cum_end = strstr(cum, "\r\nendfunction");
     if (!cun_end || !cum_end) return false;
 
     announcement = strstr(cun, "call DisplayTimedTextToForce(bj_FORCE_ALL_PLAYERS,5,");
