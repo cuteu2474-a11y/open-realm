@@ -2462,10 +2462,18 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
             if (*cur++ == '\n') { line++; column = 1; }
             else column++;
         }
+        /* Capture bytes before the failure as well: tokenization often
+         * advances beyond the actual malformed string or expression. */
+        cur = stop > buffer + 80 ? stop - 80 : buffer;
+        while (cur < stop && n < sizeof(excerpt) - 1) {
+            unsigned char ch = (unsigned char)*cur++;
+            excerpt[n++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
+        }
+        excerpt[n++] = '^';
         cur = stop;
         while (*cur && *cur != '\n' && *cur != '\r' && n < sizeof(excerpt) - 1) {
-            char ch = *cur++;
-            excerpt[n++] = (ch >= 32 && ch <= 126) ? ch : '?';
+            unsigned char ch = (unsigned char)*cur++;
+            excerpt[n++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
         }
         excerpt[n] = 0;
         snprintf(detail, sizeof(detail),
