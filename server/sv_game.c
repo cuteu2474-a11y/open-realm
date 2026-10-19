@@ -151,6 +151,7 @@ void SV_InitGameProgs(void) {
     import.SetGameTime = SV_SetGameTime;
     import.SetPaused = SV_SetPaused;
     import.ReadFile = FS_ReadFile;
+    import.ReadPriorityFile = FS_ReadPriorityFile;
     import.ReadFileAll = FS_ReadFileAll;
     import.SetPriorityArchive = FS_SetPriorityArchive;
     import.error = PF_error;
