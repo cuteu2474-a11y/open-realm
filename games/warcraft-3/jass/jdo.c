@@ -2320,20 +2320,45 @@ TOKENFUNC(TOKENS) {
  * ========================================================================= */
 
 static void jass_remove_comments(string_t buf) {
-    bool in_line  = false;
+    bool in_line = false;
     bool in_block = false;
-    uint32_t quotes  = 0;
+    bool in_string = false;
     char *src = buf, *dst = buf;
     while (*src) {
-        if (!in_line && !in_block) {
-            if (*src == '"') { quotes++; *dst++ = *src++; }
-            else if (quotes & 1) { *dst++ = *src++; }
-            else if (src[0] == '/' && src[1] == '/') { in_line  = true;  src += 2; }
-            else if (src[0] == '/' && src[1] == '*') { in_block = true;  src += 2; }
-            else { *dst++ = *src++; }
-        } else if (in_line && (*src == '\n' || *src == '\r')) { in_line = false; *dst++ = *src++; }
-          else if (in_block && src[0] == '*' && src[1] == '/')      { in_block = false; src += 2; }
-          else { src++; }
+        if (in_line) {
+            if (*src == '\n' || *src == '\r') {
+                in_line = false;
+                *dst++ = *src++;
+            } else src++;
+        } else if (in_block) {
+            if (src[0] == '*' && src[1] == '/') {
+                in_block = false;
+                src += 2;
+            } else {
+                /* Preserve source line numbers for parser diagnostics. */
+                if (*src == '\n' || *src == '\r') *dst++ = *src;
+                src++;
+            }
+        } else if (in_string) {
+            /* An escaped quote is part of the JASS string, not its terminator.
+             * Copy the escaped byte together with the backslash. */
+            if (src[0] == '\\' && src[1]) {
+                *dst++ = *src++;
+                *dst++ = *src++;
+            } else if (*src == '"') {
+                in_string = false;
+                *dst++ = *src++;
+            } else *dst++ = *src++;
+        } else if (*src == '"') {
+            in_string = true;
+            *dst++ = *src++;
+        } else if (src[0] == '/' && src[1] == '/') {
+            in_line = true;
+            src += 2;
+        } else if (src[0] == '/' && src[1] == '*') {
+            in_block = true;
+            src += 2;
+        } else *dst++ = *src++;
     }
     *dst = '\0';
 }
