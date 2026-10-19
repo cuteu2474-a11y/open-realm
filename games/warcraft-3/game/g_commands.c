@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "skills/s_skills.h"
+#include "hud/hud_local.h"
 
 #define CLIENTCOMMAND(NAME) void CMD_##NAME(edict_t *clent, uint32_t argc, cstring_t argv[])
 /* Server authority and HUD share the same WC3-only selection policy. Only the
@@ -3018,7 +3019,85 @@ static void CMD_JassDialogChoice(edict_t *ent, uint32_t argc, cstring_t argv[]) 
     G_JassDialogClick(ent, (uint32_t)dialog, (uint32_t)button);
 }
 
+/* Touch-friendly WC3 chat: the stock upper Chat button opens a modal edit
+ * window. CL_WindowOpen auto-focuses its FT_EDITBOX, which activates SDL text
+ * input / the iPad software keyboard. The editor's {wc3_chat} value is
+ * quoted by CL_WindowFormatCommand, never interpreted as a console command. */
+static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    uiFrame_t edit_frame = {0}, text_frame = {0};
+    uiEditBox_t edit = {0};
+    uiLabel_t label = {0};
+    uint32_t editor_number;
+    (void)argc;
+    (void)argv;
+    if (!ent || !ent->client || !ent->client->connected) return;
+    UI_SetCurrentClient(ent->client);
+    UI_WriteWindowStart(&MAKE(uiWindowDef_t,
+        .id = BZ_WC3_WINDOW_CHAT, .class_id = BZ_WC3_WINDOW_CHAT,
+        .flags = UI_WINDOW_MODAL | UI_WINDOW_NO_PAUSE | UI_WINDOW_UNIQUE));
+
+    UI_WriteBackdropFrame(0.135f, 0.368f, 0.53f, 0.155f,
+        "UI\\Widgets\\EscMenu\\Human\\human-options-menu-background.blp",
+        "UI\\Widgets\\EscMenu\\Human\\human-options-menu-border.blp");
+    UI_WriteTextFrameSized(0.155f, 0.378f, 0.40f, 0.025f, "CHAT / COMMAND",
+        COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_FONT_SIZE);
+
+    edit_frame.flags.type = FT_EDITBOX;
+    edit_frame.color = COLOR32_WHITE;
+    UI_SetFrameRect(&edit_frame, 0.155f, 0.414f, 0.395f, 0.060f);
+    strlcpy(edit.id, "wc3_chat", sizeof(edit.id));
+    edit.maxChars = 220;
+    edit.borderSize = 0.004f;
+    edit.font = gi.FontIndex("Fonts\\FRIZQT__.TTF", HUD_FONT_SIZE);
+    edit.textColor = COLOR32_WHITE;
+    edit.cursorColor = COLOR32_WHITE;
+    edit.background.Background = gi.ImageIndex("UI\\Widgets\\EscMenu\\Human\\human-options-menu-background.blp");
+    edit.background.TileBackground = true;
+    UI_WriteProxyFrame(&edit_frame, &edit, sizeof(edit));
+    editor_number = edit_frame.number;
+
+    /* The text child is required by the existing client edit-widget state
+     * machine; do not use a standalone text field, which cannot receive IME. */
+    text_frame.flags.type = FT_STRING;
+    text_frame.color = COLOR32_WHITE;
+    text_frame.parent = editor_number;
+    text_frame.text = "";
+    UI_SetFrameRect(&text_frame, 0.006f, 0.011f, 0.375f, 0.034f);
+    label.font = edit.font;
+    label.textalignx = FONT_JUSTIFYLEFT;
+    label.textaligny = FONT_JUSTIFYCENTER;
+    UI_WriteProxyFrame(&text_frame, &label, sizeof(label));
+
+    UI_WriteCommandTextFrame(0.556f, 0.420f, 0.089f, 0.050f,
+        "SEND", UI_WINDOW_CLOSE_COMMAND_PREFIX "chat \\"{wc3_chat}\\"",
+        COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_FONT_SIZE);
+    UI_WriteCommandTextFrame(0.155f, 0.480f, 0.085f, 0.030f,
+        "LOG", UI_WINDOW_CLOSE_COMMAND_PREFIX "log",
+        COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_SMALL_FONT_SIZE);
+    UI_WriteCommandTextFrame(0.562f, 0.378f, 0.083f, 0.030f,
+        "CANCEL", UI_WINDOW_CLOSE_ACTION,
+        COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_SMALL_FONT_SIZE);
+    UI_WriteWindowEnd(ent);
+    UI_SetCurrentClient(NULL);
+}
+
+static void CMD_Chat(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    edict_t *player;
+    gameEvent_t *evt;
+    if (!ent || !ent->client || argc != 2 || !argv[1] || !argv[1][0]) return;
+    player = G_GetPlayerEntityByNumber(ent->client->ps.number);
+    if (!player) return;
+    evt = G_PublishEvent(player, EVENT_PLAYER_CHAT);
+    if (evt) {
+        strlcpy(evt->chat_text, argv[1], sizeof(evt->chat_text));
+        fprintf(stderr, "WC3_CHAT player=%u bytes=%u dispatched=1\\n",
+            (unsigned)ent->client->ps.number, (unsigned)strlen(evt->chat_text));
+    }
+}
+
 clientCommand_t clientCommands[] = {
+    { "chat_open", CMD_ChatOpen },
+    { "chat", CMD_Chat },
     { "give", CMD_Give },
     { "god", CMD_God },
     { "kill", CMD_Kill },
