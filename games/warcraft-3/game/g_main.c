@@ -1318,19 +1318,35 @@ void G_RequestCampaignSelect(void) {
  * Surface it in the running game because iPad app logs may omit stderr. */
 static void G_ORDRShowFlowStatus(void) {
     uint32_t mask;
+    uint32_t difficulty_units = 0;
+    uint32_t choice_screen_units = 0;
     char message[224];
     if (!level.vm || level.framenum % (5000 / FRAMETIME) != 0 ||
         !jass_functionbyname(level.vm, "CUO") ||
         !jass_functionbyname(level.vm, "CUW") ||
         !jass_functionbyname(level.vm, "CUN")) return;
     mask = jass_ordr_flow_mask(level.vm);
+    /* CUN creates six difficulty picks (u000-u005) and six supporting
+     * selection-scene units (u006-u009, u00A-u00C). Confirm they're
+     * still live after the JASS handler returns. */
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t const *ent = &g_edicts[i];
+        if (!ent->inuse) continue;
+        if (ent->class_id >= 0x75303030u && ent->class_id <= 0x75303035u)
+            difficulty_units++;
+        if ((ent->class_id >= 0x75303030u && ent->class_id <= 0x75303039u) ||
+            (ent->class_id >= 0x75303041u && ent->class_id <= 0x75303043u))
+            choice_screen_units++;
+    }
     snprintf(message, sizeof(message),
-             "ORDR DEBUG: main=%u init=%u timerReg=%u timerFire=%u choice=%u worldEnt=%u",
+             "ORDR DEBUG: main=%u init=%u timerReg=%u timerFire=%u choice=%u picks=%u/6 scene=%u/12 worldEnt=%u",
              (unsigned)((mask & (1u << 0)) != 0),
              (unsigned)((mask & (1u << 3)) != 0),
              (unsigned)((mask & (1u << 5)) != 0),
              (unsigned)((mask & (1u << 6)) != 0),
              (unsigned)((mask & (1u << 7)) != 0),
+             (unsigned)difficulty_units,
+             (unsigned)choice_screen_units,
              (unsigned)globals.num_edicts);
     jass_ordr_log_event(level.vm, "STATE", message);
     FOR_LOOP(i, game.max_clients) {
