@@ -495,6 +495,67 @@ TEST(wc3_jass_map, forgroup_snapshot_survives_nested_mutation) {
 
 /* ORDR 2.323[C] ends main() by evaluating an uninitialized (null)
  * trigger. A null handle must not dereference trigger->conditions. */
+/* ORDR 2.323[C] uses TriggerEvaluate(Lu) to broadcast initialization
+ * callbacks declared 'returns nothing', including the difficulty timer
+ * initializer. They must all run in the order they were registered. */
+TEST(wc3_jass_map, void_trigger_conditions_execute_in_registration_order) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger initTrigger = null\n"
+        "  integer initOrder = 0\n"
+        "endglobals\n"
+        "function FirstInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 1\n"
+        "endfunction\n"
+        "function SecondInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 2\n"
+        "endfunction\n"
+        "function ThirdInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 3\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set initTrigger = CreateTrigger()\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function FirstInit))\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function SecondInit))\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function ThirdInit))\n"
+        "  call BJassAssert(not TriggerEvaluate(initTrigger), \"void conditions produce false\")\n"
+        "  call BJassAssert(initOrder == 123, \"every void callback runs in registration order\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Explicitly false boolean conditions must still stop downstream callbacks. */
+TEST(wc3_jass_map, false_boolean_condition_still_short_circuits) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger testTrigger = null\n"
+        "  integer order = 0\n"
+        "endglobals\n"
+        "function TrueCondition takes nothing returns boolean\n"
+        "  set order = 1\n"
+        "  return true\n"
+        "endfunction\n"
+        "function FalseCondition takes nothing returns boolean\n"
+        "  set order = order * 10 + 2\n"
+        "  return false\n"
+        "endfunction\n"
+        "function SkippedCondition takes nothing returns boolean\n"
+        "  set order = order * 10 + 3\n"
+        "  return true\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set testTrigger = CreateTrigger()\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function TrueCondition))\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function FalseCondition))\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function SkippedCondition))\n"
+        "  call BJassAssert(not TriggerEvaluate(testTrigger), \"false condition fails evaluation\")\n"
+        "  call BJassAssert(order == 12, \"boolean false short-circuits later callback\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_jass_map, null_trigger_evaluate_and_execute_are_safe) {
     T_ASSERT(run_test_jass(
         "globals\n"
