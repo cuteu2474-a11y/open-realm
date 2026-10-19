@@ -18,7 +18,18 @@ cstring_t parse_token(wordExtractor_t *p) {
     while (isspace(*p->buffer)) ++p->buffer;
     if (*p->buffer == '\"' || *p->buffer == '\'') {
         char quote = *p->buffer;
-        cstring_t closingQuote = strchr(p->buffer + 1, quote);
+        /* Skip escaped quotes: strchr() incorrectly ended JASS strings at \".
+         * This broke ORDR's SaveStr text around script line 7494. */
+        cstring_t closingQuote = p->buffer + 1;
+        while (*closingQuote) {
+            if (*closingQuote == '\\' && closingQuote[1]) {
+                closingQuote += 2;
+                continue;
+            }
+            if (*closingQuote == quote) break;
+            closingQuote++;
+        }
+        if (!*closingQuote) closingQuote = NULL;
         size_t stringLength;
         if (!closingQuote) {
             strlcpy(word, p->buffer, MAX_SEGMENT_SIZE);
