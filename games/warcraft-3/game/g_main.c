@@ -791,12 +791,60 @@ static vec3_t G_MakeCameraOrigin(gameClient_t *client, float x, float y, float z
     return (vec3_t){ x, y, base + z_offset };
 }
 
+/* The ORDR 2.323[C] script calls SetCameraBounds once, reconstructing the
+ * map's authored W3I camera rectangle, and later requests a pan to its
+ * difficulty stage at (-6000,-8864). On the actual iPad run the resulting
+ * camera bounds exclude that scene, despite GetCameraMargin returning the
+ * correct four insets. Reconcile against the map's authoritative W3I rectangle
+ * rather than letting a corrupt/replaced runtime restriction hide the scene.
+ * This only applies to the exact map geometry and JASS function signature. */
+static bool G_ORDRAuthoredCameraBounds(box2_t *authored) {
+    if (!level.vm || !level.mapinfo || !authored ||
+        !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN")) return false;
+    mapCameraBounds_t const *map_camera = &level.mapinfo->cameraBounds;
+    float const *c = map_camera->bounds;
+    if (map_camera->complement.left != 26 ||
+        map_camera->complement.right != 16 ||
+        map_camera->complement.bottom != 20 ||
+        map_camera->complement.top != 32) return false;
+    authored->min = (vec2_t){ MIN(MIN(c[0], c[2]), MIN(c[4], c[6])),
+                                MIN(MIN(c[1], c[3]), MIN(c[5], c[7])) };
+    authored->max = (vec2_t){ MAX(MAX(c[0], c[2]), MAX(c[4], c[6])),
+                                MAX(MAX(c[1], c[3]), MAX(c[5], c[7])) };
+    return fabsf(authored->min.x + 8960.0f) < 0.01f &&
+           fabsf(authored->min.y + 10496.0f) < 0.01f &&
+           fabsf(authored->max.x - 9216.0f) < 0.01f &&
+           fabsf(authored->max.y - 6912.0f) < 0.01f;
+}
+
 vec2_t G_ClampCameraPosition(gameClient_t *client, vec2_t const *position) {
     vec2_t clamped = position ? *position : (vec2_t){ 0, 0 };
     box2_t bounds = level.camera_bounds;
+    box2_t authored;
+    static unsigned ordr_recovery_log_count;
 
     (void)client;
     if (!position) return clamped;
+    if (G_ORDRAuthoredCameraBounds(&authored)) {
+        bool mismatch = fabsf(bounds.min.x - authored.min.x) > 0.01f ||
+                        fabsf(bounds.min.y - authored.min.y) > 0.01f ||
+                        fabsf(bounds.max.x - authored.max.x) > 0.01f ||
+                        fabsf(bounds.max.y - authored.max.y) > 0.01f;
+        if (mismatch && ordr_recovery_log_count++ < 8) {
+            char detail[240];
+            snprintf(detail, sizeof(detail),
+                     "requested=(%.0f,%.0f) incorrect=(%.0f,%.0f)..(%.0f,%.0f) authored=(%.0f,%.0f)..(%.0f,%.0f)",
+                     (double)clamped.x, (double)clamped.y,
+                     (double)bounds.min.x, (double)bounds.min.y,
+                     (double)bounds.max.x, (double)bounds.max.y,
+                     (double)authored.min.x, (double)authored.min.y,
+                     (double)authored.max.x, (double)authored.max.y);
+            jass_ordr_log_event(level.vm, "CAMERA_BOUNDS_RECOVER", detail);
+        }
+        bounds = authored;
+    }
     if (bounds.max.x > bounds.min.x)
         clamped.x = MAX(bounds.min.x, MIN(bounds.max.x, clamped.x));
     if (bounds.max.y > bounds.min.y)
