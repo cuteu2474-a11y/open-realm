@@ -212,14 +212,27 @@ static handle_t G_ReadGameDataFile(cstring_t filename, uint32_t *size) {
 
     if (!filename || !*filename) return NULL;
     if (!size) size = &ignored_size;
+    /* Warcraft map-local SLKs supersede installed game data even when the
+     * active W3I data-set selects Custom_V0/Custom_V1. A prefixed gi.ReadFile
+     * can fall through to the stock game archive and mask Units\\UnitUI.slk
+     * in ORDR, leaving every custom unit with model=0 and SVF_NOCLIENT.
+     * Check only actual map-archive members before allowing base fallback. */
+    if (gi.ReadPriorityFile) {
+        if (game.data_prefix[0]) {
+            snprintf(path, sizeof(path), "%s\\%s", game.data_prefix, filename);
+            data = gi.ReadPriorityFile(path, size);
+            if (data) return data;
+        }
+        data = gi.ReadPriorityFile(filename, size);
+        if (data) return data;
+    }
     if (game.data_prefix[0]) {
         snprintf(path, sizeof(path), "%s\\%s", game.data_prefix, filename);
         data = gi.ReadFile(path, size);
         if (data) return data;
         fprintf(stderr, "WC3: map data overlay missing %s; using base %s\n", path, filename);
     }
-    data = gi.ReadFile(filename, size);
-    return data;
+    return gi.ReadFile(filename, size);
 }
 
 static bool starting_resource_cheat_armed;
