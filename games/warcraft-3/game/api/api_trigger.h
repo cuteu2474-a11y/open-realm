@@ -317,7 +317,20 @@ uint32_t TriggerRegisterPlayerEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerEvent = jass_checkhandle(j, 3, "playerevent");
-    event_t *evt = G_MakeEvent(*whichPlayerEvent);
+    event_t *evt;
+    /* Bad/null handles and an exhausted event pool must never crash a
+     * running map. ORDR registers many events immediately after main(). */
+    if (!whichTrigger || !whichPlayer || !whichPlayerEvent) {
+        jass_ordr_log_event(j, "PLAYER_EVENT_INVALID",
+                            "TriggerRegisterPlayerEvent received null handle");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(*whichPlayerEvent);
+    if (!evt) {
+        jass_ordr_log_event(j, "PLAYER_EVENT_FULL",
+                            "TriggerRegisterPlayerEvent allocation failed");
+        return jass_pushnullhandle(j, "event");
+    }
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerEvent, evt->subject, "player");
@@ -337,7 +350,20 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerUnitEvent = jass_checkhandle(j, 3, "playerunitevent");
     //handle_t filter = jass_checkhandle(j, 4, "boolexpr");
-    event_t *evt = G_MakeEvent(*whichPlayerUnitEvent);
+    event_t *evt;
+    /* BDN registers EVENT_PLAYER_UNIT_SELECTED for every player. A missing
+     * event constant/player or exhausted registry used to be dereferenced. */
+    if (!whichTrigger || !whichPlayer || !whichPlayerUnitEvent) {
+        jass_ordr_log_event(j, "PLAYER_UNIT_EVENT_INVALID",
+                            "TriggerRegisterPlayerUnitEvent received null handle");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(*whichPlayerUnitEvent);
+    if (!evt) {
+        jass_ordr_log_event(j, "PLAYER_UNIT_EVENT_FULL",
+                            "TriggerRegisterPlayerUnitEvent allocation failed");
+        return jass_pushnullhandle(j, "event");
+    }
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
