@@ -115,6 +115,8 @@ TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
     client->mapplayer = &level.mapinfo->players[0];
     client->connected = true;
     currentplayer = NULL;
+    T_ASSERT(G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == client);
     expected = G_ClampCameraPosition(client, &target);
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
@@ -146,6 +148,8 @@ TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
     game.clients[1].connected = true;
     client->camera.state.position = old_position;
     currentplayer = NULL;
+    T_ASSERT(!G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == NULL);
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
         "  call BJassAssert(GetLocalPlayer() == null, \"multiplayer must not guess local player\")\n"
