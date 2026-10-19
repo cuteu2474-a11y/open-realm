@@ -835,6 +835,19 @@ void G_SetCameraBounds(float const bounds[8]) {
             MAX(MAX(bounds[0], bounds[2]), MAX(bounds[4], bounds[6])),
             MAX(MAX(bounds[1], bounds[3]), MAX(bounds[5], bounds[7])),
         });
+    if (level.vm && jass_functionbyname(level.vm, "CUW") &&
+        jass_functionbyname(level.vm, "CUN")) {
+        char detail[320];
+        snprintf(detail, sizeof(detail),
+                 "raw=(%.0f,%.0f),(%.0f,%.0f),(%.0f,%.0f),(%.0f,%.0f) bounds=(%.0f,%.0f)..(%.0f,%.0f)",
+                 (double)bounds[0], (double)bounds[1],
+                 (double)bounds[2], (double)bounds[3],
+                 (double)bounds[4], (double)bounds[5],
+                 (double)bounds[6], (double)bounds[7],
+                 (double)level.camera_bounds.min.x, (double)level.camera_bounds.min.y,
+                 (double)level.camera_bounds.max.x, (double)level.camera_bounds.max.y);
+        jass_ordr_log_event(level.vm, "SET_CAMERA_BOUNDS", detail);
+    }
     FOR_LOOP(i, game.max_clients)
         G_ReclampClientCamera(game.clients + i);
 }
