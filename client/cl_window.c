@@ -1235,7 +1235,26 @@ bool CL_WindowKeyEvent(int key, uint32_t mods) {
                 value->anchor = ti.anchor;
                 return true;
             }
-            if (key == K_ENTER || key == K_TAB) { CL_WindowBlurEdit(); return true; }
+            if (key == K_ENTER) {
+                /* Mobile software keyboards expose Return, not a pointer click.
+                 * Submit an authored chat action through the exact same
+                 * control-value formatter used by the SEND button. Do not run
+                 * arbitrary typed text as an engine console command. */
+                root = CL_WindowRoot(window);
+                CL_WindowPrepareState(window, &root);
+                FOR_LOOP(i, SCR_NumFrames()) {
+                    uiFrame_t const *send = SCR_Frame(i);
+                    cstring_t prefix = UI_WINDOW_CLOSE_COMMAND_PREFIX "chat ";
+                    if (send && send->onclick &&
+                        !strncmp(send->onclick, prefix, strlen(prefix))) {
+                        CL_WindowActivateFrame(window, send);
+                        return true;
+                    }
+                }
+                CL_WindowBlurEdit();
+                return true;
+            }
+            if (key == K_TAB) { CL_WindowBlurEdit(); return true; }
             if (key == K_ESCAPE) { CL_WindowBlurEdit(); return true; }
         }
     }
