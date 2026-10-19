@@ -3069,7 +3069,7 @@ static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
     UI_WriteProxyFrame(&text_frame, &label, sizeof(label));
 
     UI_WriteCommandTextFrame(0.556f, 0.420f, 0.089f, 0.050f,
-        "SEND", UI_WINDOW_CLOSE_COMMAND_PREFIX "chat \\"{wc3_chat}\\"",
+        "SEND", UI_WINDOW_CLOSE_COMMAND_PREFIX "chat \"{wc3_chat}\"",
         COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_FONT_SIZE);
     UI_WriteCommandTextFrame(0.155f, 0.480f, 0.085f, 0.030f,
         "LOG", UI_WINDOW_CLOSE_COMMAND_PREFIX "log",
