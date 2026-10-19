@@ -9,7 +9,7 @@ import pathlib
 import re
 import sys
 
-EVENT = re.compile(r"^\\s*\\d+\\s+ms\\s+\\[\\s*([A-Z][A-Z0-9_ ]*)\\s*\\]\\s*(.*)$")
+EVENT = re.compile(r"^\s*\d+\s+ms\s+\[\s*([A-Z][A-Z0-9_ ]*)\s*\]\s*(.*)$")
 MILESTONES = (
     "FLOW_RETURN_MAIN",
     "MAP_LOAD_AFTER_JASS",
@@ -35,7 +35,7 @@ def inspect(text):
         last_event = event
         if event in ERROR_EVENTS:
             issues.append(event + ": " + detail[:160])
-        if event == "FLOW_RETURN" and re.search(r"\\bfunction=main(?:\\s|$)", detail):
+        if event == "FLOW_RETURN" and re.search(r"\bfunction=main(?:\s|$)", detail):
             observed.append("FLOW_RETURN_MAIN")
         elif event in MILESTONES:
             observed.append(event)
