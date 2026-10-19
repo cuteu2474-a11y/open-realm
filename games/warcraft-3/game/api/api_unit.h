@@ -1345,6 +1345,26 @@ uint32_t CreateUnit(jass_t *j) {
         return jass_pushnullhandle(j, "unit");
     }
     edict_t *unit = unit_create(PLAYER_NUM(player), unitid, &location, facing);
+    /* Trace gameplay spawns as well as difficulty menu picks. Map scripting
+     * can create an edict successfully even when SP_CallSpawn has no UnitUI
+     * model row, sets SVF_NOCLIENT, or the player cannot see it through fog. */
+    if (level.time >= 4000 && jass_functionbyname(j, "CUN") && unit) {
+        static unsigned ordr_spawn_samples;
+        if (ordr_spawn_samples++ < 48) {
+            char detail[300];
+            snprintf(detail, sizeof(detail),
+                     "id=%c%c%c%c owner=%u edict=%d pos=(%.0f,%.0f) model=%u flags=0x%x svflags=0x%x unit_ui_model=%s visible_p0=%d",
+                     (int)((unitid>>24)&255), (int)((unitid>>16)&255),
+                     (int)((unitid>>8)&255), (int)(unitid&255),
+                     (unsigned)PLAYER_NUM(player), (int)unit->s.number,
+                     (double)unit->s.origin.x, (double)unit->s.origin.y,
+                     (unsigned)unit->s.model, (unsigned)unit->s.flags,
+                     (unsigned)unit->svflags,
+                     unit->data.UnitUI && unit->data.UnitUI->modelFile ? unit->data.UnitUI->modelFile : "(none)",
+                     (int)G_FowPlayerCanSeeEntity(0, unit));
+            jass_ordr_log_event(j, "ORDR_UNIT_RENDER", detail);
+        }
+    }
     if (ordr_choice_unit) {
         char detail[256];
         snprintf(detail, sizeof(detail),
