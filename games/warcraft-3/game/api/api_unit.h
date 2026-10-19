@@ -1334,10 +1334,31 @@ uint32_t CreateUnit(jass_t *j) {
     uint32_t unitid = jass_checkinteger(j, 2);
     vec2_t location = MAKE(vec2_t, jass_checknumber(j, 3), jass_checknumber(j, 4));
     float facing = jass_checknumber(j, 5);
+    /* ORDR difficulty screen uses twelve neutral-passive units: u000-u009,
+     * u00A-u00C. Confirm real engine entities, not merely CUN() entry. */
+    bool ordr_choice_unit = (level.time >= 3900 && level.time <= 6000) &&
+        ((unitid >= 0x75303030u && unitid <= 0x75303039u) ||
+         (unitid >= 0x75303041u && unitid <= 0x75303043u));
     if (!player) {
+        if (ordr_choice_unit)
+            jass_ordr_log_event(j, "CHOICE_CREATE_FAIL", "no player for difficulty unit");
         return jass_pushnullhandle(j, "unit");
     }
     edict_t *unit = unit_create(PLAYER_NUM(player), unitid, &location, facing);
+    if (ordr_choice_unit) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "type=%c%c%c%c player=%u position=(%.0f,%.0f) created=%d entity=%d actual=(%.0f,%.0f) flags=0x%x",
+                 (int)((unitid >> 24) & 255), (int)((unitid >> 16) & 255),
+                 (int)((unitid >> 8) & 255), (int)(unitid & 255),
+                 (unsigned)PLAYER_NUM(player),
+                 (double)location.x, (double)location.y,
+                 unit && unit->inuse ? 1 : 0, unit ? (int)unit->s.number : -1,
+                 unit ? (double)unit->s.origin.x : 0.0,
+                 unit ? (double)unit->s.origin.y : 0.0,
+                 unit ? (unsigned)unit->s.flags : 0u);
+        jass_ordr_log_event(j, "CHOICE_CREATE", detail);
+    }
     return jass_pushlighthandle(j, unit, "unit");
 }
 uint32_t CreateUnitByName(jass_t *j) {
