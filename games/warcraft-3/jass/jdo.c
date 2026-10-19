@@ -447,6 +447,9 @@ static uint32_t ordr_flow_mask;
 static FILE *ordr_jass_log;
 static unsigned ordr_jass_log_lines;
 static bool ordr_jass_log_open_attempted;
+/* Crash probe is armed only while resuming post-main ORDR callbacks. */
+static bool ordr_native_probe_active;
+static unsigned ordr_native_probe_calls;
 
 uint32_t jass_ordr_flow_mask(jass_t *j) {
     return j && jass_root(j) == ordr_flow_vm ? ordr_flow_mask : 0;
@@ -1275,7 +1278,12 @@ void jass_runevents(jass_t *j) {
         jasscoroutine_t *next;
         ordinal++;
         jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_RESUME", co, ordinal);
+        bool const previous_probe = ordr_native_probe_active;
+        if (root == ordr_flow_vm && ordinal >= 6 && ordinal <= 32 &&
+            ordr_native_probe_calls < 512)
+            ordr_native_probe_active = true;
         jass_resume(root, co);
+        ordr_native_probe_active = previous_probe;
         jass_ordr_scheduler_checkpoint(root, "EVENT_AFTER_RESUME", co, ordinal);
 
         next = co->next;
@@ -3352,7 +3360,22 @@ static uint32_t jass_call_impl(jass_t *j, uint32_t args) {
         printf("%s\n", func->name);
 #endif
         if (func->nativefunc) {
+            unsigned probe_id = 0;
+            if (ordr_native_probe_active && jass_root(j) == ordr_flow_vm &&
+                ordr_native_probe_calls < 512) {
+                char detail[144];
+                probe_id = ++ordr_native_probe_calls;
+                snprintf(detail, sizeof(detail), "call=%u native=%s argc=%u",
+                         probe_id, func->name ? func->name : "(unnamed)", args);
+                jass_ordr_log_event(j, "NATIVE_BEFORE", detail);
+            }
             ret = func->nativefunc(j);
+            if (probe_id) {
+                char detail[144];
+                snprintf(detail, sizeof(detail), "call=%u native=%s returned=%u",
+                         probe_id, func->name ? func->name : "(unnamed)", ret);
+                jass_ordr_log_event(j, "NATIVE_AFTER", detail);
+            }
         } else {
             FOR_EACH_LIST(jassarg_t, arg, func->args) {
                 jassdict_t *local = JASSALLOC(jassdict_t);
