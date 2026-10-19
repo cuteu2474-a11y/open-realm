@@ -206,7 +206,14 @@ uint32_t Player(jass_t *j) {
     return jass_pushlighthandle(j, player, "player");
 }
 uint32_t GetLocalPlayer(jass_t *j) {
-    return jass_pushlighthandle(j, (mapPlayer_t *)currentplayer, "player");
+    /* GetLocalPlayer remains meaningful inside an offline timer callback.
+     * ORDR's BDk indexes camera setup arrays by the local player's ID. */
+    player_t *local = currentplayer;
+    if (!local) {
+        gameClient_t *client = G_SinglePlayerLocalClient();
+        if (client) local = &client->ps;
+    }
+    return jass_pushlighthandle(j, local, "player");
 }
 uint32_t IsPlayerAlly(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 1, "player");
