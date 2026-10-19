@@ -274,7 +274,7 @@ void UI_LoadHudConsole(void) {
         UI_SetOnClick(hud.upper.UpperButtonBarQuestsButton, "quests");
         UI_SetOnClick(hud.upper.UpperButtonBarMenuButton, "menu");
         UI_SetOnClick(hud.upper.UpperButtonBarAlliesButton, "allies");
-        UI_SetOnClick(hud.upper.UpperButtonBarChatButton, "log");
+        UI_SetOnClick(hud.upper.UpperButtonBarChatButton, "chat_open");
         snprintf(hud.upper_cmds[0], sizeof(hud.upper_cmds[0]), "%s", hud.upper.UpperButtonBarQuestsButton->OnClick);
         snprintf(hud.upper_cmds[1], sizeof(hud.upper_cmds[1]), "%s", hud.upper.UpperButtonBarMenuButton->OnClick);
         snprintf(hud.upper_cmds[2], sizeof(hud.upper_cmds[2]), "%s", hud.upper.UpperButtonBarAlliesButton->OnClick);
