@@ -2643,6 +2643,20 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
     return !jass_rterror_pending(j);
 }
 
+/* Standalone structural validation: uses the same JASS lexer/parser as the
+ * actual map VM, but deliberately does not initialize globals or call natives. */
+bool jass_parsebuffer_only(string_t buffer) {
+    if (!buffer) return false;
+    jass_remove_comments(buffer);
+    jass_remove_bom(buffer);
+    wordExtractor_t parser = MAKE(wordExtractor_t,
+        .buffer = buffer, .start = buffer, .delimiters = ",;()[]+-/*=<>!");
+    token_t *program = JASS_ParseTokens(&parser);
+    bool const ok = !parser.error && program != NULL;
+    JASS_FreeTokens(program);
+    return ok;
+}
+
 bool jass_dobuffer(jass_t *j, string_t buffer) {
     return jass_dobuffer_ex(j, buffer, JASS_MODE_JASS);
 }
