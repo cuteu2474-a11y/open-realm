@@ -466,7 +466,17 @@ uint32_t TriggerAddCondition(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     gTriggerCondition_t *condition = gi.MemAlloc(sizeof(gTriggerCondition_t));
     condition->expr = jass_checkhandle(j, 2, "boolexpr");
-    ADD_TO_LIST(condition, whichTrigger->conditions);
+    /* Warcraft evaluates trigger conditions in registration order. A
+     * prepended list reversed ORDR's Lu startup callbacks, so the last
+     * callback ran first and short-circuited the difficulty timer setup. */
+    condition->next = NULL;
+    if (!whichTrigger->conditions) {
+        whichTrigger->conditions = condition;
+    } else {
+        gTriggerCondition_t *tail = whichTrigger->conditions;
+        while (tail->next) tail = tail->next;
+        tail->next = condition;
+    }
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         cstring_t func = condition->expr ? jass_functionname(condition->expr) : NULL;
         fprintf(stderr,
