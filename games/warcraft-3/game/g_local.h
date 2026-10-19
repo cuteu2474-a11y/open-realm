@@ -984,6 +984,7 @@ typedef struct gameevent_s {
     event_t *responseTo;
     uint32_t dialog_id, button_id;
     uint32_t dialog_player; /* one-based player index; zero means no override */
+    char chat_text[256]; /* queued player chat, including command prefixes */
 } gameEvent_t;
 
 typedef struct {
@@ -2110,6 +2111,8 @@ struct gevent_s {
     uint32_t limitop;
     float limitval;
     cstring_t variable;
+    char chat_match[256]; /* immutable registered chat prefix/exact string */
+    bool chat_exact;
     bool inuse;
     uint32_t handle_generation;
     uint8_t generation_exhausted;
