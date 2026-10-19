@@ -465,9 +465,15 @@ static bool G_LoadMap(cstring_t mapFilename) {
     G_SpawnEntities();
     gi.LoadingFrame();
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
+    /* ORDR iPad startup checkpoints: distinguish a completed JASS main()
+     * from a crash in loading-frame rendering or world activation. */
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_BEFORE_JASS", "G_LoadMap entering G_StartScripts");
     G_StartScripts();
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_AFTER_JASS", "G_StartScripts returned; next loading frame");
     gi.LoadingFrame();
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_AFTER_LOADING_FRAME", "loading frame returned; marking level started");
     level.started = true;
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_READY", "G_LoadMap completed");
     return true;
 }
 
