@@ -209,9 +209,25 @@ uint32_t TriggerRegisterTimerEvent(jass_t *j) {
     bool periodic = jass_checkboolean(j, 3);
     gtimer_t *timer;
     event_t *evt;
-    if (!whichTrigger || !(timer = G_AllocJassTimer())) return jass_pushnullhandle(j, "event");
+    if (!whichTrigger) return jass_pushnullhandle(j, "event");
+    /* Allocate registration first: no orphan timer when event slots are full. */
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) {
+        jass_ordr_log_event(j, "TIMER_EVENT_FULL",
+                            "TriggerRegisterTimerEvent: event registry exhausted");
+        return jass_pushnullhandle(j, "event");
+    }
+    timer = G_AllocJassTimer();
+    if (!timer) {
+        /* Undo this registration without disturbing the slot generation. */
+        evt->inuse = false;
+        jass_ordr_log_event(j, "TIMER_POOL_FULL",
+                            "TriggerRegisterTimerEvent: timer registry exhausted");
+        return jass_pushnullhandle(j, "event");
+    }
     G_TimerStart(timer, (uint32_t)(MAX(0.0f, timeout) * 1000.0f), periodic, NULL);
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer");
     return jass_pushlighthandle(j, evt, "event");
 }
@@ -220,7 +236,9 @@ uint32_t TriggerRegisterTimerExpireEvent(jass_t *j) {
     gtimer_t *timer = jass_checkhandle(j, 2, "timer");
     event_t *evt;
     if (!whichTrigger || !timer) return jass_pushnullhandle(j, "event");
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger; evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer-expire");
     return jass_pushlighthandle(j, evt, "event");
 }
@@ -229,7 +247,10 @@ uint32_t TriggerRegisterGameStateEvent(jass_t *j) {
     uint32_t *whichState = jass_checkhandle(j, 2, "gamestate");
     uint32_t *opcode = jass_checkhandle(j, 3, "limitop");
     float limitval = jass_checknumber(j, 4);
-    event_t *evt = G_MakeEvent(EVENT_GAME_STATE_LIMIT);
+    event_t *evt;
+    if (!whichTrigger) return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_GAME_STATE_LIMIT);
+    if (!evt) return jass_pushnullhandle(j, "event");
     evt->trigger = whichTrigger;
     evt->state = whichState ? *whichState : 0;
     evt->limitop = opcode ? *opcode : 0;
