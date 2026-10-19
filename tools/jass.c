@@ -63,12 +63,17 @@ static handle_t read_file(cstring_t filename, uint32_t *out_size) {
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    string_t buf = Tool_MemAlloc(size);
+    string_t buf = Tool_MemAlloc(size + 1);
     if (!buf) {
         fclose(f);
         return NULL;
     }
-    fread(buf, 1, size, f);
+    if (fread(buf, 1, size, f) != (size_t)size) {
+        Tool_MemFree(buf);
+        fclose(f);
+        return NULL;
+    }
+    buf[size] = '\0';
     fclose(f);
     *out_size = (uint32_t)size;
     return buf;
@@ -101,6 +106,21 @@ static void handle_sigint(int sig) {
     /* Best-effort interrupt: just print a message. The interpreter has no
      * async-safe cancellation hook yet. */
     fprintf(stderr, "\n(interrupted)\n");
+}
+
+static int do_parse_only(cstring_t filename) {
+    uint32_t length = 0;
+    string_t source = read_file(filename, &length);
+    if (!source) return 1;
+    bool const ok = jass_parsebuffer_only(source);
+    Tool_MemFree(source);
+    if (!ok) {
+        fprintf(stderr, "JASS parse-only failed: %s\n", filename);
+        return 1;
+    }
+    fprintf(stdout, "JASS parse-only passed: %s (%u bytes)\n",
+            filename, (unsigned)length);
+    return 0;
 }
 
 static int do_file(jass_t *j, cstring_t filename) {
@@ -197,6 +217,7 @@ static void print_usage(cstring_t prog) {
         "  -l <file>   Load file\n"
         "  -i          Interactive mode\n"
         "  -v          Print version\n"
+        "  -p          Parse script only (no native execution)\n"
         "  --          End option processing\n",
         prog);
 }
@@ -220,6 +241,7 @@ int main(int argc, char *argv[]) {
 
     int interactive = 0;
     int script_done = 0;
+    int parse_only = 0;
     int status = 0;
     cstring_t prog = argv[0];
 
@@ -239,6 +261,8 @@ int main(int argc, char *argv[]) {
             print_version();
             jass_close(j);
             return 0;
+        } else if (strcmp(argv[i], "-p") == 0) {
+            parse_only = 1;
         } else if (strcmp(argv[i], "-i") == 0) {
             interactive = 1;
         } else if (strcmp(argv[i], "-e") == 0) {
@@ -260,7 +284,7 @@ int main(int argc, char *argv[]) {
             print_usage(prog);
             status = 1;
         } else if (!script_done) {
-            status = do_file(j, argv[i]);
+            status = parse_only ? do_parse_only(argv[i]) : do_file(j, argv[i]);
             script_done = 1;
         }
     }
