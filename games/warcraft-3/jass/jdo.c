@@ -2469,7 +2469,7 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
             unsigned char ch = (unsigned char)*cur++;
             excerpt[n++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
         }
-        excerpt[n++] = '^';
+        if (n < sizeof(excerpt) - 1) excerpt[n++] = '^';
         cur = stop;
         while (*cur && *cur != '\n' && *cur != '\r' && n < sizeof(excerpt) - 1) {
             unsigned char ch = (unsigned char)*cur++;
