@@ -1268,6 +1268,14 @@ void jass_runevents(jass_t *j) {
  * ========================================================================= */
 
 static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
+    /* Warcraft JASS permits null trigger handles. In ORDR 2.323[C],
+     * main ends with ConditionalTriggerExecute(ve), where ve stays null.
+     * TriggerEvaluate(null) must fail cleanly rather than dereferencing
+     * params->trigger->conditions and crashing the app at game time zero. */
+    if (!params || !params->trigger) {
+        jass_ordr_log_event(j, "NULL_TRIGGER_EVAL", "null trigger handle ignored");
+        return false;
+    }
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     if (!tmp_state) return false;
@@ -1375,6 +1383,8 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 }
 
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
+    /* TriggerExecute(null) is a no-op in JASS, not a reason to crash. */
+    if (!params || !params->trigger) return;
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
