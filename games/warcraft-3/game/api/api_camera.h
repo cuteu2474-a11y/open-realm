@@ -501,11 +501,13 @@ uint32_t PanCameraToTimed(jass_t *j) {
     if (camera_client && level.time >= 3900 && level.time <= 4600) {
         char detail[160];
         snprintf(detail, sizeof(detail),
-                 "camera_player=%u applied_target=(%.0f,%.0f) pan_active=%d",
+                 "camera_player=%u applied_target=(%.0f,%.0f) pan_active=%d bounds=(%.0f,%.0f)..(%.0f,%.0f)",
                  (unsigned)camera_client->ps.number,
                  (double)camera_client->camera.state.position.x,
                  (double)camera_client->camera.state.position.y,
-                 (int)camera_client->camera.pan_active);
+                 (int)camera_client->camera.pan_active,
+                 (double)level.camera_bounds.min.x, (double)level.camera_bounds.min.y,
+                 (double)level.camera_bounds.max.x, (double)level.camera_bounds.max.y);
         jass_ordr_log_event(j, "CHOICE_CAMERA_APPLIED", detail);
     }
     return 0;
