@@ -609,6 +609,36 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
 /* BDN is the first ORDR ExecuteFunc callback after the four completed
  * post-main callbacks in both iPad logs. It registers player-unit events;
  * malformed/native-null handles must fail closed instead of SIGSEGV. */
+/* ORDR's BDN reaches the old MAX_EVENTS=1024 boundary before BF0
+ * registers a timer. This test must not terminate on the old 1025th
+ * registration, and verifies that high-index region tokens still roundtrip. */
+TEST(wc3_jass_map, ordr_registers_more_than_1024_handlers_and_timer) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  local event e = null\n"
+        "  local integer i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1500\n"
+        "    set e = TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "    call BJassAssert(e != null, \"player-unit handler allocation\")\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set e = TriggerRegisterTimerEvent(t, 1.0, false)\n"
+        "  call BJassAssert(e != null, \"timer-event handler allocation\")\n"
+        "endfunction\n"
+    ));
+    event_t *region_event = G_MakeEvent(EVENT_GAME_ENTER_REGION);
+    uint32_t slot = 0, generation = 0;
+    T_ASSERT(region_event != NULL);
+    if (region_event) {
+        handle_t handle = G_EventHandle(region_event);
+        T_ASSERT(G_EventHandleParts(handle, &slot, &generation));
+        T_ASSERT(slot >= 1500);
+        T_ASSERT(G_EventFromHandle(handle) == region_event);
+    }
+}
+
 TEST(wc3_jass_map, ordr_player_unit_event_registration_rejects_nulls) {
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
