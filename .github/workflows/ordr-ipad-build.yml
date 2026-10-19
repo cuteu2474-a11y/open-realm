@@ -5,6 +5,8 @@ on:
     paths:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
+      - 'tools/ordr/**'
+      - 'tests/test_ordr_startup_log.py'
       - '.github/workflows/ordr-ipad-build.yml'
 # Avoid redundant builds when newer commits arrive on the same branch.
 concurrency:
@@ -12,7 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  regression:
+    name: ORDR JASS regressions
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/corepunch/open-realm-ci:ubuntu-24.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify startup log analyzer
+        run: python3 -m unittest discover -s tests -p 'test_ordr_startup_log.py' -v
+      - name: Run full engine tests
+        run: make test
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORDR-JASS-regression-results
+          path: build/tests/junit/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
   compile-ipad:
+    needs: regression
     # Intel runner uses a separate macOS pool; clang still cross-compiles for iPad arm64.
     runs-on: macos-15-intel
     timeout-minutes: 90
