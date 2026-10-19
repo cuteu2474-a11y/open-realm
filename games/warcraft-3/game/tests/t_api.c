@@ -1889,6 +1889,17 @@ TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
     T_FEQ(level.camera_bounds.max.y, 6912.0f, 0.001f);
     T_ASSERT(-6000.0f >= level.camera_bounds.min.x);
     T_ASSERT(-8864.0f >= level.camera_bounds.min.y);
+    /* Regression for the exact live-iPad failure: the runtime camera rect
+     * was (-3584,-8192) even though the authored map allows (-6000,-8864). */
+    box2_t authored = level.camera_bounds;
+    level.camera_bounds = MAKE(box2_t,
+        .min = { -3584.0f, -8192.0f },
+        .max = { 9216.0f, 6912.0f });
+    vec2_t pan_target = { -6000.0f, -8864.0f };
+    vec2_t unclipped = G_ClampCameraPosition(&game.clients[0], &pan_target);
+    T_FEQ(unclipped.x, -6000.0f, 0.001f);
+    T_FEQ(unclipped.y, -8864.0f, 0.001f);
+    level.camera_bounds = authored;
     CM_SetupTestWorldBounds(NULL);
 }
 
