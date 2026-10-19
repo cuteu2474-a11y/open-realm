@@ -77,6 +77,7 @@ struct jass_context {
     edict_t *source;
     int32_t eventValue;
     uint32_t dialog_id, dialog_button_id;
+    char chat_text[256], chat_matched[256];
     vec2_t point;
     uint8_t hasPoint;
     player_t *playerState;
