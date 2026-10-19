@@ -369,11 +369,19 @@ uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
     return jass_pushnullhandle(j, "event");
 }
 uint32_t TriggerRegisterPlayerChatEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //cstring_t chatMessageToDetect = jass_checkstring(j, 3);
-    //bool exactMatchOnly = jass_checkboolean(j, 4);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    player_t *player = jass_checkhandle(j, 2, "player");
+    cstring_t pattern = jass_checkstring(j, 3);
+    bool exact = jass_checkboolean(j, 4);
+    event_t *evt;
+    if (!trigger || !player) return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_PLAYER_CHAT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(player));
+    evt->trigger = trigger;
+    evt->chat_exact = exact;
+    strlcpy(evt->chat_match, pattern ? pattern : "", sizeof(evt->chat_match));
+    return jass_pushlighthandle(j, G_EventHandle(evt), "event");
 }
 uint32_t TriggerRegisterDeathEvent(jass_t *j) {
     /* Fire whichTrigger when whichWidget dies.  "widget" is the base type of
