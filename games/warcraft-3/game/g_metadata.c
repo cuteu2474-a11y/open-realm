@@ -2112,8 +2112,17 @@ UnitUI_t const *G_UnitUI(uint32_t id) {
     static UnitUI_t zero;
     UnitUI_t const *override = FindMapUnitUIOverride(id);
     UnitUI_t *row;
+    /* A map-specific UnitUI row is authoritative only when it contains
+     * model art. Some custom maps provide a sparse override, and a zero
+     * modelFile must not hide the base unit's renderable model. */
+    if (override && override->modelFile && override->modelFile[0])
+        return override;
+    row = FS_SLKLookup(&ui_idx, id);
+    if (!row && ResolveUnitID(id) != id)
+        row = FS_SLKLookup(&ui_idx, ResolveUnitID(id));
+    if (row && row->modelFile && row->modelFile[0])
+        return row;
     if (override) return override;
-    row = FS_SLKLookup(&ui_idx, ResolveUnitID(id));
     return row ? row : &zero;
 }
 UnitWeapons_t const *G_UnitWeapons(uint32_t id) { static UnitWeapons_t zero; UnitWeapons_t *row = FS_SLKLookup(&weapons_idx, ResolveUnitID(id)); return row ? row : &zero; }
