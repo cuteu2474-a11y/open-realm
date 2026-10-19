@@ -606,6 +606,23 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
 /* ORDR main() queues multiple zero-time callbacks. Exercise the same
  * scheduler path with more callbacks than the five that completed in the
  * iPad crash trace; every finished coroutine must be removed safely. */
+/* BDN is the first ORDR ExecuteFunc callback after the four completed
+ * post-main callbacks in both iPad logs. It registers player-unit events;
+ * malformed/native-null handles must fail closed instead of SIGSEGV. */
+TEST(wc3_jass_map, ordr_player_unit_event_registration_rejects_nulls) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(null, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, null, EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), null, null)\n"
+        "  call TriggerRegisterPlayerEvent(null, Player(0), null)\n"
+        "  call TriggerRegisterPlayerEvent(t, null, null)\n"
+        "  call BJassAssert(true, \"invalid event handles did not crash\")\n"
+        "endfunction\n"
+    ));
+}
+
 TEST(wc3_jass_map, ordr_startup_many_queued_callbacks_drain_after_main) {
     T_ASSERT(run_test_jass(
         "globals\n"
