@@ -131,10 +131,7 @@ static char *G_ORDRAutoNightmareScript(cstring_t script, bool exact_map) {
         "set th[tl]=false\n"
         "set th[tn]=true\n"
         "set th[tp]=false\n";
-    static cstring_t const helper_end =
-        "\ncall DisplayTimedTextToForce(bj_FORCE_ALL_PLAYERS,8,"
-        "\"|cff04ffc4[OpenRealm]|r 악몽 + 이세계 모드 자동 시작\")\n"
-        "endfunction\n";
+    static cstring_t const helper_end = "\nendfunction\n";
     cstring_t cum, cun, core, cum_end, spot, cun_end;
     char *out, *w;
     size_t source_bytes, first_bytes, last_bytes, core_bytes, capacity;
