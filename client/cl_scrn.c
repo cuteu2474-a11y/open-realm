@@ -205,6 +205,16 @@ void SCR_DrawScreenField(uint32_t msec) {
         break;
     }
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if (cls.state == ca_active && cls.key_dest == key_game &&
+        cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
+        !CL_WindowModalActive() && !SCR_LayoutModalActive()) {
+        size2_t size = re.GetWindowSize();
+        rect_t chat_button = { .x = size.width - 110, .y = 16, .w = 94, .h = 46 };
+        re.DrawFill(&chat_button, MAKE(color32_t, 24, 34, 48, 220));
+        re.DrawString((int)chat_button.x + 17, (int)chat_button.y + 14, "CHAT");
+    }
+#endif
     CON_DrawConsole();
     if (Cvar_Integer("scr_showfps", 0)) {
         SCR_DrawFPS(msec);
