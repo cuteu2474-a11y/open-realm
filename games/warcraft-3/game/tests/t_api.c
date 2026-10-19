@@ -1918,6 +1918,10 @@ TEST(wc3_api, normalize_imported_mdl_unit_button_paths) {
     T_ASSERT(!strcmp(actual, "war3mapImported\\Button Nightmare.mdx"));
     G_NormalizeModelFilename("war3mapImported\\Button Easy.blp", actual, sizeof(actual));
     T_ASSERT(!strcmp(actual, "war3mapImported\\Button Easy.blp"));
+    /* Stock data sometimes references editable .mdl stems that must not
+     * be rewritten without an asset-level mapping decision. */
+    G_NormalizeModelFilename("Units\\Campaign\\Hero\\Hero.mdl", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "Units\\Campaign\\Hero\\Hero.mdl"));
 }
 
 TEST(wc3_api, camera_margin_is_default_camera_inset_from_playable_area) {
