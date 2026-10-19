@@ -1409,9 +1409,21 @@ edict_t *unit_create(uint32_t player, uint32_t unitid, vec2_t const *location, f
         unit->mana.value = unit->mana.max_value;
     }
     /* Warsmash CreateUnit delegates to createUnitSimple, which checks the
-     * spawned unit against static pathing and nudges it to a legal point. */
+     * spawned unit against static pathing and nudges it to a legal point.
+     * ORDR's neutral-passive difficulty selection markers are a fixed
+     * in-world UI laid out against scenery at authored coordinates. Nudging
+     * them shifts multiple buttons by 256-384 units and breaks the layout.
+     * Restrict this exception to the exact menu codes, owner, time and area;
+     * ordinary Warcraft units retain normal unstuck placement. */
+    bool ordr_choice_marker = player == 15 &&
+        level.time >= 3900 && level.time <= 7000 &&
+        ((unitid >= 0x75303030u && unitid <= 0x75303039u) ||
+         (unitid >= 0x75303041u && unitid <= 0x75303043u)) &&
+        location->x >= -7200.0f && location->x <= -4800.0f &&
+        location->y >= -9600.0f && location->y <= -8200.0f;
     vec2_t position;
-    if (G_FindUnitUnstuckPosition(unit, location, &position)) {
+    if (ordr_choice_marker || G_FindUnitUnstuckPosition(unit, location, &position)) {
+        if (ordr_choice_marker) position = *location;
         unit->s.origin2 = position;
         unit->s.origin.x = position.x;
         unit->s.origin.y = position.y;
