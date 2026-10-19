@@ -1439,6 +1439,59 @@ static void G_ORDRShowFlowStatus(void) {
              (unsigned)choice_screen_units,
              (unsigned)globals.num_edicts);
     jass_ordr_log_event(level.vm, "STATE", message);
+    /* A registered model is not proof of actual client visibility. Audit
+     * the simulated camera, the render model indices and FOW separately.
+     * The first sample happens after the 4-second menu-unit spawn and after
+     * a complete FOW update. */
+    {
+        gameClient_t *viewer = G_SinglePlayerLocalClient();
+        unsigned with_model = 0, visible = 0, hovered = 0, total = 0, examples = 0;
+        char audit[320];
+        if (viewer) {
+            FOR_LOOP(i, globals.num_edicts) {
+                edict_t const *unit = &g_edicts[i];
+                if (!unit->inuse ||
+                    !((unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u) ||
+                      (unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u)))
+                    continue;
+                total++;
+                if (unit->s.model) with_model++;
+                if (G_FowPlayerCanSeeEntity(viewer->ps.number, unit)) visible++;
+                if (G_FowPlayerCanHoverEntity(viewer->ps.number, unit)) hovered++;
+                if (examples++ < 3) {
+                    snprintf(audit, sizeof(audit),
+                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d",
+                             (int)((unit->class_id >> 24) & 255),
+                             (int)((unit->class_id >> 16) & 255),
+                             (int)((unit->class_id >> 8) & 255),
+                             (int)(unit->class_id & 255),
+                             (unsigned)unit->s.number, (unsigned)unit->s.model,
+                             (unsigned)unit->svflags, (unsigned)unit->s.flags,
+                             (unsigned)unit->s.player, (double)unit->s.origin.x,
+                             (double)unit->s.origin.y,
+                             (int)G_FowPlayerCanSeeEntity(viewer->ps.number, unit));
+                    jass_ordr_log_event(level.vm, "CHOICE_MODEL_AUDIT", audit);
+                }
+            }
+            snprintf(audit, sizeof(audit),
+                     "player=%u connected=%d camera=(%.0f,%.0f) vieworigin=(%.0f,%.0f,%.0f) angles=(%.1f,%.1f,%.1f) distance=%.0f fogflags=0x%x buttons=%u modeled=%u visible=%u hoverable=%u",
+                     (unsigned)viewer->ps.number, (int)viewer->connected,
+                     (double)viewer->camera.state.position.x,
+                     (double)viewer->camera.state.position.y,
+                     (double)viewer->ps.vieworigin.x,
+                     (double)viewer->ps.vieworigin.y,
+                     (double)viewer->ps.vieworigin.z,
+                     (double)viewer->ps.viewangles.x,
+                     (double)viewer->ps.viewangles.y,
+                     (double)viewer->ps.viewangles.z,
+                     (double)viewer->ps.distance,
+                     (unsigned)viewer->ps.rdflags,
+                     total, with_model, visible, hovered);
+            jass_ordr_log_event(level.vm, "CHOICE_RENDER_AUDIT", audit);
+        } else {
+            jass_ordr_log_event(level.vm, "CHOICE_RENDER_AUDIT", "offline local client not found");
+        }
+    }
     FOR_LOOP(i, game.max_clients) {
         gameClient_t *client = &game.clients[i];
         edict_t *ent;
