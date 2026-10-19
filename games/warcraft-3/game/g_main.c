@@ -1368,7 +1368,7 @@ static void G_RunFrame(void) {
     if (ordr_frame_trace) {
         snprintf(ordr_frame_detail, sizeof(ordr_frame_detail),
                  "frame=%u time_ms=%u", (unsigned)level.framenum,
-                 (unsigned)jass_gettime());
+                 (unsigned)level.time);
         jass_ordr_log_event(level.vm, "FRAME_ENTER", ordr_frame_detail);
     }
     G_StartScripts();
