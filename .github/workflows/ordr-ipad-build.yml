@@ -1,4 +1,4 @@
-name: ORDR iPad unsigned build check
+name: ORDR iPad SideStore IPA build
 on:
   workflow_dispatch:
   pull_request:
@@ -23,10 +23,18 @@ jobs:
         run: |
           test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
           find build/ipad -maxdepth 5 -name '*.app' -print
-      - name: Upload unsigned app for diagnostics only
+      - name: Package unsigned IPA for SideStore signing
+        run: |
+          mkdir -p build/ipad/ipa-staging/Payload
+          cp -R build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app build/ipad/ipa-staging/Payload/
+          cd build/ipad/ipa-staging
+          /usr/bin/zip -qry ../ORDR-iPad-SideStore-unsigned.ipa Payload
+          test -s ../ORDR-iPad-SideStore-unsigned.ipa
+          /usr/bin/unzip -t ../ORDR-iPad-SideStore-unsigned.ipa
+      - name: Upload unsigned IPA for SideStore
         uses: actions/upload-artifact@v4
         with:
-          name: openrealm-ipad-unsigned
-          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          name: ORDR-iPad-SideStore-IPA
+          path: build/ipad/ORDR-iPad-SideStore-unsigned.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
