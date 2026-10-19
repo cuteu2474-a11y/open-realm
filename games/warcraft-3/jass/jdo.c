@@ -32,6 +32,7 @@ typedef struct {
     edict_t *source;
     int32_t value;
     uint32_t dialog_id, dialog_button_id;
+    cstring_t chat_text, chat_matched;
     player_t *event_player;
     vec2_t const *point;
     bool has_point;
@@ -1290,6 +1291,8 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.eventValue = params->value;
         tmp_state->context.dialog_id = params->dialog_id;
         tmp_state->context.dialog_button_id = params->dialog_button_id;
+        snprintf(tmp_state->context.chat_text, sizeof(tmp_state->context.chat_text), "%s", params->chat_text ? params->chat_text : "");
+        snprintf(tmp_state->context.chat_matched, sizeof(tmp_state->context.chat_matched), "%s", params->chat_matched ? params->chat_matched : "");
         tmp_state->context.point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f };
         tmp_state->context.hasPoint = params->has_point;
         tmp_state->context.playerState = player;
@@ -1398,7 +1401,7 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
-        jasscoroutine_t *co = jass_startcoroutine(j, &MAKE(jassContext_t,
+        jassContext_t chat_context = MAKE(jassContext_t,
                                   .trigger = params->trigger,
                                   .func = action->func,
                                   .unit = params->unit,
@@ -1414,7 +1417,10 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
                                   .region = params->region,
                                   .timer_generation = params->timer ? ((gtimer_t const *)params->timer)->generation : 0,
                                   .timer_pending = params->timer_pending,
-                              ));
+                              );
+        snprintf(chat_context.chat_text, sizeof(chat_context.chat_text), "%s", params->chat_text ? params->chat_text : "");
+        snprintf(chat_context.chat_matched, sizeof(chat_context.chat_matched), "%s", params->chat_matched ? params->chat_matched : "");
+        jasscoroutine_t *co = jass_startcoroutine(j, &chat_context);
         jassVar_t *loop_index = find_global(j, "bj_forLoopAIndex");
         /* Keep queued and suspended actions on the loop index captured at dispatch. */
         if (co && loop_index && loop_index->value && jass_getvarbasetype(loop_index) == jasstype_integer) {
@@ -1470,6 +1476,8 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
     return jass_calltriggercontext(j, &(jassTriggerContextParams_t){
         .trigger = trigger, .unit = event->edict, .source = event->source, .value = event->value,
         .dialog_id = event->dialog_id, .dialog_button_id = event->button_id,
+        .chat_text = event->type == EVENT_PLAYER_CHAT ? event->chat_text : NULL,
+        .chat_matched = event->type == EVENT_PLAYER_CHAT && event->responseTo ? event->responseTo->chat_match : NULL,
         .event_player = event->dialog_player
             ? jass_getplayerbyindex(event->dialog_player - 1) : NULL,
         .point = event->has_point ? &event->point : NULL, .has_point = event->has_point,
