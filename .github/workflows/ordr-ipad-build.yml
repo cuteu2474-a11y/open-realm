@@ -6,9 +6,15 @@ on:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
       - '.github/workflows/ordr-ipad-build.yml'
+# Avoid redundant builds when newer commits arrive on the same branch.
+concurrency:
+  group: ordr-ipad-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compile-ipad:
-    runs-on: macos-15
+    # Intel runner uses a separate macOS pool; clang still cross-compiles for iPad arm64.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
