@@ -1302,8 +1302,10 @@ static uint32_t ordr_pool_choose(ordr_weighted_pool_t *pool){
     return pool->count?pool->entries[pool->count-1].id:0;
 }
 uint32_t CreateUnitPool(jass_t *j){
-    ordr_weighted_pool_t *pool=ordr_pool_new(j,"unitpool");
-    return jass_pushlighthandle(j,pool,"unitpool");
+    /* ordr_pool_new() calls jass_newhandle(), which already pushes the handle.
+     * A second push left two values on the JASS stack and corrupted arguments. */
+    ordr_pool_new(j,"unitpool");
+    return 1;
 }
 uint32_t DestroyUnitPool(jass_t *j){
     ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
@@ -1347,8 +1349,10 @@ uint32_t PlaceRandomUnit(jass_t *j){
     return jass_pushlighthandle(j,unit,"unit");
 }
 uint32_t CreateItemPool(jass_t *j){
-    ordr_weighted_pool_t *pool=ordr_pool_new(j,"itempool");
-    return jass_pushlighthandle(j,pool,"itempool");
+    /* ordr_pool_new() calls jass_newhandle(), which already pushes the handle.
+     * A second push left two values on the JASS stack and corrupted arguments. */
+    ordr_pool_new(j,"itempool");
+    return 1;
 }
 uint32_t DestroyItemPool(jass_t *j){
     ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
