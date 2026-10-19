@@ -9,7 +9,7 @@ import unittest
 TOOL = pathlib.Path(__file__).resolve().parents[1] / "tools" / "ordr" / "check_startup_log.py"
 
 def log(*entries):
-    return "".join(f"0 ms  [{event:<20}]  {detail}\\n" for event, detail in entries)
+    return "".join(f"0 ms  [{event:<20}]  {detail}\n" for event, detail in entries)
 
 class StartupCheckTests(unittest.TestCase):
     def verify(self, content, expected):
