@@ -142,11 +142,22 @@ void G_RunDeferredFrees(void) {
 void G_ResetDeferredFrees(void) { deferred_free_count = 0; }
 
 event_t *G_MakeEvent(EVENTTYPE type) {
-    FOR_LOOP(i, MAX_EVENTS) if (!level.events.handlers[i].inuse && !level.events.handlers[i].generation_exhausted) {
+    /* Most trigger registrations are append-only during map initialization.
+     * Restarting a linear scan at zero for every one of ORDR's thousands of
+     * player-unit events is quadratic. Search from the high-water hint, then
+     * wrap to reuse retired slots with their generation intact. */
+    uint32_t const start = level.events.next_handler_hint % MAX_EVENTS;
+    FOR_LOOP(offset, MAX_EVENTS) {
+        uint32_t const i = (start + offset) % MAX_EVENTS;
         event_t *evt = &level.events.handlers[i];
-        uintptr_t generation = evt->handle_generation;
-        memset(evt, 0, sizeof(*evt)); evt->handle_generation = generation;
-        evt->inuse = true; evt->type = type; return evt;
+        if (evt->inuse || evt->generation_exhausted) continue;
+        uintptr_t const generation = evt->handle_generation;
+        memset(evt, 0, sizeof(*evt));
+        evt->handle_generation = generation;
+        evt->inuse = true;
+        evt->type = type;
+        level.events.next_handler_hint = (i + 1) % MAX_EVENTS;
+        return evt;
     }
     fprintf(stderr, "WC3: event slot limit %u reached\n", MAX_EVENTS);
     return NULL;
