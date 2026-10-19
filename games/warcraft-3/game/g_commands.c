@@ -3036,15 +3036,15 @@ static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
         .id = BZ_WC3_WINDOW_CHAT, .class_id = BZ_WC3_WINDOW_CHAT,
         .flags = UI_WINDOW_MODAL | UI_WINDOW_NO_PAUSE | UI_WINDOW_UNIQUE));
 
-    UI_WriteBackdropFrame(0.135f, 0.368f, 0.53f, 0.155f,
+    UI_WriteBackdropFrame(0.135f, 0.080f, 0.53f, 0.155f,
         "UI\\Widgets\\EscMenu\\Human\\human-options-menu-background.blp",
         "UI\\Widgets\\EscMenu\\Human\\human-options-menu-border.blp");
-    UI_WriteTextFrameSized(0.155f, 0.378f, 0.40f, 0.025f, "CHAT / COMMAND",
+    UI_WriteTextFrameSized(0.155f, 0.090f, 0.40f, 0.025f, "CHAT / COMMAND",
         COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_FONT_SIZE);
 
     edit_frame.flags.type = FT_EDITBOX;
     edit_frame.color = COLOR32_WHITE;
-    UI_SetFrameRect(&edit_frame, 0.155f, 0.414f, 0.395f, 0.060f);
+    UI_SetFrameRect(&edit_frame, 0.155f, 0.126f, 0.395f, 0.060f);
     strlcpy(edit.id, "wc3_chat", sizeof(edit.id));
     edit.maxChars = 220;
     edit.borderSize = 0.004f;
@@ -3068,13 +3068,13 @@ static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
     label.textaligny = FONT_JUSTIFYCENTER;
     UI_WriteProxyFrame(&text_frame, &label, sizeof(label));
 
-    UI_WriteCommandTextFrame(0.556f, 0.420f, 0.089f, 0.050f,
+    UI_WriteCommandTextFrame(0.556f, 0.132f, 0.089f, 0.050f,
         "SEND", UI_WINDOW_CLOSE_COMMAND_PREFIX "chat \"{wc3_chat}\"",
         COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_FONT_SIZE);
-    UI_WriteCommandTextFrame(0.155f, 0.480f, 0.085f, 0.030f,
+    UI_WriteCommandTextFrame(0.155f, 0.192f, 0.085f, 0.030f,
         "LOG", UI_WINDOW_CLOSE_COMMAND_PREFIX "log",
         COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_SMALL_FONT_SIZE);
-    UI_WriteCommandTextFrame(0.562f, 0.378f, 0.083f, 0.030f,
+    UI_WriteCommandTextFrame(0.562f, 0.090f, 0.083f, 0.030f,
         "CANCEL", UI_WINDOW_CLOSE_ACTION,
         COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_SMALL_FONT_SIZE);
     UI_WriteWindowEnd(ent);
