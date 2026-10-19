@@ -79,6 +79,7 @@ struct jass_context {
     edict_t *source;
     int32_t eventValue;
     uint32_t dialog_id, dialog_button_id;
+    uint32_t ui_frame_id; /* immutable dynamic UI callback identity */
     vec2_t point;
     uint8_t hasPoint;
     player_t *playerState;

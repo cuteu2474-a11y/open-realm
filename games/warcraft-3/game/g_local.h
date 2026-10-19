@@ -3490,6 +3490,7 @@ void G_UpdateUnitResponsePresentation(void);
 void G_QueueSelectionSound(edict_t *, bool);
 void G_QueueAttackOrderSound(edict_t *);
 void G_ClientCommand(edict_t *, uint32_t, cstring_t[]);
+void G_OrdrFrameEvent(edict_t *, uint32_t, int32_t);
 bool G_CheatsEnabled(void);
 void G_ClientSetCameraPosition(edict_t *, vec2_t const *);
 

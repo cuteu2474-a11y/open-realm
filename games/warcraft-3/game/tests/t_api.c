@@ -9889,4 +9889,112 @@ TEST(wc3_api, ordr_invalid_registry_counts_do_not_replace_valid_save) {
     T_EQ(level.ordr_num_sync_registrations, (uint32_t)0);
     remove(filename);
 }
+
+/* Drive authenticated commands, the scheduler, nested ExecuteFunc and a suspended save/load. */
+static void ordr_ui_command_roundtrip(bool sync) {
+    cstring_t file = Test_TempPath("ordr-ui-event.sav");
+    setup_test_world();
+    currentplayer = G_GetPlayerByNumber(0);
+    T_ASSERT(run_test_jass(
+        "native DzCreateFrameByTagName takes string kind, string name, integer parent, string template, integer context returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer eventId, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventPlayer takes nothing returns player\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzTriggerRegisterSyncData takes trigger t, string prefix, boolean server returns nothing\n"
+        "native DzSyncData takes string prefix, string data returns nothing\n"
+        "native DzGetTriggerSyncPlayer takes nothing returns player\n"
+        "native DzGetTriggerSyncData takes nothing returns string\n"
+        "globals\n"
+        " integer frame = 0\n"
+        " integer calls = 0\n"
+        " integer syncs = 0\n"
+        " trigger nested = null\n"
+        "endglobals\n"
+        "function check_context takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventPlayer() == Player(1), \"UI sender lost\")\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == frame, \"UI frame lost\")\n"
+        "endfunction\n"
+        "function on_sync takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerSyncPlayer() == Player(1), \"sync sender lost\")\n"
+        " call BJassAssert(DzGetTriggerSyncData() == \"click\", \"sync payload lost\")\n"
+        " set syncs = syncs + 1\n"
+        "endfunction\n"
+        "function on_click takes nothing returns nothing\n"
+        " call ExecuteFunc(\"check_context\")\n"
+        " call TriggerExecute(nested)\n"
+        " set calls = calls + 1\n"
+        " call TriggerSleepAction(0.2)\n"
+        " call check_context()\n"
+        " call DzSyncData(\"ui\", \"click\")\n"
+        "endfunction\n"
+        "function verify_pending takes nothing returns nothing\n"
+        " call BJassAssert(calls == 1, \"UI callback not started exactly once\")\n"
+        " call BJassAssert(syncs == 0, \"UI callback did not sleep\")\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(calls == 1, \"UI callback chain missing or duplicated\")\n"
+        " call BJassAssert(syncs == 1, \"sync callback missing or duplicated\")\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == 0, \"UI context leaked\")\n"
+        " call BJassAssert(DzGetTriggerUIEventPlayer() == null, \"UI player leaked\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local trigger t = CreateTrigger()\n"
+        " local integer parent = DzCreateFrameByTagName(\"FRAME\", \"Parent\", 1, \"\", 0)\n"
+        " set frame = DzCreateFrameByTagName(\"BUTTON\", \"Click\", parent, \"\", 0)\n"
+        " call DzFrameSetScriptByCode(frame, 1, function on_click, false)\n"
+        " set nested = CreateTrigger()\n"
+        " call TriggerAddAction(nested, function check_context)\n"
+        " call TriggerAddAction(t, function on_sync)\n"
+        " call DzTriggerRegisterSyncData(t, \"ui\", false)\n"
+        "endfunction\n"
+    ));
+    level.ordr_frames[1].callbacks[0].sync = sync;
+    g_edicts[1].client = &game.clients[1];
+    game.clients[1].ps.number = 1;
+    cstring_t command[] = { "dzframe", "3", "1" };
+    cstring_t bad[][3] = {
+        { "dzframe", "-1", "1" }, { "dzframe", "3garbage", "1" },
+        { "dzframe", "4294967296", "1" }, { "dzframe", "3", "2147483648" },
+        { "dzframe", "3", "2" }, { "dzframe", "0", "1" },
+        { "dzframe", "3", "-1" }, { "dzframe", "", "1" },
+    };
+    FOR_LOOP(i, sizeof(bad) / sizeof(*bad)) globals.ClientCommand(&g_edicts[1], 3, bad[i]);
+    globals.ClientCommand(&g_edicts[1], 2, command);
+    level.ordr_frames[1].visible = false;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.ordr_frames[1].visible = true;
+    level.ordr_frames[1].enabled = false;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.ordr_frames[1].enabled = true;
+    level.ordr_frames[0].visible = false;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.ordr_frames[0].visible = true;
+    level.ordr_frames[0].enabled = false;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.ordr_frames[0].enabled = true;
+    level.ordr_frames[0].parent = 3;
+    globals.ClientCommand(&g_edicts[1], 3, command); /* cyclic ancestry */
+    level.ordr_frames[0].parent = 999;
+    globals.ClientCommand(&g_edicts[1], 3, command); /* missing parent */
+    level.ordr_frames[0].parent = 1;
+    jassFunc_t const *callback = level.ordr_frames[1].callbacks[0].func;
+    level.ordr_frames[1].callbacks[0].func = NULL;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.ordr_frames[1].callbacks[0].func = callback;
+    globals.ClientCommand(&g_edicts[1], 3, command);
+    level.started = level.scriptsStarted = true;
+    globals.RunFrame();
+    jass_callbyname(level.vm, "verify_pending", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_ASSERT(WriteGame(file));
+    T_ASSERT(ReadGame(file));
+    FOR_LOOP(i, 6) { level.time += FRAMETIME; globals.RunFrame(); }
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    remove(file);
+}
+
+TEST(wc3_api, ordr_ui_command_local_context_survives_save) { ordr_ui_command_roundtrip(false); }
+TEST(wc3_api, ordr_ui_command_sync_context_survives_save) { ordr_ui_command_roundtrip(true); }
+
 #endif

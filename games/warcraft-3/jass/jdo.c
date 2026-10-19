@@ -22,7 +22,7 @@
 #define INF_LOOP_PROTECTION 1000000  /* SC2 Galaxy scripts have large but legitimate loops */
 #define SYNTAX_C_OPERATORS 1 // bitmask; enables Galaxy symbolic logic and shift operators
 #define SYNTAX_INCLUDES    2 // bitmask; enables Galaxy include preprocessing
-#define BZ_JASS_SNAPSHOT_VERSION 9 // v9 preserves queued offline sync event payloads
+#define BZ_JASS_SNAPSHOT_VERSION 10 // v10 preserves suspended dynamic UI callback identity
 #define BZ_JASS_SNAPSHOT_MAX_COUNT (1u << 20) // records; bounds allocations and list walks from corrupt snapshots
 #define BZ_JASS_SNAPSHOT_MAX_STRING (1u << 20) // bytes; bounds strings from corrupt snapshots
 
@@ -32,6 +32,7 @@ typedef struct {
     edict_t *source;
     int32_t value;
     uint32_t dialog_id, dialog_button_id;
+    uint32_t ui_frame_id;
     player_t *event_player;
     cstring_t sync_data;
     vec2_t const *point;
@@ -1244,6 +1245,7 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
                                   .source = params->source,
                                   .eventValue = params->value,
                                   .dialog_id = params->dialog_id,
+                                  .ui_frame_id = params->ui_frame_id,
                                   .dialog_button_id = params->dialog_button_id,
                                   .point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f },
                                   .hasPoint = params->has_point,
@@ -1282,7 +1284,9 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
 }
 
 void jass_executetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    jass_executetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit }, true);
+    jassContext_t const *ctx = jass_getcontext(j);
+    jass_executetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit,
+        .ui_frame_id = ctx->ui_frame_id, .event_player = ctx->ui_frame_id ? ctx->playerState : NULL }, true);
 }
 
 static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
@@ -2772,6 +2776,7 @@ static bool jass_snapshot_writecontext(jassSnapshot_t *snapshot, jassContext_t c
     if (!jass_snapshot_writestr(snapshot, jass_functionname(context->func)) ||
         !jass_snapshot_io(snapshot, (void *)&context->eventValue, sizeof(context->eventValue)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_id, sizeof(context->dialog_id)) ||
+        !jass_snapshot_io(snapshot, (void *)&context->ui_frame_id, sizeof(context->ui_frame_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->point, sizeof(context->point)) ||
         !jass_snapshot_io(snapshot, (void *)&context->hasPoint, sizeof(context->hasPoint)) ||
@@ -2800,6 +2805,7 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
     if (has_func && !context->func) return false;
     if (!jass_snapshot_io(snapshot, &context->eventValue, sizeof(context->eventValue)) ||
         !jass_snapshot_io(snapshot, &context->dialog_id, sizeof(context->dialog_id)) ||
+        !jass_snapshot_io(snapshot, &context->ui_frame_id, sizeof(context->ui_frame_id)) ||
         !jass_snapshot_io(snapshot, &context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, &context->point, sizeof(context->point)) ||
         !jass_snapshot_io(snapshot, &context->hasPoint, sizeof(context->hasPoint)) ||

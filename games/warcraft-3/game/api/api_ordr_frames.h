@@ -1,6 +1,6 @@
 /* Logical DzFrame compatibility for ORDR offline map scripts.
  * This layer owns stable map-local handles and attributes; it DOES NOT render
- * dynamic artwork or dispatch touch/click events to the client yet.
+ * dynamic artwork. Server command dispatch exists; HUD hit testing is pending.
  * Avoid reporting UI as playable until the client presentation bridge exists.
  */
 #ifndef WC3_API_ORDR_FRAMES_H
@@ -218,13 +218,42 @@ static uint32_t DzFrameSetScriptByCode(jass_t *j) {
     return 0;
 }
 
-/* These context getters are meaningful only after a UI event has been
- * delivered from a client; the presentation/input bridge is still pending. */
+/* Command sender identity is server-owned; no player ID is accepted from the client.
+ * Dynamic HUD command emission/hit testing remains a separate implementation step. */
+void G_OrdrFrameEvent(edict_t *ent, uint32_t id, int32_t event) {
+    ordrFrame_t *frame = ORDR_Frame(id), *parent = frame;
+    player_t *sender = NULL;
+    if (!level.vm || !ent || !ent->client || !frame) return;
+    FOR_LOOP(i, game.max_clients)
+        if (ent->client == &game.clients[i] && ent == G_GetPlayerEntityByNumber(game.clients[i].ps.number))
+            sender = &game.clients[i].ps;
+    if (!sender) return;
+    /* Reject hidden/disabled ancestors, missing links and cycles without unbounded traversal. */
+    FOR_LOOP(i, level.ordr_num_frames) {
+        if (!parent->visible || !parent->enabled) return;
+        if (parent->parent <= ORDR_GAME_UI_ROOT_ID) { parent = NULL; break; }
+        parent = ORDR_Frame(parent->parent);
+        if (!parent) return;
+    }
+    if (parent) return;
+    FOR_LOOP(i, frame->callback_count) {
+        ordrFrameEvent_t const *cb = &frame->callbacks[i];
+        if (cb->event_id != event || !cb->func) continue;
+        /* Both registration modes execute locally; this is not multiplayer synchronization. */
+        jassContext_t ctx = { .func = cb->func, .ui_frame_id = id, .playerState = sender, .localPlayerState = sender };
+        jass_startcoroutine(level.vm, &ctx);
+        break;
+    }
+}
+
 static uint32_t DzGetTriggerUIEventPlayer(jass_t *j) {
-    return jass_pushnullhandle(j, "player");
+    jassContext_t const *ctx = jass_getcontext(j);
+    return ctx && ctx->ui_frame_id && ctx->playerState
+        ? jass_pushlighthandle(j, ctx->playerState, "player") : jass_pushnullhandle(j, "player");
 }
 static uint32_t DzGetTriggerUIEventFrame(jass_t *j) {
-    return jass_pushinteger(j, 0);
+    jassContext_t const *ctx = jass_getcontext(j);
+    return jass_pushinteger(j, ctx ? ctx->ui_frame_id : 0);
 }
 
 #endif /* WC3_API_ORDR_FRAMES_H */

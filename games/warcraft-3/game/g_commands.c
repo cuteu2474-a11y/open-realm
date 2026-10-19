@@ -3054,6 +3054,22 @@ CLIENTCOMMAND(Chat) {
     G_JassPlayerChat(&clent->client->ps, message);
 }
 
+/* Reject signs, whitespace, suffixes and overflow rather than partially parsing input. */
+static void CMD_OrdrFrame(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    uint32_t values[2] = {0};
+    if (argc != 3) return;
+    FOR_LOOP(i, 2) {
+        cstring_t arg = argv[i + 1];
+        if (!arg || !*arg) return;
+        for (; *arg; ++arg) {
+            if (*arg < '0' || *arg > '9' || values[i] > (INT32_MAX - (uint32_t)(*arg - '0')) / 10)
+                return;
+            values[i] = values[i] * 10 + (*arg - '0');
+        }
+    }
+    G_OrdrFrameEvent(ent, values[0], (int32_t)values[1]);
+}
+
 clientCommand_t clientCommands[] = {
     { "chat", CMD_Chat },
     { "say", CMD_Chat },
@@ -3107,6 +3123,7 @@ clientCommand_t clientCommands[] = {
     { "gameresult_load", CMD_GameResultLoad },
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
+    { "dzframe", CMD_OrdrFrame },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },
     { "eclear", CMD_EnemiesClear },

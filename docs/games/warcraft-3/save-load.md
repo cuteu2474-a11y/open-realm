@@ -6,7 +6,7 @@ The WC3 game module owns save/load. `GetGameAPI()` exposes `SaveGame` and `LoadG
 
 `WriteGame()` writes the current game state to a versioned binary file. The file contains:
 
-- `W3SV` magic, format version 91, canonical map path, the current `sizeof(edict_t)`, entity count, client count, script identity, and native-handle registry counts;
+- `W3SV` magic, format version 92, canonical map path, the current `sizeof(edict_t)`, entity count, client count, script identity, and native-handle registry counts;
 - level frame/time, authoritative Warcraft time-of-day state, map-global camera bounds, and started/script-started flags;
 - each client `GAMECLIENT` state, including its `PLAYER` state, JASS settings and dynamically sized `SetPlayerAbilityAvailable` rawcode list, runtime removed/result-presentation state, researched tech, text storage, camera values, messages, and HUD caches;
 - each camera target as an entity index;
@@ -26,6 +26,12 @@ The versioned layout retains the authoritative `level.timeofday` record and game
 ### Save compatibility policy
 
 Save compatibility is deliberately unsupported. Load only the current format version and serialized layout, and reject older or otherwise mismatched saves with a diagnostic. Bump the format version when the serialized layout, callback identity, or meaning changes, including changes that leave `sizeof(edict_t)` unchanged. Do not retain legacy layouts, migration defaults, compatibility aliases, or optional extension records.
+
+Version 92 pairs with JASS snapshot 10 to retain `jassContext_t.ui_frame_id` for queued
+or sleeping dynamic UI callbacks. Player context already uses the existing handle codec.
+The ORDR command regression saves during `TriggerSleepAction`, reloads, advances the real
+scheduler, and verifies frame/sender context and the subsequent offline sync callback.
+Network packets are unchanged; older saves and snapshots are rejected.
 
 Version 91 persists the ORDR logical frame and offline sync registries in `level_fields`.
 Frame handles, parent/anchor IDs, text, media paths, layout and interaction flags are values;

@@ -119,7 +119,8 @@ static uint32_t const save_commit = MAKEFOURCC('W', '3', 'O', 'K');
 /* Version 89 retains entity identity for ability-owned point-spell approaches. */
 /* Version 90 expands event registrations to 2048 and rebalances region-event token bits. */
 /* Version 91 persists ORDR logical frames, callbacks and offline sync registrations. */
-static uint32_t const save_version = 91;
+/* Version 92 pairs with JASS snapshot 10 for suspended UI callback context. */
+static uint32_t const save_version = 92;
 #define SAVE_STREAM_BUFFER (1u << 20) // bytes; save files are several MB of field writes, so a large stdio buffer avoids per-4 KB syscalls
 #define MAX_SAVE_STRING (1u << 20) // bytes; bounds quest-string allocations from corrupt saves
 #define MAX_SAVE_GROUP_HANDLES 65536u // corrupt-save bound only; runtime group registry itself grows dynamically
