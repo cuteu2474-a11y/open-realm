@@ -8,10 +8,11 @@ extern player_t *currentplayer;
 
 static gameClient_t *G_CurrentCameraClient(cstring_t func) {
     (void)func;
-    if (!currentplayer) {
-        return NULL;
-    }
-    return G_GetPlayerClientByNumber(PLAYER_NUM(currentplayer));
+    if (currentplayer)
+        return G_GetPlayerClientByNumber(PLAYER_NUM(currentplayer));
+    /* Offline map timers (e.g. ORDR's BDk difficulty camera) have no
+     * localPlayerState. They nevertheless run on the sole local client. */
+    return G_SinglePlayerLocalClient();
 }
 
 static float G_CameraHorizontalToVerticalFov(float horizontal) {
@@ -489,13 +490,24 @@ uint32_t PanCameraToTimed(jass_t *j) {
     if (level.time >= 3900 && level.time <= 4600) {
         char detail[160];
         snprintf(detail, sizeof(detail),
-                 "target=(%.0f,%.0f) duration=%.2f local_player=%d camera_client=%d",
+                 "target=(%.0f,%.0f) duration=%.2f local_player=%d camera_client=%d resolved_player=%d",
                  (double)x, (double)y, (double)duration,
                  currentplayer ? (int)PLAYER_NUM(currentplayer) : -1,
-                 camera_client ? 1 : 0);
+                 camera_client ? 1 : 0,
+                 camera_client ? (int)camera_client->ps.number : -1);
         jass_ordr_log_event(j, "CHOICE_CAMERA", detail);
     }
     G_StartCameraPanTimed(camera_client, (vec2_t){ x, y }, duration);
+    if (camera_client && level.time >= 3900 && level.time <= 4600) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "camera_player=%u applied_target=(%.0f,%.0f) pan_active=%d",
+                 (unsigned)camera_client->ps.number,
+                 (double)camera_client->camera.state.position.x,
+                 (double)camera_client->camera.state.position.y,
+                 (int)camera_client->camera.pan_active);
+        jass_ordr_log_event(j, "CHOICE_CAMERA_APPLIED", detail);
+    }
     return 0;
 }
 uint32_t PanCameraToWithZ(jass_t *j) {
