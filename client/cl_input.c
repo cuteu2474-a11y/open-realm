@@ -704,7 +704,7 @@ void CL_Input(void) {
                         ipad_chat_touch_down = true;
                         fprintf(stderr, "ORDR_CHAT_TOUCH open\n");
                         Cmd_ForwardToServer("chat_open");
-                        break;
+                        continue;
                     }
                     if (mousevt && cls.key_dest != key_console) {
                         mouse_button_keys[event.button.button] = mousevt;
@@ -717,7 +717,7 @@ void CL_Input(void) {
                     if (ipad_chat_touch_down && event.button.which == SDL_TOUCH_MOUSEID &&
                         event.button.button == SDL_BUTTON_LEFT) {
                         ipad_chat_touch_down = false;
-                        break;
+                        continue;
                     }
                     keyCode_t mousevt = event.button.button < sizeof(mouse_button_keys) / sizeof(*mouse_button_keys)
                                       ? mouse_button_keys[event.button.button]
