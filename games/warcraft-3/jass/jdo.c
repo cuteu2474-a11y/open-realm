@@ -1239,28 +1239,66 @@ bool jass_resume(jass_t *j, jasscoroutine_t *co) {
     return true;
 }
 
+/* Log both sides of every lifecycle boundary during the initial ORDR map
+ * startup. The two recorded device crashes happened after RESUME_EXIT but
+ * before G_StartScripts returned: that does not establish whether the next
+ * resume, completed-coroutine free, or list advancement failed. Keep these
+ * checkpoints uncoupled from game semantics and cap startup volume. */
+static void jass_ordr_scheduler_checkpoint(jass_t *root, cstring_t stage,
+                                           jasscoroutine_t const *co,
+                                           unsigned ordinal) {
+    if (root != ordr_flow_vm || ordinal > 128) return;
+    char detail[208];
+    cstring_t function = "(none)";
+    if (co && co->state && co->state->context.func) {
+        cstring_t name = jass_functionname(co->state->context.func);
+        if (name && *name) function = name;
+    }
+    snprintf(detail, sizeof(detail),
+             "ordinal=%u co=%p function=%s done=%d yielded=%d wake_ms=%u",
+             ordinal, (void *)co, function, co ? (int)co->done : -1,
+             co ? (int)co->yielded : -1,
+             co ? (unsigned)co->wake_time : 0u);
+    jass_ordr_log_event(root, stage, detail);
+}
+
 void jass_runevents(jass_t *j) {
     jass_t *root = jass_root(j);
     jasscoroutine_t *prev = NULL;
     jasscoroutine_t *co = root->coroutines;
+    unsigned ordinal = 0;
 
+    if (root == ordr_flow_vm)
+        jass_ordr_log_event(root, "EVENT_DRAIN_ENTER",
+                            "queued JASS coroutines entering event scheduler");
     while (co) {
         jasscoroutine_t *next;
+        ordinal++;
+        jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_RESUME", co, ordinal);
         jass_resume(root, co);
+        jass_ordr_scheduler_checkpoint(root, "EVENT_AFTER_RESUME", co, ordinal);
 
         next = co->next;
         if (co->done) {
+            jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_FREE", co, ordinal);
             if (prev) {
                 prev->next = next;
             } else {
                 root->coroutines = next;
             }
             jass_free_coroutine(co);
+            jass_ordr_scheduler_checkpoint(root, "EVENT_AFTER_FREE", NULL, ordinal);
         } else {
             prev = co;
         }
         if (root->halt_events) break;
         co = next;
+    }
+    if (root == ordr_flow_vm) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "visited=%u queue_empty=%d halted=%d",
+                 ordinal, root->coroutines == NULL, (int)root->halt_events);
+        jass_ordr_log_event(root, "EVENT_DRAIN_EXIT", detail);
     }
 }
 
