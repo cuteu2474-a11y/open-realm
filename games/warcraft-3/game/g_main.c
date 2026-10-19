@@ -1203,6 +1203,35 @@ bool G_IsSinglePlayer(void) {
     return humans <= 1;
 }
 
+/* On an offline map there is one actual local game client, even when a
+ * timer/trigger callback has no player context (currentplayer == NULL).
+ * Camera natives and GetLocalPlayer must resolve that client consistently.
+ * Never infer a local client for multiplayer, where doing so could direct
+ * one player's camera changes to somebody else's view. */
+gameClient_t *G_SinglePlayerLocalClient(void) {
+    if (!G_IsSinglePlayer() || !game.clients) return NULL;
+    /* Prefer the connected human over neutral/computer map slots. */
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->connected && client->mapplayer &&
+            client->mapplayer->playerType == kPlayerTypeHuman)
+            return client;
+    }
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->connected) return client;
+    }
+    /* During early map loading, a declared human slot may not yet be
+     * connected. Preserve scripted camera state on that player. */
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->mapplayer &&
+            client->mapplayer->playerType == kPlayerTypeHuman)
+            return client;
+    }
+    return NULL;
+}
+
 bool G_GameResultDebugEnabled(void) {
     return atoi(gi.CvarString("wc3_game_result_debug", "0")) != 0;
 }
