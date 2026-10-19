@@ -1874,14 +1874,14 @@ TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
         "function CUN takes nothing returns nothing\n"
         "endfunction\n"
         "function main takes nothing returns nothing\n"
-        "  call SetCameraBounds(-9472.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), "
-        "-10752.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM), "
-        "9728.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), "
-        "7168.0 - GetCameraMargin(CAMERA_MARGIN_TOP), "
-        "-9472.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), "
-        "7168.0 - GetCameraMargin(CAMERA_MARGIN_TOP), "
-        "9728.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), "
-        "-10752.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM))\n"
+        "  call SetCameraBounds(-9472.+GetCameraMargin(CAMERA_MARGIN_LEFT),"
+        "-10752.+GetCameraMargin(CAMERA_MARGIN_BOTTOM),"
+        "9728.-GetCameraMargin(CAMERA_MARGIN_RIGHT),"
+        "7168.-GetCameraMargin(CAMERA_MARGIN_TOP),"
+        "-9472.+GetCameraMargin(CAMERA_MARGIN_LEFT),"
+        "7168.-GetCameraMargin(CAMERA_MARGIN_TOP),"
+        "9728.-GetCameraMargin(CAMERA_MARGIN_RIGHT),"
+        "-10752.+GetCameraMargin(CAMERA_MARGIN_BOTTOM))\n"
         "endfunction\n"));
     T_FEQ(level.camera_bounds.min.x, -8960.0f, 0.001f);
     T_FEQ(level.camera_bounds.min.y, -10496.0f, 0.001f);
