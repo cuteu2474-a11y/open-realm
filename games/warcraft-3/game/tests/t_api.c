@@ -101,14 +101,17 @@ static void selection_native_test_unicast(edict_t *ent) { (void)ent; }
  * map GetLocalPlayer and camera natives must target the connected human,
  * not silently ignore the camera pan. */
 TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
+    static mapInfo_t camera_test_mapinfo;
     gameClient_t *client = &game.clients[0];
     vec2_t target = { 256.0f, 192.0f };
     vec2_t expected;
     player_t *saved_currentplayer = currentplayer;
 
     setup_test_world();
-    level.mapinfo->players[0].used = true;
-    level.mapinfo->players[0].playerType = kPlayerTypeHuman;
+    memcpy(&camera_test_mapinfo, level.mapinfo, sizeof(camera_test_mapinfo));
+    level.mapinfo = &camera_test_mapinfo;
+    camera_test_mapinfo.players[0].used = true;
+    camera_test_mapinfo.players[0].playerType = kPlayerTypeHuman;
     client->mapplayer = &level.mapinfo->players[0];
     client->connected = true;
     currentplayer = NULL;
@@ -125,15 +128,18 @@ TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
 }
 
 TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
+    static mapInfo_t camera_test_mapinfo;
     gameClient_t *client = &game.clients[0];
     player_t *saved_currentplayer = currentplayer;
     vec2_t old_position = { -120.0f, -80.0f };
 
     setup_test_world();
-    level.mapinfo->players[0].used = true;
-    level.mapinfo->players[0].playerType = kPlayerTypeHuman;
-    level.mapinfo->players[1].used = true;
-    level.mapinfo->players[1].playerType = kPlayerTypeHuman;
+    memcpy(&camera_test_mapinfo, level.mapinfo, sizeof(camera_test_mapinfo));
+    level.mapinfo = &camera_test_mapinfo;
+    camera_test_mapinfo.players[0].used = true;
+    camera_test_mapinfo.players[0].playerType = kPlayerTypeHuman;
+    camera_test_mapinfo.players[1].used = true;
+    camera_test_mapinfo.players[1].playerType = kPlayerTypeHuman;
     client->mapplayer = &level.mapinfo->players[0];
     client->connected = true;
     game.clients[1].mapplayer = &level.mapinfo->players[1];
