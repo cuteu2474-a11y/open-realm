@@ -603,6 +603,33 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+/* ORDR main() queues multiple zero-time callbacks. Exercise the same
+ * scheduler path with more callbacks than the five that completed in the
+ * iPad crash trace; every finished coroutine must be removed safely. */
+TEST(wc3_jass_map, ordr_startup_many_queued_callbacks_drain_after_main) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer finished = 0\n"
+        "endglobals\n"
+        "function MarkFinished takes nothing returns nothing\n"
+        "  set finished = finished + 1\n"
+        "endfunction\n"
+        "function VerifyAllFinished takes nothing returns nothing\n"
+        "  call BJassAssert(finished == 64, \"all queued callbacks finished\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set finished = 0\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, 64)
+        jass_callbyname(level.vm, "MarkFinished", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "VerifyAllFinished", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_jass_map, nested_trigger_execute_preserves_parent_coroutine) {
     T_ASSERT(run_test_jass(
         "globals\n"
