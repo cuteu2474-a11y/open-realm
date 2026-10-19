@@ -1311,10 +1311,25 @@ uint32_t DestroyUnitPool(jass_t *j){
     return 0;
 }
 uint32_t UnitPoolAddUnitType(jass_t *j){
+    static unsigned trace_count;
     ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
     uint32_t id=(uint32_t)jass_checkinteger(j,2);
     float weight=jass_checknumber(j,3);
-    ordr_pool_add(pool,id,weight);return 0;
+    if (trace_count < 16) {
+        char detail[160];
+        snprintf(detail,sizeof(detail),"entry call=%u pool=%p id=%u weight=%g count=%d",
+                 trace_count,(void *)pool,(unsigned)id,(double)weight,pool ? pool->count : -1);
+        jass_ordr_log_event(j,"UNITPOOL_ENTER",detail);
+    }
+    ordr_pool_add(pool,id,weight);
+    if (trace_count < 16) {
+        char detail[120];
+        snprintf(detail,sizeof(detail),"return call=%u count=%d",
+                 trace_count,pool ? pool->count : -1);
+        jass_ordr_log_event(j,"UNITPOOL_RETURN",detail);
+    }
+    trace_count++;
+    return 0;
 }
 uint32_t UnitPoolRemoveUnitType(jass_t *j){
     ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
