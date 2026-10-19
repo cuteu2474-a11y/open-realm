@@ -236,9 +236,21 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
     slash = slash_back;
     if (!slash || (slash_forward && slash_forward > slash)) slash = slash_forward;
     dot = strrchr(authored, '.');
-    if (dot && (!slash || dot > slash))
-        strlcpy(out, authored, out_size);
-    else
+    if (dot && (!slash || dot > slash)) {
+        /* Warcraft custom UnitUI can refer to .mdl even when the MPQ
+         * contains only the binary .mdx version. Both the gameplay
+         * animation loader and the client model registry must use the
+         * actual .mdx filename. ORDR's u000-u00C selection buttons are
+         * such imported models (e.g. "Button Easy.mdl" -> ".mdx"). */
+        if (!strcasecmp(dot, ".mdl")) {
+            size_t stem_len = (size_t)(dot - authored);
+            if (stem_len + sizeof(".mdx") <= out_size) {
+                memcpy(out, authored, stem_len);
+                memcpy(out + stem_len, ".mdx", sizeof(".mdx"));
+            }
+        } else
+            strlcpy(out, authored, out_size);
+    } else
         snprintf(out, out_size, "%s.mdx", authored);
 }
 
