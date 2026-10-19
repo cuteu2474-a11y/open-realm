@@ -493,6 +493,24 @@ TEST(wc3_jass_map, forgroup_snapshot_survives_nested_mutation) {
         "endfunction\n"));
 }
 
+/* ORDR 2.323[C] ends main() by evaluating an uninitialized (null)
+ * trigger. A null handle must not dereference trigger->conditions. */
+TEST(wc3_jass_map, null_trigger_evaluate_and_execute_are_safe) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger unused = null\n"
+        "  integer reached = 0\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(unused), \"null trigger must not evaluate true\")\n"
+        "  call TriggerExecute(unused)\n"
+        "  set reached = 1\n"
+        "  call BJassAssert(reached == 1, \"null trigger execution returns to caller\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
     T_ASSERT(run_test_jass(
         "globals\n"
