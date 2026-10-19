@@ -1850,6 +1850,48 @@ TEST(wc3_api, enemy_event_keeps_trigger_player_separate_from_local_player_contex
     T_NULL(currentplayer);
 }
 
+/* Regression for ORDR 2.323[C]: the JASS main() reconstructs its camera
+ * rect from GetCameraMargin, but an incorrect runtime W3E world bound can
+ * otherwise clamp the difficulty scene (-6000,-8864) to (-3584,-8192).
+ * Match the map's extracted W3I default camera and complement metadata. */
+TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
+    mapInfo_t *mapinfo = (mapInfo_t *)level.mapinfo;
+    int const complements[4] = { 26, 16, 20, 32 };
+    CM_SetupTestWorldBounds(&MAKE(box2_t,
+        .min = { -18176.0f, -15616.0f },
+        .max = { 6400.0f, 8960.0f }));
+    memcpy(&mapinfo->cameraBounds.complement, complements, sizeof(complements));
+    memcpy(mapinfo->cameraBounds.bounds, (float[8]){
+        -8960.0f, -10496.0f, 9216.0f, 6912.0f,
+        -8960.0f, 6912.0f, 9216.0f, -10496.0f
+    }, sizeof(mapinfo->cameraBounds.bounds));
+
+    T_ASSERT(run_test_jass(
+        "function CUO takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUW takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUN takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  call SetCameraBounds(-9472.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), "
+        "-10752.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM), "
+        "9728.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), "
+        "7168.0 - GetCameraMargin(CAMERA_MARGIN_TOP), "
+        "-9472.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), "
+        "7168.0 - GetCameraMargin(CAMERA_MARGIN_TOP), "
+        "9728.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), "
+        "-10752.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM))\n"
+        "endfunction\n"));
+    T_FEQ(level.camera_bounds.min.x, -8960.0f, 0.001f);
+    T_FEQ(level.camera_bounds.min.y, -10496.0f, 0.001f);
+    T_FEQ(level.camera_bounds.max.x, 9216.0f, 0.001f);
+    T_FEQ(level.camera_bounds.max.y, 6912.0f, 0.001f);
+    T_ASSERT(-6000.0f >= level.camera_bounds.min.x);
+    T_ASSERT(-8864.0f >= level.camera_bounds.min.y);
+    CM_SetupTestWorldBounds(NULL);
+}
+
 TEST(wc3_api, camera_margin_is_default_camera_inset_from_playable_area) {
     /* W3I complements crop the entire W3E terrain to the playable rectangle.
      * GetCameraMargin is the remaining inset from that playable rectangle to
