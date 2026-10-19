@@ -483,7 +483,19 @@ uint32_t PanCameraToTimed(jass_t *j) {
     float x = jass_checknumber(j, 1);
     float y = jass_checknumber(j, 2);
     float duration = jass_checknumber(j, 3);
-    G_StartCameraPanTimed(G_CurrentCameraClient("PanCameraToTimed"), (vec2_t){ x, y }, duration);
+    gameClient_t *camera_client = G_CurrentCameraClient("PanCameraToTimed");
+    /* ORDR's difficulty scene camera (BDe -> BDk) uses a periodic timer
+     * after CUN. A null local-player context silently discards the pan. */
+    if (level.time >= 3900 && level.time <= 4600) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "target=(%.0f,%.0f) duration=%.2f local_player=%d camera_client=%d",
+                 (double)x, (double)y, (double)duration,
+                 currentplayer ? (int)PLAYER_NUM(currentplayer) : -1,
+                 camera_client ? 1 : 0);
+        jass_ordr_log_event(j, "CHOICE_CAMERA", detail);
+    }
+    G_StartCameraPanTimed(camera_client, (vec2_t){ x, y }, duration);
     return 0;
 }
 uint32_t PanCameraToWithZ(jass_t *j) {
