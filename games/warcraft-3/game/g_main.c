@@ -1357,11 +1357,31 @@ static void G_RunFrame(void) {
     level.framenum++;
     level.time = gi.GetTime();
 
+    /* Record the server boundary around long ORDR map initialization.
+     * If the log stops before FRAME_AFTER_JASS, the active JASS coroutine
+     * or a script-side trigger did not return to the simulation frame. */
+    bool ordr_frame_trace = level.vm &&
+        (level.framenum <= 8 || level.framenum % 100 == 0) &&
+        jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW");
+    char ordr_frame_detail[96];
+    if (ordr_frame_trace) {
+        snprintf(ordr_frame_detail, sizeof(ordr_frame_detail),
+                 "frame=%u time_ms=%u", (unsigned)level.framenum,
+                 (unsigned)jass_gettime());
+        jass_ordr_log_event(level.vm, "FRAME_ENTER", ordr_frame_detail);
+    }
     G_StartScripts();
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_AFTER_START", ordr_frame_detail);
     G_UpdateTimeOfDay();
     G_RunTimers();
     G_RunEvents();
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_BEFORE_JASS", ordr_frame_detail);
     jass_runevents(level.vm);
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_AFTER_JASS", ordr_frame_detail);
     G_ORDRShowFlowStatus();
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
