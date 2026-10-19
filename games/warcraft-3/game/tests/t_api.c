@@ -1931,7 +1931,14 @@ TEST(wc3_api, ordr_autostart_uses_original_commit_without_clicked_unit) {
     jass_callbyname(level.vm, "AssertIdle", false);
     T_ASSERT(!jass_rterror_pending(level.vm));
     jass_callbyname(level.vm, "ORDR_AutoNightmareIsekai", false);
-    jass_callbyname(level.vm, "AssertAutostart", false);
+    if (jass_rterror_pending(level.vm))
+        fprintf(stderr, "ORDR_AUTOSTART_TEST_CALLBACK_ERROR: %s\n",
+                jass_rterror_message(level.vm));
+    else
+        jass_callbyname(level.vm, "AssertAutostart", false);
+    if (jass_rterror_pending(level.vm))
+        fprintf(stderr, "ORDR_AUTOSTART_TEST_ASSERT_ERROR: %s\n",
+                jass_rterror_message(level.vm));
     T_ASSERT(!jass_rterror_pending(level.vm));
     gi.MemFree(patched);
 }
