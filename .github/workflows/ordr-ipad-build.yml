@@ -18,8 +18,10 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Check tools
+      - name: Check tools and record build revision
         run: |
+          echo "ORDR build commit: $(git rev-parse HEAD)"
+          echo "Build runner architecture: $(uname -m)"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
           cmake --version
