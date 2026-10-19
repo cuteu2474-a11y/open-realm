@@ -172,6 +172,8 @@ void jass_callbyname(jass_t *j, cstring_t name, bool spawn_coroutine);
  * jass_dofile auto-detects Galaxy mode for .galaxy filenames. */
 bool jass_dofile(jass_t *j, cstring_t fileName);
 bool jass_dobuffer(jass_t *j, string_t buffer);
+/* Parse without evaluating globals or calling unavailable WC3 natives. */
+bool jass_parsebuffer_only(string_t buffer);
 
 /* _ex variants — explicit mode control. */
 bool jass_dofile_ex(jass_t *j, cstring_t fileName, JASSMODE mode);
