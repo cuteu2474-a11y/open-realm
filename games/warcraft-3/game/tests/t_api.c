@@ -1903,6 +1903,23 @@ TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
     CM_SetupTestWorldBounds(NULL);
 }
 
+/* A Warcraft .mdl file value is an editable model alias. Imported maps
+ * commonly package only the compiled .mdx, as ORDR u000-u00C does. The
+ * renderer model index must advertise .mdx from the start. */
+TEST(wc3_api, normalize_imported_mdl_unit_button_paths) {
+    PATHSTR actual;
+    G_NormalizeModelFilename("war3mapImported\\Button Easy.mdl", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Easy.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Normal.MDL", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Normal.mdx"));
+    G_NormalizeModelFilename("units\\human\\footman\\footman.mdx", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "units\\human\\footman\\footman.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Nightmare", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Nightmare.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Easy.blp", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Easy.blp"));
+}
+
 TEST(wc3_api, camera_margin_is_default_camera_inset_from_playable_area) {
     /* W3I complements crop the entire W3E terrain to the playable rectangle.
      * GetCameraMargin is the remaining inset from that playable rectangle to
