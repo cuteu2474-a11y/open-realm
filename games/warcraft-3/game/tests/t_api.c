@@ -29,6 +29,7 @@ void setup_test_world(void);
 void CM_SetupTestPathmap(uint32_t width, uint32_t height, uint8_t const *cells);
 void CM_SetupTestWorldBounds(box2_t const *bounds);
 bool run_test_jass(cstring_t src);
+char *G_TestORDRAutoNightmareScript(cstring_t script);
 extern player_t *currentplayer;
 void unit_die(edict_t *self, edict_t *attacker);
 void unit_build(edict_t *self, uint32_t class_id);
@@ -1854,6 +1855,93 @@ TEST(wc3_api, enemy_event_keeps_trigger_player_separate_from_local_player_contex
  * rect from GetCameraMargin, but an incorrect runtime W3E world bound can
  * otherwise clamp the difficulty scene (-6000,-8864) to (-3584,-8192).
  * Match the map's extracted W3I default camera and complement metadata. */
+/* ORDR iPad fallback: verify the script patch preserves the original click
+ * handler and adds a fully executable Nightmare + Isekai timer callback. */
+TEST(wc3_api, ordr_autostart_uses_original_commit_without_clicked_unit) {
+    static cstring_t const original =
+        "globals\n"
+        "boolean tU=false\n"
+        "integer NE=0\n"
+        "constant integer NL=6\n"
+        "constant integer tl=1\n"
+        "constant integer tn=2\n"
+        "constant integer tp=3\n"
+        "boolean array th\n"
+        "unit tP=null\n"
+        "endglobals\n"
+        "function CUO takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUW takes nothing returns nothing\n"
+        "endfunction\n"
+        "function Bcw takes player p returns boolean\n"
+        "return false\n"
+        "endfunction\n"
+        "function CT9 takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUM takes nothing returns nothing\n"
+        "local integer EK=0\n"
+        "if tU or not Bcw(GetTriggerPlayer()) then\n"
+        "return\n"
+        "endif\n"
+        "if GetTriggerUnit()!=tP then\n"
+        "return\n"
+        "endif\n"
+        "if NE==0 then\n"
+        "return\n"
+        "endif\n"
+        "call CT9()\n"
+        "set tU=true\n"
+        "endfunction\n"
+        "function CUF takes integer raw,integer x,integer y,integer scale returns unit\n"
+        "return null\n"
+        "endfunction\n"
+        "function BHs takes integer tag returns timer\n"
+        "return CreateTimer()\n"
+        "endfunction\n"
+        "function BHu takes timer source returns nothing\n"
+        "if source!=null then\n"
+        "call DestroyTimer(source)\n"
+        "endif\n"
+        "endfunction\n"
+        "function CUN takes nothing returns nothing\n"
+        "set tP=CUF($75303036,880,-375,250)\n"
+        "call SetUnitAnimation(tP,\"Stand\")\n"
+        "endfunction\n"
+        "function AssertIdle takes nothing returns nothing\n"
+        "call BJassAssert(not tU, \"idle before selecting\")\n"
+        "endfunction\n"
+        "function AssertAutostart takes nothing returns nothing\n"
+        "call BJassAssert(tU, \"difficulty committed\")\n"
+        "call BJassAssert(NE==NL, \"nightmare difficulty\")\n"
+        "call BJassAssert(th[tn], \"isekai enabled\")\n"
+        "call BJassAssert(not th[tl], \"mutation disabled\")\n"
+        "call BJassAssert(not th[tp], \"other mode disabled\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "call CUN()\n"
+        "endfunction\n";
+    char *patched = G_TestORDRAutoNightmareScript(original);
+    T_NOT_NULL(patched);
+    if (!patched) return;
+    T_ASSERT(strstr(patched, "function ORDR_AutoNightmareIsekai takes nothing returns nothing") != NULL);
+    T_ASSERT(strstr(patched, "call TimerStart(BHs(0),.25,false,function ORDR_AutoNightmareIsekai)") != NULL);
+    T_ASSERT(run_test_jass(patched));
+    T_ASSERT(jass_hasfunction(level.vm, "ORDR_AutoNightmareIsekai"));
+    jass_callbyname(level.vm, "CUM", false);
+    jass_callbyname(level.vm, "AssertIdle", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "ORDR_AutoNightmareIsekai", false);
+    jass_callbyname(level.vm, "AssertAutostart", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    gi.MemFree(patched);
+}
+
+TEST(wc3_api, ordr_autostart_rejects_nonmatching_map_source) {
+    char *patched = G_TestORDRAutoNightmareScript(
+        "function CUM takes nothing returns nothing\nendfunction\n");
+    T_NULL(patched);
+}
+
 TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
     mapInfo_t *mapinfo = (mapInfo_t *)level.mapinfo;
     int const complements[4] = { 26, 16, 20, 32 };
