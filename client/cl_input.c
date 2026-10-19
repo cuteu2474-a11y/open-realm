@@ -13,6 +13,7 @@ static struct {
 } camera_drag;
 
 static bool smart_click_active;
+static bool ipad_chat_touch_down;
 #define BZ_SELECT_DOUBLE_CLICK_MS 500 // milliseconds; shared opt-in same-entity double-click window
 static bool cam_west, cam_east, cam_north, cam_south;
 
@@ -632,6 +633,17 @@ static bool CL_MouseOverGameplayUIAt(int x, int y) {
     return SCR_LayoutHitTest(x, y) || CL_WindowMouseOver(x, y);
 }
 
+static bool CL_iPadChatHit(int x, int y) {
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    size2_t size = re.GetWindowSize();
+    return x >= (int)size.width - 110 && x < (int)size.width - 16 &&
+           y >= 16 && y < 62;
+#else
+    (void)x; (void)y;
+    return false;
+#endif
+}
+
 bool CL_GameplayInputReady(void) {
     if (!input.focus || cls.key_dest != key_game || cls.state != ca_active ||
         cl.playerstate.client_ui_state != CLIENT_UI_GAME) {
@@ -686,6 +698,14 @@ void CL_Input(void) {
                     input.touch_pointer = event.button.which == SDL_TOUCH_MOUSEID;
                     mouse.origin.x = event.button.x;
                     mouse.origin.y = event.button.y;
+                    if (event.button.which == SDL_TOUCH_MOUSEID &&
+                        event.button.button == SDL_BUTTON_LEFT &&
+                        CL_GameplayInputReady() && CL_iPadChatHit(event.button.x, event.button.y)) {
+                        ipad_chat_touch_down = true;
+                        fprintf(stderr, "ORDR_CHAT_TOUCH open\n");
+                        Cmd_ForwardToServer("chat_open");
+                        break;
+                    }
                     if (mousevt && cls.key_dest != key_console) {
                         mouse_button_keys[event.button.button] = mousevt;
                         CL_InputKeyEvent(mousevt, CL_BindMods(SDL_GetModState()), true, event.button.timestamp);
@@ -694,6 +714,11 @@ void CL_Input(void) {
                 break;
             case SDL_MOUSEBUTTONUP:
                 {
+                    if (ipad_chat_touch_down && event.button.which == SDL_TOUCH_MOUSEID &&
+                        event.button.button == SDL_BUTTON_LEFT) {
+                        ipad_chat_touch_down = false;
+                        break;
+                    }
                     keyCode_t mousevt = event.button.button < sizeof(mouse_button_keys) / sizeof(*mouse_button_keys)
                                       ? mouse_button_keys[event.button.button]
                                       : 0;
