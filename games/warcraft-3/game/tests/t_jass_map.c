@@ -612,6 +612,50 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
 /* ORDR's BDN reaches the old MAX_EVENTS=1024 boundary before BF0
  * registers a timer. This test must not terminate on the old 1025th
  * registration, and verifies that high-index region tokens still roundtrip. */
+/* The ORDR difficulty buttons belong to Neutral Passive (15), while the
+ * registering PLAYER_UNIT_SELECTED trigger belongs to the human who clicked.
+ * Trigger dispatch and GetTriggerPlayer must use the clicker, not the owner. */
+TEST(wc3_jass_map, ordr_neutral_button_selection_uses_clicking_player) {
+    edict_t *button = NULL;
+    gameEvent_t *evt;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "  integer receivedClicks = 0\n"
+        "endglobals\n"
+        "function OnMenuClick takes nothing returns nothing\n"
+        "  call BJassAssert(GetTriggerPlayer() == Player(0), \"selection player is clicker\")\n"
+        "  call BJassAssert(GetTriggerUnit() == menuButton, \"selection target is neutral button\")\n"
+        "  set receivedClicks = receivedClicks + 1\n"
+        "endfunction\n"
+        "function VerifyClick takes nothing returns nothing\n"
+        "  call BJassAssert(receivedClicks == 1, \"neutral button event delivered once\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerAddAction(t, function OnMenuClick)\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, globals.num_edicts) {
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    }
+    T_NOT_NULL(button);
+    if (!button) return;
+    evt = G_PublishEventWithSource(button, EVENT_PLAYER_UNIT_SELECTED,
+                                   G_GetPlayerEntityByNumber(0));
+    T_NOT_NULL(evt);
+    if (!evt) return;
+    evt->dialog_player = 1; /* player 0 initiated the selection */
+    G_RunEvents();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "VerifyClick", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_jass_map, ordr_registers_more_than_1024_handlers_and_timer) {
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
