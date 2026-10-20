@@ -2135,6 +2135,7 @@ typedef struct {
 typedef struct {
     event_t handlers[MAX_EVENTS];
     uint32_t next_handler_hint; /* first likely unused slot; reset alongside level.events */
+    uint32_t handler_scan_limit; /* highest ever allocated index + 1; skip empty tail in hot event loops */
     uint32_t registration_sequence; /* monotonically increasing per map; reset alongside level.events */
     gameEvent_t queue[MAX_EVENT_QUEUE];
     uint32_t write, read;
@@ -2435,7 +2436,7 @@ struct level_locals {
 };
 
 #define FOR_EACH_EVENT(property) \
-for (uint32_t event_index = 0; event_index < MAX_EVENTS; ++event_index) \
+for (uint32_t event_index = 0; event_index < level.events.handler_scan_limit; ++event_index) \
     for (event_t *property = &level.events.handlers[event_index]; property; property = NULL) \
         if (property->inuse)
 
