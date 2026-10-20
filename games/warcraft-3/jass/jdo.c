@@ -1369,7 +1369,16 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
 }
 
 bool jass_evaluatetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    return jass_evaluatetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit });
+    jassContext_t const *caller = jass_getcontext(j);
+    /* Nested TriggerEvaluate(J8) in ORDR's BC6 runs while an actual human
+     * clicks a Neutral Passive menu unit. Preserve GetTriggerPlayer() from
+     * the outer selection event: recomputing from unit ownership incorrectly
+     * turns the triggering player into Neutral Passive and fails Bcw(). */
+    player_t *trigger_player = caller && caller->unit == unit
+        ? caller->playerState : NULL;
+    return jass_evaluatetriggercontext(j, &(jassTriggerContextParams_t){
+        .trigger = trigger, .unit = unit, .event_player = trigger_player
+    });
 }
 
 /* Scratch VMs are heap allocated: the two 4096-slot hash tables and value
