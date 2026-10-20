@@ -1080,6 +1080,77 @@ static bool G_FowPlayerFogDisabled(uint32_t player) {
     return client && (client->ps.rdflags & RDF_NOFOG);
 }
 
+/* JASS IsVisible/Fogged/MaskedToPlayer query the terrain at an exact
+ * world point, not an entity's selectable/hover state. Read the same
+ * authoritative visible/explored planes as the renderer/network fog, including
+ * shared sight already composed by G_FowUpdate and scripted fog modifiers. */
+uint32_t G_FowPointState(uint32_t viewer, float world_x, float world_y) {
+    fowPlayerGrid_t const *grid;
+    uint32_t x, y, index;
+    bool visible, explored;
+
+    if (viewer >= MAX_PLAYERS || !G_FowReady() ||
+        !isfinite(world_x) || !isfinite(world_y))
+        return WC3_FOG_STATE_MASKED;
+    if (G_FowPlayerFogDisabled(viewer)) return WC3_FOG_STATE_VISIBLE;
+    if (world_x < level.fow.bounds.min.x || world_y < level.fow.bounds.min.y ||
+        world_x > level.fow.bounds.max.x || world_y > level.fow.bounds.max.y)
+        return WC3_FOG_STATE_MASKED;
+    x = G_FowWorldToCellX(world_x);
+    y = G_FowWorldToCellY(world_y);
+    if (x == FOW_INVALID_CELL || y == FOW_INVALID_CELL)
+        return WC3_FOG_STATE_MASKED;
+    index = y * level.fow.width + x;
+    grid = &level.fow.players[viewer];
+#ifdef WC3_FOW_PACKED_MASK
+    if (g_fow_fast && grid->packed_visible && grid->packed_explored) {
+        visible = G_FowPackedAt(grid->packed_visible, grid, x, y);
+        explored = G_FowPackedAt(grid->packed_explored, grid, x, y);
+    } else
+#endif
+    {
+        visible = grid->visible && grid->visible[index];
+        explored = grid->explored && grid->explored[index];
+    }
+    if (visible) return WC3_FOG_STATE_VISIBLE;
+    if (explored) return WC3_FOG_STATE_FOGGED;
+    return WC3_FOG_STATE_MASKED;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_fow, world_point_visibility_tracks_both_fog_planes) {
+    fowGrid_t const saved_fow = level.fow;
+    uint32_t const old_client_count = game.max_clients;
+#ifdef WC3_FOW_PACKED_MASK
+    bool const old_fast = g_fow_fast;
+    g_fow_fast = false;
+#endif
+    uint8_t visible[4] = { 0, 1, 0, 0 };
+    uint8_t explored[4] = { 1, 1, 0, 0 };
+    game.max_clients = 0;
+    memset(&level.fow, 0, sizeof(level.fow));
+    level.fow.width = 2;
+    level.fow.height = 2;
+    level.fow.bounds.min = (vec2_t){ 0, 0 };
+    level.fow.bounds.max = (vec2_t){ 2 * FOW_CELL_SIZE, 2 * FOW_CELL_SIZE };
+    level.fow.players[0].visible = visible;
+    level.fow.players[0].explored = explored;
+    T_EQ(G_FowPointState(0, 0, 0), WC3_FOG_STATE_FOGGED);
+    T_EQ(G_FowPointState(0, FOW_CELL_SIZE + 1, 0), WC3_FOG_STATE_VISIBLE);
+    T_EQ(G_FowPointState(0, 0, FOW_CELL_SIZE + 1), WC3_FOG_STATE_MASKED);
+    T_EQ(G_FowPointState(0, -1, 0), WC3_FOG_STATE_MASKED);
+    T_EQ(G_FowPointState(MAX_PLAYERS, 0, 0), WC3_FOG_STATE_MASKED);
+    explored[0] = 0;
+    T_EQ(G_FowPointState(0, 0, 0), WC3_FOG_STATE_MASKED);
+    level.fow = saved_fow;
+    game.max_clients = old_client_count;
+#ifdef WC3_FOW_PACKED_MASK
+    g_fow_fast = old_fast;
+#endif
+}
+#endif
+
 /* Hover information is interactive gameplay state, so unlike explored
  * scenery it is exposed only while the entity is actively visible. */
 bool G_FowPlayerCanHoverEntity(uint32_t player, edict_t const *ent) {

@@ -236,38 +236,43 @@ uint32_t IsPlayerObserver(jass_t *j) {
     //player_t *whichPlayer = jass_checkhandle(j, 1, "player");
     return jass_pushboolean(j, 0);
 }
+/* Use the game FOW grid, not the camera's rendering flag or a constant
+ * placeholder, for all six Warcraft III JASS point/location queries. */
+static bool PlayerFogMatches(player_t const *who, vec2_t const *location,
+                             uint32_t fog_state) {
+    return who && location &&
+        G_FowPointState(PLAYER_NUM(who), location->x, location->y) == fog_state;
+}
+
 uint32_t IsVisibleToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_VISIBLE));
 }
 uint32_t IsLocationVisibleToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_VISIBLE));
 }
 uint32_t IsFoggedToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_FOGGED));
 }
 uint32_t IsLocationFoggedToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_FOGGED));
 }
 uint32_t IsMaskedToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_MASKED));
 }
 uint32_t IsLocationMaskedToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_MASKED));
 }
 uint32_t GetPlayerRace(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 1, "player");

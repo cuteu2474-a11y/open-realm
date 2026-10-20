@@ -51,3 +51,7 @@ The original ORDR choice UI uses nine selectable neutral-passive models (`u000..
 **Unfinished function families:** `DzLoadToc` still does not materialize FDF frame templates; `DzFrameSetTexture` still only stores a path without presenting a textured UI element; `DzFrameSetScriptByCode` requires a fully wired render-to-input UI event adapter. The offline JN profile store does not implement the unavailable original online service. No completeness claim for all ORDR natives, unit systems or gameplay is justified.
 
 `GetEventPlayerState` now returns a typed JASS player-state handle sourced from the event's coroutine-local context value. It no longer silently returns null for a valid `TriggerRegisterPlayerStateEvent` callback. As in classic JASS, callers should only use this getter while handling a player-state event; outside that event its value is undefined.
+
+### Warcraft III native fog queries — six real implementations
+
+`IsVisibleToPlayer`, `IsLocationVisibleToPlayer`, `IsFoggedToPlayer`, `IsLocationFoggedToPlayer`, `IsMaskedToPlayer`, and `IsLocationMaskedToPlayer` previously returned a hardcoded false. They now read the canonical gameplay FOW grid (current sight vs previously explored cells), respect out-of-world points and `FogEnable(false)`, and reuse its packed grid when enabled. Their tests check visible, fogged, masked, outside world, and unexplored transitions. This fixes actual JASS-visible world-state behavior rather than adding temporary gameplay balance.

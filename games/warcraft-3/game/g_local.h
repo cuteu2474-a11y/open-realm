@@ -2667,6 +2667,7 @@ void G_FowSendFull(edict_t *ent);
 bool G_FowPlayerCanSeeEntity(uint32_t player, edict_t const *ent);
 bool G_FowPlayerCanHoverEntity(uint32_t player, edict_t const *ent);
 bool G_FowPlayersShareVision(uint32_t viewer, uint32_t owner);
+uint32_t G_FowPointState(uint32_t player, float world_x, float world_y);
 bool G_UnitSharesVisionWith(edict_t const *unit, uint32_t viewer);
 void G_SetUnitSharedVision(edict_t *unit, uint32_t viewer, bool share);
 void G_AddUnitForcedVisibility(edict_t *unit, uint32_t viewer);
