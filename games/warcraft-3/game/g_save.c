@@ -2381,6 +2381,17 @@ bool ReadGame(cstring_t filename) {
         fprintf(stderr, "WC3 LoadGame: saved event registry dropped live non-region slot %u\n", (unsigned)i);
         fclose(f); return false;
     }
+    /* Nonserialized allocation bookkeeping must be reconstructed after
+     * mapped field restoration; otherwise loaded high-slot registrations
+     * would be invisible to the optimized live handler scan. */
+    level.events.handler_scan_limit = 0;
+    level.events.next_handler_hint = 0;
+    FOR_LOOP(i, MAX_EVENTS) {
+        if (level.events.handlers[i].inuse || level.events.handlers[i].generation_exhausted) {
+            level.events.handler_scan_limit = i + 1;
+            level.events.next_handler_hint = (i + 1) % MAX_EVENTS;
+        }
+    }
     if (ActiveEventCount() != header.events) {
         fprintf(stderr, "WC3 LoadGame: event count mismatch saved=%u restored=%u\n",
                 (unsigned)header.events, (unsigned)ActiveEventCount());
