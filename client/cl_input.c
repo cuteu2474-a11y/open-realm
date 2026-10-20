@@ -337,13 +337,12 @@ static vec2_t CL_TouchPanCenter(void) {
                      (touch_pan.pos[0].y + touch_pan.pos[1].y) * 0.5f };
 }
 
-/* SDL's iOS backend may emit SDL_FINGER* without a matching synthetic
- * mouse click (or omit only its release). Route the fallback through the
- * normal SDL mouse pipeline, rather than calling IN_SelectDown/Up directly:
- * in-game F10/quest windows, modal dialogs and gameplay units all depend on
- * the same UI mouse DOWN/UP event handling. Use a distinct which ID so late
- * SDL_TOUCH_MOUSEID events can be discarded without suppressing our pair. */
-#define CL_FINGER_FALLBACK_MOUSEID (SDL_TOUCH_MOUSEID - 1u)
+/* SDL's iOS backend can omit synthetic mouse events for SDL_FINGER*.
+ * Dispatch authored UI first, then complete any unhandled gameplay tap
+ * through the existing bound mouse key. Keeping it synchronous prevents
+ * the release from being deferred behind other queued touch events and
+ * lets a missing synthetic mouse-up release its original key. Late SDL
+ * synthetic events are suppressed using fallback_sent. */
 /* A finger-only SDL backend must not postpone a visible HUD or window click
  * behind injected mouse events. The player can tap F10 and other server-authored
  * UI even if the SDL mouse synthesis path is absent. Preserve the normal
@@ -383,17 +382,25 @@ static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
             MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, shift });
     return consumed || released || cls.netchan.message.cursize > message_before;
 }
-static bool CL_QueueFingerMouseButton(SDL_TouchFingerEvent const *finger,
-                                      vec2_t point, uint32_t type) {
-    SDL_Event evt = { 0 };
-    evt.button.type = type;
-    evt.button.timestamp = finger->timestamp;
-    evt.button.which = CL_FINGER_FALLBACK_MOUSEID;
-    evt.button.button = SDL_BUTTON_LEFT;
-    evt.button.state = type == SDL_MOUSEBUTTONDOWN ? SDL_PRESSED : SDL_RELEASED;
-    evt.button.x = (int)point.x;
-    evt.button.y = (int)point.y;
-    return SDL_PushEvent(&evt) == 1;
+/* Complete a physical finger tap on the same binding used by mouse input.
+ * The UI receives its own down/up in CL_TouchFallbackUI before this call.
+ * We must not synthesize a second press if SDL already delivered one. */
+static bool CL_CompleteFingerMouseButton(SDL_TouchFingerEvent const *finger,
+                                         vec2_t point, bool synthetic_down_seen) {
+    keyCode_t key = mouse_button_keys[SDL_BUTTON_LEFT];
+    uint32_t const mods = CL_BindMods(SDL_GetModState());
+    mouse.origin = point;
+    input.touch_pointer = true;
+    if (!synthetic_down_seen) {
+        if (!CL_GameplayInputReady()) return false;
+        key = K_MOUSE1;
+        mouse_button_keys[SDL_BUTTON_LEFT] = key;
+        CL_InputKeyEvent(key, mods, true, finger->timestamp);
+    }
+    if (key && cls.key_dest != key_console)
+        CL_InputKeyEvent(key, mods, false, finger->timestamp);
+    mouse_button_keys[SDL_BUTTON_LEFT] = 0;
+    return key != 0;
 }
 
 static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
@@ -446,14 +453,13 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
              * If SDL sent a down but omitted its up, synthesize only up. */
             if (touch_pan.count == 1 && !touch_pan.gesture &&
                 !touch_pan.synthetic_up_seen) {
-                if (CL_TouchFallbackUI(pos, touch_pan.synthetic_down_seen)) {
-                    touch_pan.fallback_sent = true;
-                } else {
-                    bool pressed = touch_pan.synthetic_down_seen ||
-                        CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONDOWN);
-                    if (pressed && CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONUP))
-                        touch_pan.fallback_sent = true;
-                }
+                bool const ui_handled = CL_TouchFallbackUI(pos, touch_pan.synthetic_down_seen);
+                /* Release a previously synthesized mouse-down even when the
+                 * finger ends over UI. Otherwise a lost synthetic mouse-up
+                 * can leave +select held across later taps. */
+                bool const key_handled = (touch_pan.synthetic_down_seen || !ui_handled) &&
+                    CL_CompleteFingerMouseButton(finger, pos, touch_pan.synthetic_down_seen);
+                touch_pan.fallback_sent = ui_handled || key_handled;
             }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
@@ -858,7 +864,7 @@ void CL_Input(void) {
                     }
                     keyCode_t mousevt = CL_MouseButtonKey(&event.button);
                     bool const touch_mouse = event.button.which == SDL_TOUCH_MOUSEID ||
-                                             event.button.which == CL_FINGER_FALLBACK_MOUSEID;
+                                             false /* finger-only fallback handled synchronously */;
                     input.touch_pointer = touch_mouse;
                     mouse.origin.x = event.button.x;
                     mouse.origin.y = event.button.y;
@@ -885,7 +891,7 @@ void CL_Input(void) {
                     }
                     if (ipad_chat_touch_down &&
                         (event.button.which == SDL_TOUCH_MOUSEID ||
-                         event.button.which == CL_FINGER_FALLBACK_MOUSEID) &&
+                         false /* finger-only fallback handled synchronously */) &&
                         event.button.button == SDL_BUTTON_LEFT) {
                         ipad_chat_touch_down = false;
                         continue;
