@@ -18,6 +18,8 @@ static bool cam_west, cam_east, cam_north, cam_south;
 
 static void CL_ScrollFrame(void);
 static bool CL_MouseOverGameplayUIAt(int x, int y);
+static void CL_InputKeyEvent(keyCode_t key, uint32_t mods, bool down, uint32_t time);
+static uint32_t CL_BindMods(SDL_Keymod mods);
 
 static struct {
     uint32_t buttons, sent, last_ms;
@@ -716,9 +718,9 @@ void CL_Input(void) {
             event.type == SDL_FINGERUP) {
             if (!CL_TouchToPointer(&event)) continue;
         } else if (touch_direct_mouse &&
-                   ((event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) &&
-                    event.button.which == SDL_TOUCH_MOUSEID ||
-                    event.type == SDL_MOUSEMOTION && event.motion.which == SDL_TOUCH_MOUSEID)) {
+                   (((event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) &&
+                     event.button.which == SDL_TOUCH_MOUSEID) ||
+                    (event.type == SDL_MOUSEMOTION && event.motion.which == SDL_TOUCH_MOUSEID))) {
             /* SDL also emits a mouse event for the same contact. */
             continue;
         }
