@@ -2569,65 +2569,12 @@ static void jass_evalprogram(jass_t *j, token_t const *program) {
     root->sync_rterror_jmp_set = false;
 }
 
-/* ORDR 2.323[C] iPad single-player training option: bypass the broken
- * 3D menu by selecting Nightmare plus Isekai and invoking the map's OWN
- * CUM startup function after CUN has finished. Other maps are untouched.
- * Every edit fits within an existing source line to avoid reallocating
- * the original MPQ-owned script buffer. */
-static bool ordr_autostart_replace_line(char *line, char const *value) {
-    char *end;
-    size_t capacity, size;
-    if (!line || !value || !(end = strchr(line, '\n'))) return false;
-    capacity = (size_t)(end - line);
-    size = strlen(value);
-    if (size > capacity) return false;
-    memset(line, ' ', capacity);
-    memcpy(line, value, size);
-    return true;
-}
-
-static bool ordr_enable_nightmare_isekai_autostart(string_t buffer) {
-    char *cun, *cum, *cun_end, *cum_end;
-    char *announcement, *first_guard, *second_guard;
-    if (!buffer || strlen(buffer) != 2503677u) return false;
-    cun = strstr(buffer, "function CUN takes nothing returns nothing\r\n");
-    cum = strstr(buffer, "function CUM takes nothing returns nothing\r\n");
-    if (!cun || !cum || cun <= cum) return false;
-    cun_end = strstr(cun, "\r\nendfunction");
-    cum_end = strstr(cum, "\r\nendfunction");
-    if (!cun_end || !cum_end) return false;
-
-    announcement = strstr(cun, "call DisplayTimedTextToForce(bj_FORCE_ALL_PLAYERS,5,");
-    first_guard = strstr(cum, "if tU or not Bcw(GetTriggerPlayer()) then");
-    second_guard = strstr(cum, "if GetTriggerUnit()!=tP then");
-    if (!announcement || announcement >= cun_end ||
-        !first_guard || first_guard >= cum_end ||
-        !second_guard || second_guard >= cum_end) return false;
-
-    /* Replacement line lengths are validated before any source mutation.
-     * A standalone timer runs after the CUN trigger callback returns. */
-    char const *setup =
-        "set NE=NL\nset th[tn]=true\ncall TimerStart(BHs(0),0.5,false,function CUM)";
-    if ((size_t)(strchr(announcement, '\n') - announcement) < strlen(setup))
-        return false;
-    if (!ordr_autostart_replace_line(announcement, setup)) return false;
-    /* CUM is ordinarily gated by the clicked start-button unit and host
-     * trigger player. Timer callbacks have neither, but tU remains the
-     * original one-shot guard and CUM's game setup stays unchanged. */
-    if (!ordr_autostart_replace_line(first_guard, "if tU then")) return false;
-    if (!ordr_autostart_replace_line(second_guard, "if false then")) return false;
-    fprintf(stderr, "ORDR offline auto-choice installed: Nightmare + Isekai, original CUM startup scheduled\n");
-    return true;
-}
-
 bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
     if (!buffer) {
         /* Missing mapscript used to SIGSEGV in jass_remove_comments(NULL). */
         jass_setruntimeerror(j, "null buffer");
         return false;
     }
-    /* Apply only to the exact ORDR 2.323[C] original script. */
-    ordr_enable_nightmare_isekai_autostart(buffer);
     jass_remove_comments(buffer);
     jass_remove_bom(buffer);
     if ((uint32_t)mode >= sizeof(jass_syntax) / sizeof(jass_syntax[0])) {
