@@ -615,6 +615,23 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
 /* The ORDR difficulty buttons belong to Neutral Passive (15), while the
  * registering PLAYER_UNIT_SELECTED trigger belongs to the human who clicked.
  * Trigger dispatch and GetTriggerPlayer must use the clicker, not the owner. */
+/* The real ORDR script asks GetUnitAbilityLevel(button, $41393030),
+ * while object data calls the ability A900. This gate decides whether a
+ * selection is dispatched to CUK/CUL/CUM at all. */
+TEST(wc3_jass_map, ordr_numeric_a900_ability_dispatch_gate) {
+    T_ASSERT(run_test_jass(
+        "function CUO takes nothing returns nothing\nendfunction\n"
+        "function CUW takes nothing returns nothing\nendfunction\n"
+        "function CUN takes nothing returns nothing\nendfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local unit button = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "  call UnitAddAbility(button, 'A900')\n"
+        "  call BJassAssert(GetUnitAbilityLevel(button, 'A900') > 0, \"canonical A900\")\n"
+        "  call BJassAssert(GetUnitAbilityLevel(button, 0x41393030) > 0, \"ORDR numeric A900\")\n"
+        "endfunction\n"
+    ));
+}
+
 TEST(wc3_jass_map, ordr_neutral_button_selection_uses_clicking_player) {
     edict_t *button = NULL;
     gameEvent_t *evt;
