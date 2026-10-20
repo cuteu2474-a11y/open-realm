@@ -2116,6 +2116,7 @@ struct gevent_s {
     bool inuse;
     uint32_t handle_generation;
     uint8_t generation_exhausted;
+    uint32_t registration_sequence; /* event created after a movement scan began must not see that crossing */
 };
 
 typedef struct {
@@ -2134,6 +2135,7 @@ typedef struct {
 typedef struct {
     event_t handlers[MAX_EVENTS];
     uint32_t next_handler_hint; /* first likely unused slot; reset alongside level.events */
+    uint32_t registration_sequence; /* monotonically increasing per map; reset alongside level.events */
     gameEvent_t queue[MAX_EVENT_QUEUE];
     uint32_t write, read;
 } levelEvents_t;
