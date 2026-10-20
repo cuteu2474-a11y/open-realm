@@ -19,6 +19,8 @@ static bool cam_west, cam_east, cam_north, cam_south;
 
 static void CL_ScrollFrame(void);
 static bool CL_MouseOverGameplayUIAt(int x, int y);
+static void CL_InputKeyEvent(keyCode_t key, uint32_t mods, bool down, uint32_t time);
+static uint32_t CL_BindMods(SDL_Keymod mods);
 void IN_SelectDown(void);
 void IN_SelectUp(void);
 
@@ -415,6 +417,15 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 touch_pan.gesture = true;
                 input.select = false;
                 cl.selection.in_progress = false;
+                /* The first finger may have produced a synthetic mouse-down
+                 * without a matching up. Release its binding now so a pan
+                 * cannot leave +select held and block the next real tap. */
+                if (mouse_button_keys[SDL_BUTTON_LEFT]) {
+                    CL_InputKeyEvent(mouse_button_keys[SDL_BUTTON_LEFT],
+                                     CL_BindMods(SDL_GetModState()), false,
+                                     finger->timestamp);
+                    mouse_button_keys[SDL_BUTTON_LEFT] = 0;
+                }
                 CL_EndMinimapDrag();
                 vec2_t center = CL_TouchPanCenter();
                 CL_BeginPan(center.x, center.y);
@@ -2231,11 +2242,13 @@ TEST(client_input, two_finger_touch_pans_camera) {
     T_EQ(SDL_PushEvent(&event), 1);
     CL_Input(); Cbuf_Execute();
     T_ASSERT(input.select && !camera_drag.active);
+    T_ASSERT(mouse_button_keys[SDL_BUTTON_LEFT] != 0);
 
     /* Second finger: the selection is cancelled and the midpoint anchors a pan. */
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1, .fingerId = 2, .x = 0.6f, .y = 0.5f } };
     T_EQ(SDL_PushEvent(&event), 1); CL_Input(); Cbuf_Execute();
     T_ASSERT(!input.select && !cl.selection.in_progress && camera_drag.active);
+    T_EQ(mouse_button_keys[SDL_BUTTON_LEFT], 0);
 
     /* Both fingers report motion in one input pass (one event each per frame)
      * and drag the midpoint 102.4px right: the pan must apply once, since the
@@ -2256,14 +2269,28 @@ TEST(client_input, two_finger_touch_pans_camera) {
     SZ_Init(&cls.netchan.message, data, sizeof(data));
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERUP, .touchId = 1, .fingerId = 1, .x = 0.5f, .y = 0.5f } };
     T_EQ(SDL_PushEvent(&event), 1);
-    event = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONUP, .which = SDL_TOUCH_MOUSEID,
-        .button = SDL_BUTTON_LEFT, .x = 512, .y = 384 } };
-    T_EQ(SDL_PushEvent(&event), 1);
+    /* iOS may never send the matching synthesized mouse-up. The second
+     * finger must still leave the binding released. */
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERUP, .touchId = 1, .fingerId = 2, .x = 0.6f, .y = 0.5f } };
     T_EQ(SDL_PushEvent(&event), 1);
     CL_Input(); Cbuf_Execute();
     T_EQ(cls.netchan.message.cursize, 0);
     T_ASSERT(!camera_drag.active && !touch_pan.count && !touch_pan.gesture);
+    T_EQ(mouse_button_keys[SDL_BUTTON_LEFT], 0);
+
+    /* A subsequent single-finger tap must still select after a pan where
+     * the SDL synthetic mouse-up was omitted. */
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1,
+        .fingerId = 3, .x = 0.45f, .y = 0.40f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERUP;
+    T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input(); Cbuf_Execute();
+    char next_tap[128] = { 0 };
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, next_tap);
+    T_STREQ(next_tap, "select 7");
 
     /* Edge scroll: a touch cursor parked on the edge stays put, a mouse scrolls. */
     Cvar_Set("cl_camera_edge_scroll", "1"); Cvar_Set("cl_camera_scroll_speed", "1000");
