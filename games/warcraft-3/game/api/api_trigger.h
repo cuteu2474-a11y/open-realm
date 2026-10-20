@@ -66,7 +66,11 @@ uint32_t DestroyTrigger(jass_t *j) {
     return 0;
 }
 uint32_t ResetTrigger(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    if(trigger){
+        trigger->evaluation_count=0;
+        trigger->execution_count=0;
+    }
     return 0;
 }
 uint32_t EnableTrigger(jass_t *j) {
@@ -140,27 +144,14 @@ uint32_t IsTriggerEnabled(jass_t *j) {
     return jass_pushboolean(j, enabled);
 }
 uint32_t TriggerWaitOnSleeps(jass_t *j) {
-    /* TODO: Store the per-trigger wait-on-sleeps flag once coroutine suspension exposes that state. */
-    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    bool flag = jass_checkboolean(j, 2);
-    if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
-        fprintf(stderr,
-                "WC3_TUTORIAL_FLOW wait-on-sleeps trigger=%ld flag=%d caller=\"%s\" implementation=stub\n",
-                (long)QuestPeonStageTriggerOrdinal(whichTrigger), (int)flag,
-                jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "(native/root)");
-    }
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    bool enabled=jass_checkboolean(j,2);
+    if(trigger)trigger->wait_on_sleeps=enabled;
     return 0;
 }
 uint32_t IsTriggerWaitOnSleeps(jass_t *j) {
-    /* TODO: Return the stored per-trigger wait-on-sleeps flag once coroutine suspension exposes that state. */
-    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
-        fprintf(stderr,
-                "WC3_TUTORIAL_FLOW is-wait-on-sleeps trigger=%ld caller=\"%s\" result=0 implementation=stub\n",
-                (long)QuestPeonStageTriggerOrdinal(whichTrigger),
-                jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "(native/root)");
-    }
-    return jass_pushboolean(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushboolean(j,trigger && trigger->wait_on_sleeps);
 }
 uint32_t GetTriggeringTrigger(jass_t *j) {
     jassContext_t const *ctx = jass_getcontext(j);
@@ -178,12 +169,12 @@ uint32_t GetTriggerEventId(jass_t *j) {
     return jass_pushnullhandle(j, "eventid");
 }
 uint32_t GetTriggerEvalCount(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    return jass_pushinteger(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushinteger(j,trigger ? (int32_t)MIN(trigger->evaluation_count,(uint32_t)INT32_MAX):0);
 }
 uint32_t GetTriggerExecCount(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    return jass_pushinteger(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushinteger(j,trigger ? (int32_t)MIN(trigger->execution_count,(uint32_t)INT32_MAX):0);
 }
 /* Registrations own their subject/filter/limit data. Dispatch installs event
  * response context before conditions and actions, then restores it for nested

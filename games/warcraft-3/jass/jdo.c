@@ -1327,6 +1327,8 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     bool all_true = true;
     if (!tmp_state) return false;
+    if (params->trigger->evaluation_count < UINT32_MAX)
+        params->trigger->evaluation_count++;
     FOR_EACH_LIST(gTriggerCondition_t, cond, params->trigger->conditions) {
         memcpy(tmp_state, j, sizeof(struct jass_s));
         memset(tmp_state->stack, 0, sizeof(tmp_state->stack));
@@ -1453,6 +1455,8 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
     /* TriggerExecute(null) is a no-op in JASS, not a reason to crash. */
     if (!params || !params->trigger) return;
+    if (params->trigger->execution_count < UINT32_MAX)
+        params->trigger->execution_count++;
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);

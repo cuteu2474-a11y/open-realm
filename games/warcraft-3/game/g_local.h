@@ -1133,6 +1133,9 @@ struct gtrigger_s {
     gTriggerAction_t *actions;
     gTriggerCondition_t *conditions;
     bool disabled;
+    bool wait_on_sleeps; /* TriggerWaitOnSleeps */
+    uint32_t evaluation_count; /* TriggerEvaluate/event condition calls */
+    uint32_t execution_count;  /* TriggerExecute/accepted event actions */
 };
 
 struct gtimer_s {
