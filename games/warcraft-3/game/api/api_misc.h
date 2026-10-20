@@ -558,7 +558,9 @@ uint32_t DestroyBoolExpr(jass_t *j) {
     return 0;
 }
 uint32_t GetEventGameState(jass_t *j) {
-    return jass_pushnullhandle(j, "gamestate");
+    /* TriggerRegisterGameStateEvent publishes the registration's enum
+     * value through the coroutine-local eventValue, not an ephemeral global. */
+    return JassPushEnumHandle(j, "gamestate", jass_getcontext(j)->eventValue);
 }
 uint32_t GetWinningPlayer(jass_t *j) {
     return jass_pushnullhandle(j, "player");
@@ -749,7 +751,9 @@ uint32_t GetEventPlayerChatStringMatched(jass_t *j) {
     return jass_pushstring(j, jass_getcontext(j)->chat_matched);
 }
 uint32_t GetEventUnitState(jass_t *j) {
-    return jass_pushnullhandle(j, "unitstate");
+    /* TriggerRegisterUnitStateEvent shares the game-state transition
+     * event machinery and receives the original UNIT_STATE_* enum. */
+    return JassPushUnitStateHandle(j, jass_getcontext(j)->eventValue);
 }
 uint32_t GetEventDamage(jass_t *j) {
     return jass_pushnumber(j, (float)jass_getcontext(j)->eventValue);

@@ -1744,7 +1744,14 @@ gameEvent_t *G_PublishEvent(edict_t *edict, EVENTTYPE type) {
 
 void G_PublishEventResponse(edict_t *edict, EVENTTYPE type, event_t *response_to) {
     gameEvent_t *event = G_PublishEvent(edict, type);
-    if (event) event->responseTo = response_to;
+    if (event) {
+        event->responseTo = response_to;
+        /* The registered state is the identity returned by
+         * GetEventGameState / GetEventUnitState. Preserve it on the queued
+         * event so nested and suspended JASS trigger calls don't race. */
+        if (response_to && type == EVENT_GAME_STATE_LIMIT)
+            event->value = (int32_t)response_to->state;
+    }
 }
 
 void G_PublishSummonEvents(edict_t *summoner, edict_t *summoned) {
