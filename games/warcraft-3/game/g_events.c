@@ -11,6 +11,17 @@ static bool G_ChatMatches(cstring_t message, cstring_t pattern, bool exact) {
                    strncmp(message, pattern, strlen(pattern)) == 0;
 }
 
+/* ORDR's own offline mode is enabled by its JASS chat command,
+ * not by disabling the engine's networking or simulating save bonuses.
+ * Both -오프라인모드 and -offline are published by the original game.
+ * Prefer the ASCII alias where a catch-all handler is registered, since
+ * map-language and native filesystem encodings may differ on iPad. */
+static cstring_t G_ORDROfflineMatch(cstring_t pattern, bool exact) {
+    if (G_ChatMatches("-offline", pattern, exact)) return "-offline";
+    if (G_ChatMatches("-오프라인모드", pattern, exact)) return "-오프라인모드";
+    return NULL;
+}
+
 #ifdef BZ_TESTS
 #include "shared/test.h"
 TEST(wc3_chat, register_filter_exact_prefix_and_empty) {
@@ -21,7 +32,79 @@ TEST(wc3_chat, register_filter_exact_prefix_and_empty) {
     T_ASSERT(G_ChatMatches("-anything", "", false));
     T_ASSERT(!G_ChatMatches("-anything", "", true));
 }
+TEST(wc3_chat, ordr_offline_mode_uses_authored_command) {
+    T_STREQ(G_ORDROfflineMatch("-offline", true), "-offline");
+    T_STREQ(G_ORDROfflineMatch("-오프라인모드", true), "-오프라인모드");
+    T_STREQ(G_ORDROfflineMatch("", false), "-offline");
+    T_STREQ(G_ORDROfflineMatch("-off", false), "-offline");
+    T_ASSERT(G_ORDROfflineMatch("-offline", false));
+    T_ASSERT(!G_ORDROfflineMatch("-help", true));
+    T_ASSERT(!G_ORDROfflineMatch("-offline", false) == false);
+}
+
 #endif
+
+/* A single-player ORDR session cannot log in to the map's online save
+ * service. Run the map-authored offline command automatically instead of
+ * altering JASS rewards/state. The trigger must already be registered for
+ * the local player, so the event is indistinguishable from that player's
+ * manual chat and reaches the original JASS conditions. */
+void G_ORDRTryAutoOfflineMode(void) {
+    edict_t *player;
+    gameClient_t *client;
+    cstring_t command = NULL;
+    gameEvent_t *evt;
+
+    if (level.ordr_auto_offline_queued || !level.started ||
+        !level.vm || !G_IsSinglePlayer() ||
+        /* This command belongs only to the original ORDR S2 map script. */
+        !jass_hasfunction(level.vm, "CUO") ||
+        !jass_hasfunction(level.vm, "CUW") ||
+        !jass_hasfunction(level.vm, "CUN") ||
+        level.time > 15000)
+        return;
+
+    client = G_SinglePlayerLocalClient();
+    if (!client || !client->connected) return;
+    player = G_GetPlayerEntityByNumber(client->ps.number);
+    if (!player) return;
+
+    /* Prefer the exact registered command over a wildcard handler.
+     * If only a wildcard exists, the English alias is used as the
+     * original map already accepts it in ORDR S2. */
+    FOR_EACH_EVENT(reg) {
+        if (reg->type != EVENT_PLAYER_CHAT ||
+            !G_EventSubjectIsCurrent(reg) || reg->subject != player ||
+            !reg->trigger || reg->trigger->disabled ||
+            !reg->chat_match[0])
+            continue;
+        command = G_ORDROfflineMatch(reg->chat_match, reg->chat_exact);
+        if (command) break;
+    }
+    if (!command) {
+        FOR_EACH_EVENT(reg) {
+            if (reg->type != EVENT_PLAYER_CHAT ||
+                !G_EventSubjectIsCurrent(reg) || reg->subject != player ||
+                !reg->trigger || reg->trigger->disabled)
+                continue;
+            command = G_ORDROfflineMatch(reg->chat_match, reg->chat_exact);
+            if (command) break;
+        }
+    }
+    if (!command) return;
+
+    evt = G_PublishEvent(player, EVENT_PLAYER_CHAT);
+    if (!evt) return;
+    strlcpy(evt->chat_text, command, sizeof(evt->chat_text));
+    level.ordr_auto_offline_queued = true;
+
+    /* The next G_RunEvents/JASS pass dispatches this through the same
+     * player chat triggers used by the original manual command. */
+    char info[144];
+    snprintf(info, sizeof(info), "player=%u command=%s via=registered_chat",
+             (unsigned)client->ps.number, command);
+    jass_ordr_log_event(level.vm, "ORDR_OFFLINE_STARTUP", info);
+}
 
 /* GetSaveBasicFilename is a short-lived context provided by the host save/load
  * operation, not a physical filesystem path or a script-selectable scope. */

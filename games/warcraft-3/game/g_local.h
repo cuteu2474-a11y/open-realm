@@ -2431,6 +2431,8 @@ struct level_locals {
     bool started;
     bool scriptsConfigured;
     bool scriptsStarted;
+    /* One shot per map session; never replay the original ORDR chat command. */
+    bool ordr_auto_offline_queued;
     bool cinematic_debug_result_window; /* per-map debug latch for result-window tracing */
     bool campaign_select_on_end; /* ForceCampaignSelectScreen defers campaign selection until EndGame */
 };
@@ -3745,6 +3747,7 @@ void jass_runevents(jass_t *);
 // g_events.c
 void G_RunEntities(void);
 void G_RunEvents(void);
+void G_ORDRTryAutoOfflineMode(void);
 /* Host save/restore lifecycle; the basic filename is only visible during these callbacks. */
 bool G_BeforeSaveGame(cstring_t name);
 void G_AfterLoadGame(cstring_t name);

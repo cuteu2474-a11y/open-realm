@@ -1591,6 +1591,9 @@ static void G_RunFrame(void) {
     jass_runevents(level.vm);
     if (ordr_frame_trace)
         jass_ordr_log_event(level.vm, "FRAME_AFTER_JASS", ordr_frame_detail);
+    /* Original ORDR-only -offline/-오프라인모드 command, delivered after
+     * main() has registered player chat handlers. Never bypass JASS. */
+    G_ORDRTryAutoOfflineMode();
     G_ORDRShowFlowStatus();
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
