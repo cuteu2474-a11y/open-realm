@@ -19,6 +19,7 @@ static bool cam_west, cam_east, cam_north, cam_south;
 
 static void CL_ScrollFrame(void);
 static bool CL_MouseOverGameplayUIAt(int x, int y);
+static bool CL_iPadChatHit(int x, int y);
 static void CL_InputKeyEvent(keyCode_t key, uint32_t mods, bool down, uint32_t time);
 static uint32_t CL_BindMods(SDL_Keymod mods);
 void IN_SelectDown(void);
@@ -337,6 +338,8 @@ static struct {
     bool synthetic_down_seen;
     bool synthetic_up_seen;
     bool fallback_sent;
+    /* A direct touch owns its SDL_MOUSE* duplicates for the whole session. */
+    bool native_direct_seen;
 } touch_pan;
 
 static bool CL_TouchIsDirect(SDL_TouchID touch) {
@@ -451,6 +454,7 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
     int32_t slot = -1;
 
     if (!touch_is_direct(finger->touchId)) return;
+    touch_pan.native_direct_seen = true;
     FOR_LOOP(i, touch_pan.count) if (touch_pan.id[i] == finger->fingerId) slot = (int32_t)i;
     switch (finger->type) {
         case SDL_FINGERDOWN:
@@ -459,6 +463,11 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 touch_pan.synthetic_down_seen = false;
                 touch_pan.synthetic_up_seen = false;
                 touch_pan.fallback_sent = false;
+                if (cls.state == ca_active && CL_GameplayInputReady() &&
+                    CL_iPadChatHit((int)pos.x, (int)pos.y)) {
+                    ipad_chat_touch_down = true;
+                    Cmd_ForwardToServer("chat_open");
+                }
             }
             touch_pan.id[touch_pan.count] = finger->fingerId;
             touch_pan.pos[touch_pan.count++] = pos;
@@ -493,9 +502,11 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             /* Do not gate this on CL_GameplayInputReady: the player may be
              * tapping the F10 pause menu, a modal, or the out-of-game menu.
              * If SDL sent a down but omitted its up, synthesize only up. */
-            if (touch_pan.count == 1 && !touch_pan.gesture &&
-                !touch_pan.synthetic_up_seen) {
-                if (CL_ORDRFinishChoiceTouch(finger, pos)) {
+            if (touch_pan.count == 1 && !touch_pan.gesture) {
+                if (ipad_chat_touch_down) {
+                    ipad_chat_touch_down = false;
+                    touch_pan.fallback_sent = true;
+                } else if (CL_ORDRFinishChoiceTouch(finger, pos)) {
                     touch_pan.fallback_sent = true;
                 } else {
                     bool const ui_handled = CL_TouchFallbackUI(pos, touch_pan.synthetic_down_seen);
@@ -513,12 +524,16 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
     }
 }
 
-/* During a two-finger gesture the first finger's synthetic mouse motion and
- * presses would fight the pan; button-ups still pass to release key state. */
+/* A native direct finger is the sole owner of the contact on iOS. SDL emits
+ * both FINGER* and synthetic SDL_TOUCH_MOUSEID edges, and its release can
+ * arrive before FINGERUP. Suppress those duplicate edges unconditionally,
+ * not only during a two-finger pan or after a completed fallback. Real
+ * mouse/trackpad events retain their ordinary pipeline. */
 static bool CL_TouchGestureOwnsMouse(SDL_Event const *event) {
-    if (!touch_pan.gesture) return false;
+    if (!touch_pan.native_direct_seen) return false;
     if (event->type == SDL_MOUSEMOTION) return event->motion.which == SDL_TOUCH_MOUSEID;
-    if (event->type == SDL_MOUSEBUTTONDOWN) return event->button.which == SDL_TOUCH_MOUSEID;
+    if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP)
+        return event->button.which == SDL_TOUCH_MOUSEID;
     return false;
 }
 
@@ -2505,6 +2520,30 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     MSG_ReadString(&cls.netchan.message, command);
     T_STREQ(command, "select 7");
     T_ASSERT(touch_pan.fallback_sent);
+    /* iOS commonly synthesizes a mouse click alongside its FINGER pair.
+     * Test BOTH arrival orders of synthetic mouse-up: the result must be
+     * exactly one world selection and never a permanently held left key. */
+    FOR_LOOP(order, 2) {
+        SZ_Init(&cls.netchan.message, data, sizeof(data));
+        SDL_Event down = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
+            .touchId = 1, .fingerId = 30 + order, .x = 0.45f, .y = 0.40f } };
+        SDL_Event up = down; up.type = SDL_FINGERUP;
+        SDL_Event mouse_down = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONDOWN,
+            .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT, .x = 461, .y = 307 } };
+        SDL_Event mouse_up = mouse_down; mouse_up.type = SDL_MOUSEBUTTONUP;
+        T_EQ(SDL_PushEvent(&down), 1);
+        T_EQ(SDL_PushEvent(&mouse_down), 1);
+        if (order == 0) T_EQ(SDL_PushEvent(&mouse_up), 1);
+        T_EQ(SDL_PushEvent(&up), 1);
+        if (order == 1) T_EQ(SDL_PushEvent(&mouse_up), 1);
+        CL_Input(); Cbuf_Execute();
+        T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+        MSG_ReadString(&cls.netchan.message, command);
+        T_STREQ(command, "select 7");
+        T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+        T_EQ(mouse_button_keys[SDL_BUTTON_LEFT], 0);
+        T_ASSERT(!touch_pan.count);
+    }
     cl = *old_cl;
     MemFree(old_cl);
     cls = old_cls;

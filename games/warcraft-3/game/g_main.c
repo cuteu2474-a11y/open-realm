@@ -1501,9 +1501,12 @@ static void G_ORDRShowFlowStatus(void) {
                 if (unit->s.model) with_model++;
                 if (G_FowPlayerCanSeeEntity(viewer->ps.number, unit)) visible++;
                 if (G_FowPlayerCanHoverEntity(viewer->ps.number, unit)) hovered++;
-                if (examples++ < 3) {
+                /* Capture ALL original difficulty controls once, not just
+                 * the three decorative labels; the controls may have very
+                 * different HP/selection traits from their title models. */
+                if (level.time <= 5500 && examples++ < 12) {
                     snprintf(audit, sizeof(audit),
-                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d hp=%.0f selectable=%d",
+                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d hp=%.0f maxhp=%.0f selectable=%d",
                              (int)((unit->class_id >> 24) & 255),
                              (int)((unit->class_id >> 16) & 255),
                              (int)((unit->class_id >> 8) & 255),
@@ -1514,6 +1517,7 @@ static void G_ORDRShowFlowStatus(void) {
                              (double)unit->s.origin.y,
                              (int)G_FowPlayerCanSeeEntity(viewer->ps.number, unit),
                              (double)unit->health.value,
+                             unit->data.UnitBalance ? (double)unit->data.UnitBalance->maxHealth : -1.0,
                              (int)G_UnitCanBeSelected(viewer, unit));
                     jass_ordr_log_event(level.vm, "CHOICE_MODEL_AUDIT", audit);
                 }
