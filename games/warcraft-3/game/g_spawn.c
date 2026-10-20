@@ -1038,12 +1038,13 @@ void G_SpawnEntities(void) {
         bool const ordr = strstr(level.mapinfo->mapscript, "function CUO") &&
                           strstr(level.mapinfo->mapscript, "function CUW");
         G_FixOrc07BridgeRestoreScript(level.mapinfo->mapscript);
-        /* Opt-in override is ON by default only for the exact shipped ORDR
-         * map in an offline session. Set wc3_ordr_autostart=0 to restore the
-         * original selection UI for later rendering diagnostics. */
+        /* Normal gameplay uses the map's original clickable difficulty,
+         * mode and start buttons. Retain the old Nightmare+Isekai shortcut
+         * strictly as an explicit diagnostic opt-in (wc3_ordr_autostart=1);
+         * otherwise it silently commits a difficulty before the user taps. */
         char *auto_script = NULL;
         cstring_t auto_opt = gi.CvarString
-            ? gi.CvarString("wc3_ordr_autostart", "1") : "1";
+            ? gi.CvarString("wc3_ordr_autostart", "0") : "0";
         if (ordr && G_IsSinglePlayer() && auto_opt && atoi(auto_opt) != 0)
             auto_script = G_ORDRAutoNightmareScript(level.mapinfo->mapscript, true);
         parsed = jass_dobuffer(level.vm,
