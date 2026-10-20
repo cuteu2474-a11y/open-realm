@@ -3018,7 +3018,61 @@ static void CMD_JassDialogChoice(edict_t *ent, uint32_t argc, cstring_t argv[]) 
     G_JassDialogClick(ent, (uint32_t)dialog, (uint32_t)button);
 }
 
+/*
+ * JASS chat registrations created by ORDR's Bcx command factory must be
+ * dispatched through the same coroutine scheduler as other player events.
+ * The input command uses the authenticated player associated with ent, not
+ * a user-supplied player id. This is game-local, not a network chat server.
+ */
+void G_JassPlayerChat(player_t *player, cstring_t message) {
+    edict_t *subject;
+    if (!player || !message || !level.vm) return;
+    subject = G_GetPlayerEntityByNumber(PLAYER_NUM(player));
+    if (!subject) return;
+    FOR_EACH_EVENT(event) {
+        if (event->type != EVENT_PLAYER_CHAT || event->subject != subject ||
+            !event->trigger || !event->variable) continue;
+        if (event->limitop ? strcmp(message, event->variable) != 0
+                           : strstr(message, event->variable) == NULL) continue;
+        jass_calltriggersync(level.vm, event->trigger, player, message);
+    }
+}
+
+CLIENTCOMMAND(Chat) {
+    char message[1024];
+    size_t used = 0;
+    if (!clent || !clent->client || argc <= 1) return;
+    message[0] = '\0';
+    for (uint32_t i = 1; i < argc; ++i) {
+        int written;
+        if (!argv[i]) continue;
+        written = snprintf(message + used, sizeof(message) - used, "%s%s",
+                           used ? " " : "", argv[i]);
+        if (written < 0 || (size_t)written >= sizeof(message) - used) return;
+        used += (size_t)written;
+    }
+    G_JassPlayerChat(&clent->client->ps, message);
+}
+
+/* Reject signs, whitespace, suffixes and overflow rather than partially parsing input. */
+static void CMD_OrdrFrame(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    uint32_t values[2] = {0};
+    if (argc != 3) return;
+    FOR_LOOP(i, 2) {
+        cstring_t arg = argv[i + 1];
+        if (!arg || !*arg) return;
+        for (; *arg; ++arg) {
+            if (*arg < '0' || *arg > '9' || values[i] > (INT32_MAX - (uint32_t)(*arg - '0')) / 10)
+                return;
+            values[i] = values[i] * 10 + (*arg - '0');
+        }
+    }
+    G_OrdrFrameEvent(ent, values[0], (int32_t)values[1]);
+}
+
 clientCommand_t clientCommands[] = {
+    { "chat", CMD_Chat },
+    { "say", CMD_Chat },
     { "give", CMD_Give },
     { "god", CMD_God },
     { "kill", CMD_Kill },
@@ -3069,6 +3123,7 @@ clientCommand_t clientCommands[] = {
     { "gameresult_load", CMD_GameResultLoad },
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
+    { "dzframe", CMD_OrdrFrame },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },
     { "eclear", CMD_EnemiesClear },

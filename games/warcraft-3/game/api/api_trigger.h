@@ -56,6 +56,17 @@ static void QuestPeonStageLogRegistration(trigger_t *trigger, EVENTTYPE type,
             trigger ? (int)trigger->disabled : -1);
 }
 
+/* An invalid JASS handle may be non-null (e.g. a rawcode interpreted as a
+ * trigger). Validate against the map's fixed trigger registry before a VM
+ * callback dereferences linked condition/action lists. */
+static bool WC3_ValidTriggerPointer(trigger_t const *trigger) {
+    uintptr_t base = (uintptr_t)level.triggers;
+    uintptr_t ptr = (uintptr_t)trigger;
+    uintptr_t used = (uintptr_t)level.num_triggers * sizeof(*trigger);
+    return ptr >= base && ptr - base < used &&
+        ((ptr - base) % sizeof(*trigger) == 0);
+}
+
 uint32_t CreateTrigger(jass_t *j) {
     trigger_t *trigger = G_AllocJassTrigger();
     if (!trigger) { jass_rterror(j, "CreateTrigger: trigger registry is full"); return 0; }
@@ -209,9 +220,13 @@ uint32_t TriggerRegisterTimerEvent(jass_t *j) {
     bool periodic = jass_checkboolean(j, 3);
     gtimer_t *timer;
     event_t *evt;
-    if (!whichTrigger || !(timer = G_AllocJassTimer())) return jass_pushnullhandle(j, "event");
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !(timer = G_AllocJassTimer()))
+        return jass_pushnullhandle(j, "event");
     G_TimerStart(timer, (uint32_t)(MAX(0.0f, timeout) * 1000.0f), periodic, NULL);
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) { G_TimerDestroy(timer); return jass_pushnullhandle(j, "event"); }
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer");
     return jass_pushlighthandle(j, evt, "event");
 }
@@ -219,8 +234,19 @@ uint32_t TriggerRegisterTimerExpireEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     gtimer_t *timer = jass_checkhandle(j, 2, "timer");
     event_t *evt;
-    if (!whichTrigger || !timer) return jass_pushnullhandle(j, "event");
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !timer)
+        return jass_pushnullhandle(j, "event");
+    {
+        uintptr_t start = (uintptr_t)level.timers, address = (uintptr_t)timer;
+        uintptr_t used = (uintptr_t)level.num_timers * sizeof(*timer);
+        if (address < start || address - start >= used ||
+            (address - start) % sizeof(*timer) != 0)
+            return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer-expire");
     return jass_pushlighthandle(j, evt, "event");
 }
@@ -317,7 +343,10 @@ uint32_t TriggerRegisterPlayerEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerEvent = jass_checkhandle(j, 3, "playerevent");
+    if (!whichTrigger || !whichPlayer || !whichPlayerEvent)
+        return jass_pushnullhandle(j, "event");
     event_t *evt = G_MakeEvent(*whichPlayerEvent);
+    if (!evt) return jass_pushnullhandle(j, "event");
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerEvent, evt->subject, "player");
@@ -337,7 +366,10 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerUnitEvent = jass_checkhandle(j, 3, "playerunitevent");
     //handle_t filter = jass_checkhandle(j, 4, "boolexpr");
+    if (!whichTrigger || !whichPlayer || !whichPlayerUnitEvent)
+        return jass_pushnullhandle(j, "event");
     event_t *evt = G_MakeEvent(*whichPlayerUnitEvent);
+    if (!evt) return jass_pushnullhandle(j, "event");
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
@@ -368,12 +400,32 @@ uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
     //float limitval = jass_checknumber(j, 5);
     return jass_pushnullhandle(j, "event");
 }
+/* Warcraft player chat: exact equals, non-exact substring match. Reuse
+ * EVENT_PLAYER_CHAT's dedicated event type and existing variable/limitop slots
+ * for registration text/flag (game-variable events use another event type).
+ * The event registry is map-local and survives until the map is unloaded. */
 uint32_t TriggerRegisterPlayerChatEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //cstring_t chatMessageToDetect = jass_checkstring(j, 3);
-    //bool exactMatchOnly = jass_checkboolean(j, 4);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    player_t *whichPlayer = jass_checkhandle(j, 2, "player");
+    cstring_t match = jass_checkstring(j, 3);
+    bool exact = jass_checkboolean(j, 4);
+    event_t *evt;
+    size_t length;
+    if (!WC3_ValidTriggerPointer(whichTrigger) || !whichPlayer || !match)
+        return jass_pushnullhandle(j, "event");
+    length = strlen(match);
+    if (length >= 1024) {
+        jass_rterror(j, "TriggerRegisterPlayerChatEvent: match text too long");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(EVENT_PLAYER_CHAT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger;
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
+    evt->variable = gi.MemAlloc(length + 1);
+    memcpy((void *)evt->variable, match, length + 1);
+    evt->limitop = exact ? 1 : 0;
+    return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterDeathEvent(jass_t *j) {
     /* Fire whichTrigger when whichWidget dies.  "widget" is the base type of
@@ -582,6 +634,7 @@ uint32_t TriggerWaitForSound(jass_t *j) {
 }
 uint32_t TriggerEvaluate(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return jass_pushboolean(j, false);
     jassContext_t const *context = jass_getcontext(j);
     bool result = jass_evaluatetrigger(j, whichTrigger, context ? context->unit : NULL);
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
@@ -611,6 +664,7 @@ uint32_t TriggerEvaluate(jass_t *j) {
 }
 uint32_t TriggerExecute(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return 0;
     jassContext_t const *context = jass_getcontext(j);
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         jassContext_t const *ctx = jass_getcontext(j);
@@ -641,6 +695,7 @@ uint32_t TriggerExecute(jass_t *j) {
 uint32_t TriggerExecuteWait(jass_t *j) {
     /* TODO: Execute and yield until the trigger finishes once the coroutine scheduler supports waits. */
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!WC3_ValidTriggerPointer(whichTrigger)) return 0;
     if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
         fprintf(stderr,
                 "WC3_TUTORIAL_FLOW direct trigger=%ld op=execute-wait caller=\"%s\" implementation=stub\n",

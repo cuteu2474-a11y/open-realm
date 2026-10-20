@@ -308,7 +308,8 @@ void MDLX_DrawSpriteInstance(drawSprite_t const *sprite, color32_t tint) {
 
     memset(&entity, 0, sizeof(entity));
     memset(&viewdef, 0, sizeof(viewdef));
-    entity.scale = 1;
+    /* Preserve the authored size instead of always drawing UI models at scale one. */
+    entity.scale = sprite->scale != 0 ? sprite->scale : 1;
     entity.model = model;
     entity.skin = sprite->skin;
     entity.skin_slot = sprite->skin_slot;

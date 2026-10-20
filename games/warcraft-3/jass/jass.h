@@ -70,6 +70,8 @@ struct vm_program {
     uint32_t size;
 };
 
+#define JASS_SYNC_PAYLOAD_MAX 1024 /* bytes per immutable sync trigger payload including NUL */
+
 struct jass_context {
     trigger_t *trigger;
     edict_t *unit;
@@ -77,6 +79,7 @@ struct jass_context {
     edict_t *source;
     int32_t eventValue;
     uint32_t dialog_id, dialog_button_id;
+    uint32_t ui_frame_id; /* immutable dynamic UI callback identity */
     vec2_t point;
     uint8_t hasPoint;
     player_t *playerState;
@@ -85,6 +88,7 @@ struct jass_context {
     handle_t region;
     uint32_t timer_generation;
     uint8_t timer_pending;
+    char syncData[JASS_SYNC_PAYLOAD_MAX]; /* copied per coroutine: no cross-event aliasing */
     jassFunc_t const *func;
 };
 
@@ -132,6 +136,7 @@ bool jass_context_references_entity(jass_t *j, edict_t const *ent);
 void jass_haltevents(jass_t *j);
 bool jass_calltrigger(jass_t *j, trigger_t *trigger, edict_t *unit, edict_t *source);
 bool jass_calltriggerwithvalue(jass_t *j, trigger_t *trigger, edict_t *unit, edict_t *source, int32_t eventValue);
+bool jass_calltriggersync(jass_t *j, trigger_t *trigger, player_t *player, cstring_t payload);
 bool jass_calltriggerwithtimer(jass_t *j, trigger_t *trigger, handle_t timer);
 bool jass_popboolean(jass_t *j);
 void jass_pop(jass_t *j, uint32_t count);

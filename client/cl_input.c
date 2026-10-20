@@ -18,6 +18,8 @@ static bool cam_west, cam_east, cam_north, cam_south;
 
 static void CL_ScrollFrame(void);
 static bool CL_MouseOverGameplayUIAt(int x, int y);
+static void CL_InputKeyEvent(keyCode_t key, uint32_t mods, bool down, uint32_t time);
+static uint32_t CL_BindMods(SDL_Keymod mods);
 
 static struct {
     uint32_t buttons, sent, last_ms;
@@ -255,6 +257,9 @@ static struct {
     uint32_t count;
     bool gesture;
 } touch_pan;
+/* Direct finger events own their pointer dispatch. SDL's separately synthesized
+ * TOUCH_MOUSEID events must not replay an already handled tap. */
+static bool touch_direct_mouse;
 
 static bool CL_TouchIsDirect(SDL_TouchID touch) {
     return SDL_GetTouchDeviceType(touch) == SDL_TOUCH_DEVICE_DIRECT;
@@ -282,6 +287,13 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 touch_pan.gesture = true;
                 input.select = false;
                 cl.selection.in_progress = false;
+                /* Cancel the first finger's pending binding, not just the marquee.
+                 * Otherwise its queued +select can run after gesture detection. */
+                if (mouse_button_keys[SDL_BUTTON_LEFT]) {
+                    CL_InputKeyEvent(mouse_button_keys[SDL_BUTTON_LEFT],
+                                     CL_BindMods(SDL_GetModState()), false, finger->timestamp);
+                    mouse_button_keys[SDL_BUTTON_LEFT] = 0;
+                }
                 CL_EndMinimapDrag();
                 vec2_t center = CL_TouchPanCenter();
                 CL_BeginPan(center.x, center.y);
@@ -303,6 +315,35 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             if (!touch_pan.count) touch_pan.gesture = false;
             break;
     }
+}
+
+/* Map the primary direct finger to the existing pointer path, including menus,
+ * client-owned HUD hit testing and world selection. Do not synthesize a tap
+ * for the second finger or resume a press partway through a pan gesture. */
+static bool CL_TouchToPointer(SDL_Event *event) {
+    SDL_TouchFingerEvent const finger = event->tfinger;
+    bool const direct = touch_is_direct(finger.touchId);
+    bool const primary = touch_pan.count && touch_pan.id[0] == finger.fingerId;
+    bool const gesture = touch_pan.gesture;
+    CL_TouchFingerEvent(&finger);
+    if (!direct) return false;
+    touch_direct_mouse = true;
+    if (gesture || touch_pan.gesture ||
+        (finger.type == SDL_FINGERDOWN ? touch_pan.count != 1 : !primary)) return false;
+
+    size2_t const win = re.GetWindowSize();
+    int const x = (int)(finger.x * win.width), y = (int)(finger.y * win.height);
+    if (finger.type == SDL_FINGERMOTION) {
+        *event = (SDL_Event){ .motion = { .type = SDL_MOUSEMOTION,
+            .timestamp = finger.timestamp, .which = SDL_TOUCH_MOUSEID, .x = x, .y = y } };
+    } else {
+        *event = (SDL_Event){ .button = {
+            .type = finger.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP,
+            .timestamp = finger.timestamp, .which = SDL_TOUCH_MOUSEID,
+            .button = SDL_BUTTON_LEFT, .state = finger.type == SDL_FINGERDOWN ? SDL_PRESSED : SDL_RELEASED,
+            .x = x, .y = y } };
+    }
+    return true;
 }
 
 /* During a two-finger gesture the first finger's synthetic mouse motion and
@@ -673,13 +714,18 @@ void CL_Input(void) {
             }
             continue;
         }
+        if (event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION ||
+            event.type == SDL_FINGERUP) {
+            if (!CL_TouchToPointer(&event)) continue;
+        } else if (touch_direct_mouse &&
+                   (((event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) &&
+                     event.button.which == SDL_TOUCH_MOUSEID) ||
+                    (event.type == SDL_MOUSEMOTION && event.motion.which == SDL_TOUCH_MOUSEID))) {
+            /* SDL also emits a mouse event for the same contact. */
+            continue;
+        }
         if (CL_TouchGestureOwnsMouse(&event)) continue;
         switch(event.type) {
-            case SDL_FINGERDOWN:
-            case SDL_FINGERMOTION:
-            case SDL_FINGERUP:
-                CL_TouchFingerEvent(&event.tfinger);
-                break;
             case SDL_MOUSEBUTTONDOWN:
                 {
                     keyCode_t mousevt = CL_MouseButtonKey(&event.button);
@@ -930,7 +976,7 @@ void IN_SelectDown(void) {
         cl.selection.in_progress = false;
         return;
     }
-    if (CL_MouseOverGameplayUI()) {
+    if (CL_MouseOverGameplayUI() || touch_pan.gesture) {
         CL_ResetSelectClickChain();
         return;
     }
@@ -1995,6 +2041,105 @@ TEST(client_input, edge_scroll_cursor_lifecycle) {
     Cvar_SetValue("cl_camera_edge_scroll", old_edge); Cvar_SetValue("cl_camera_edge_margin", old_margin);
 }
 
+/* A direct finger tap must work without SDL's optional mouse synthesis.
+ * Supplying the usual duplicate mouse edges must not send a second selection. */
+TEST(client_input, direct_touch_tap_selects_once_without_synthetic_mouse) {
+    struct client_state *old_cl = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    refExport_t old_re = re;
+    __typeof__(input) old_input = input;
+    mouseEvent_t old_mouse = mouse;
+    bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    bool old_touch_mouse = touch_direct_mouse;
+    SDL_Keymod old_mod = SDL_GetModState();
+    int old_limit = Cvar_Integer("cl_selection_limit", 64);
+    UINAME select_binding;
+    bool add_down = !Cmd_Exists("+select"), add_up = !Cmd_Exists("-select");
+    uint8_t data[512];
+    char command[128];
+    SDL_Event event;
+
+    memcpy(old_cl, &cl, sizeof(cl));
+    strlcpy(select_binding, Key_GetBinding(K_MOUSE1, 0), sizeof(select_binding));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0); SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    if (add_down) Cmd_AddCommand("+select", IN_SelectDown);
+    if (add_up) Cmd_AddCommand("-select", IN_SelectUp);
+    Key_SetBinding(K_MOUSE1, 0, "+select"); SDL_SetModState(KMOD_NONE);
+    memset(&cl, 0, sizeof(cl)); input = (__typeof__(input)){ .focus = true };
+    memset(&touch_pan, 0, sizeof(touch_pan)); touch_direct_mouse = false;
+    touch_is_direct = CL_TestTouchDirect;
+    cls.state = ca_active; cls.key_dest = key_game; cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    re.TraceMinimap = CL_TestNoMinimap; re.TraceEntity = CL_TestSelectEntity;
+    re.GetWindowSize = CL_TestWindowSize;
+    Cvar_Set("cl_selection_limit", "1");
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 12,
+        .fingerId = 7, .x = 0.5f, .y = 0.5f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERUP; T_EQ(SDL_PushEvent(&event), 1);
+    /* SDL may emit both of these after the two finger events. */
+    event = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONDOWN,
+        .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT, .x = 512, .y = 384 } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_MOUSEBUTTONUP; T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input(); Cbuf_Execute();
+
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "select 7");
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+    T_ASSERT(!touch_pan.count && !touch_pan.gesture && !input.select);
+
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT); SDL_QuitSubSystem(SDL_INIT_EVENTS);
+    cl = *old_cl; MemFree(old_cl); cls = old_cls; re = old_re; input = old_input; mouse = old_mouse;
+    touch_is_direct = old_direct; touch_direct_mouse = old_touch_mouse;
+    memset(&touch_pan, 0, sizeof(touch_pan));
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
+    Key_SetBinding(K_MOUSE1, 0, select_binding); SDL_SetModState(old_mod);
+    if (add_down) Cmd_RemoveCommand("+select");
+    if (add_up) Cmd_RemoveCommand("-select");
+    Cvar_SetValue("cl_selection_limit", old_limit);
+}
+
+/* Menus receive normalized FINGER presses, not only SDL-synthesized mouse edges. */
+TEST(client_input, direct_touch_tap_reaches_menu_once) {
+    struct client_state *old_cl = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    refExport_t old_re = re;
+    menuExport_t old_menu = menu;
+    __typeof__(input) old_input = input;
+    mouseEvent_t old_mouse = mouse;
+    bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    bool old_touch_mouse = touch_direct_mouse;
+    SDL_Event event;
+
+    memcpy(old_cl, &cl, sizeof(cl)); memset(&cl, 0, sizeof(cl));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0); SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    input = (__typeof__(input)){ .focus = true };
+    memset(&touch_pan, 0, sizeof(touch_pan)); touch_direct_mouse = false;
+    touch_is_direct = CL_TestTouchDirect;
+    cls.state = ca_disconnected; cls.key_dest = key_menu;
+    re.GetWindowSize = CL_TestWindowSize;
+    menu.MouseEvent = CL_TestMenuMouse;
+    test_menu_mouse = 0;
+
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
+        .touchId = 17, .fingerId = 1, .x = 0.2f, .y = 0.3f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERUP; T_EQ(SDL_PushEvent(&event), 1);
+    event = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONDOWN,
+        .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT, .x = 205, .y = 230 } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_MOUSEBUTTONUP; T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input(); T_EQ(test_menu_mouse, 2);
+
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT); SDL_QuitSubSystem(SDL_INIT_EVENTS);
+    cl = *old_cl; MemFree(old_cl); cls = old_cls; re = old_re; menu = old_menu;
+    input = old_input; mouse = old_mouse; touch_is_direct = old_direct;
+    touch_direct_mouse = old_touch_mouse; memset(&touch_pan, 0, sizeof(touch_pan));
+}
+
 /* Two fingers pan like +pan and cancel the first finger's synthetic selection;
  * a touch-driven cursor never edge-scrolls. */
 TEST(client_input, two_finger_touch_pans_camera) {
@@ -2005,6 +2150,7 @@ TEST(client_input, two_finger_touch_pans_camera) {
     __typeof__(input) old_input = input;
     mouseEvent_t old_mouse = mouse;
     bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    bool old_touch_mouse = touch_direct_mouse;
     UINAME select_binding;
     float old_edge = Cvar_Value("cl_camera_edge_scroll", 0), old_speed = Cvar_Value("cl_camera_scroll_speed", 0);
     bool add_select_down = !Cmd_Exists("+select"), add_select_up = !Cmd_Exists("-select");
@@ -2082,7 +2228,8 @@ TEST(client_input, two_finger_touch_pans_camera) {
     }
 
     cl = *old_cl; MemFree(old_cl); cls = old_cls; re = old_re; input = old_input; mouse = old_mouse;
-    touch_is_direct = old_direct; memset(&touch_pan, 0, sizeof(touch_pan)); pan_motion.pending = false;
+    touch_is_direct = old_direct; touch_direct_mouse = old_touch_mouse;
+    memset(&touch_pan, 0, sizeof(touch_pan)); pan_motion.pending = false;
     FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
     Key_SetBinding(K_MOUSE1, 0, select_binding);
     if (add_select_down) Cmd_RemoveCommand("+select");

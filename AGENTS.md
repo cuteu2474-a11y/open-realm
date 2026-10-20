@@ -10,6 +10,7 @@ This codebase is inspired by **Quake 2** (id Software). The developer is deeply 
 
 | Topic | File |
 |-------|------|
+| ORDR iPad: active branch, existing progress, private-data reproduction and next blocker | [docs/games/warcraft-3/ordr-handoff.md](docs/games/warcraft-3/ordr-handoff.md) |
 | Architecture, engine boundaries, struct/API discipline, network contracts | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Game/client boundary: universal client, where logic goes, parameters vs results, camera-noise worked example | [docs/architecture/game-client-boundary.md](docs/architecture/game-client-boundary.md) |
 | Client camera samples, Euler snapshot, quat slerp | [docs/architecture/client.md](docs/architecture/client.md) |

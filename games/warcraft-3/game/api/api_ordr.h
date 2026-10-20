@@ -45,8 +45,14 @@ static void ORDR_ProcessTocLine(char *line) {
         fprintf(stderr, "ORDR DzLoadToc: rejected unsafe FDF path\n");
         return;
     }
-    /* UI_EnsureFDF caches parsed files, so repeated DzLoadToc calls are safe. */
-    UI_ParseFDF(start);
+    /* Only successfully parsed files enter the template cache. Keep failures
+     * in the iPad diagnostic log even when the map ignores DzLoadToc. */
+    if (!UI_EnsureFDF(start)) {
+        char detail[ORDR_TOC_MAX_PATH + 64];
+        snprintf(detail, sizeof(detail), "DzLoadToc: failed FDF %s", start);
+        fprintf(stderr, "ORDR %s\n", detail);
+        G_JassDiagnosticNote(detail);
+    }
 }
 
 static uint32_t DzLoadToc(jass_t *j) {
@@ -101,6 +107,75 @@ static uint32_t DzLoadToc(jass_t *j) {
     }
     gi.MemFree(text);
     return 0;
+}
+
+
+/*
+ * DzSyncData: offline same-process transport.  A prefix registers one or
+ * more triggers; sending that channel queues the trigger actions with the
+ * sender player and an immutable per-coroutine payload.  UI callbacks are
+ * delivered by the JASS scheduler; no network credentials are involved.
+ *
+ * Online/server synchronization is not emulated by this path.
+ */
+static uint32_t DzTriggerRegisterSyncData(jass_t *j) {
+    trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    cstring_t prefix = jass_checkstring(j, 2);
+    bool server = jass_checkboolean(j, 3);
+    ordrSyncRegistration_t *entry;
+    if (!trigger || !prefix || !*prefix || strlen(prefix) >= MAX_ORDR_SYNC_PREFIX) {
+        jass_rterror(j, "DzTriggerRegisterSyncData: invalid trigger or prefix");
+        return 0;
+    }
+    if (level.ordr_num_sync_registrations >= MAX_ORDR_SYNC_REGISTRATIONS) {
+        jass_rterror(j, "DzTriggerRegisterSyncData: registration limit reached");
+        return 0;
+    }
+    entry = &level.ordr_sync_registrations[level.ordr_num_sync_registrations++];
+    entry->trigger = trigger;
+    snprintf(entry->prefix, sizeof(entry->prefix), "%s", prefix);
+    entry->server = server;
+    return 0;
+}
+
+static uint32_t DzSyncData(jass_t *j) {
+    cstring_t prefix = jass_checkstring(j, 1);
+    cstring_t data = jass_checkstring(j, 2);
+    jassContext_t const *context = jass_getcontext(j);
+    player_t *sender = currentplayer ? currentplayer
+        : context && context->localPlayerState ? context->localPlayerState
+        : context && context->playerState ? context->playerState
+        : G_GetPlayerByNumber(0);
+    if (!prefix || !data || strlen(data) >= JASS_SYNC_PAYLOAD_MAX) {
+        jass_rterror(j, "DzSyncData: invalid channel or oversized payload");
+        return 0;
+    }
+    FOR_LOOP(i, level.ordr_num_sync_registrations) {
+        ordrSyncRegistration_t *entry = &level.ordr_sync_registrations[i];
+        if (strcmp(entry->prefix, prefix)) continue;
+        /* Event sender and payload survive nested queued sync callbacks. */
+        jass_calltriggersync(j, entry->trigger, sender, data);
+    }
+    return 0;
+}
+
+static uint32_t DzGetTriggerSyncData(jass_t *j) {
+    jassContext_t const *context = jass_getcontext(j);
+    return jass_pushstring(j, context ? context->syncData : "");
+}
+
+static uint32_t DzGetTriggerSyncPlayer(jass_t *j) {
+    jassContext_t const *context = jass_getcontext(j);
+    return context && context->playerState
+        ? jass_pushlighthandle(j, context->playerState, "player")
+        : jass_pushnullhandle(j, "player");
+}
+
+/* Reserved integer ID for the game UI root.  DzCreateFrame and the actual
+ * frame render/input bridge are deliberately separate compatibility work. */
+#define ORDR_GAME_UI_ROOT_ID 1
+static uint32_t DzGetGameUI(jass_t *j) {
+    return jass_pushinteger(j, ORDR_GAME_UI_ROOT_ID);
 }
 
 #endif /* WC3_API_ORDR_H */

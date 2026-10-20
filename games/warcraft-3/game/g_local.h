@@ -39,9 +39,9 @@
 #define MAX_REGION_SIZE 16
 #define MAX_REGIONS 2048 // fixed region data slots; generation tokens let retired slots be reused safely
 #define REGION_TOKEN_SLOT_BITS 13 // 2048 slots plus a two-bit tag; upper uintptr_t bits carry a generation
-#define EVENT_TOKEN_SLOT_BITS 12 // 1024 slots plus a two-bit tag; upper bits carry a generation
+#define EVENT_TOKEN_SLOT_BITS 13 // 2048 slots plus a two-bit tag; upper bits carry a generation
 #define REGION_HANDLE_ID_GENERATION_BITS 17 // keeps region GetHandleId values unique in a positive 28-bit range
-#define EVENT_HANDLE_ID_GENERATION_BITS 18 // keeps region-event GetHandleId values unique in a positive 28-bit range
+#define EVENT_HANDLE_ID_GENERATION_BITS 17 // keeps region-event GetHandleId values unique in a positive 28-bit range
 #define REGION_HANDLE_GENERATION_MAX ((1u << REGION_HANDLE_ID_GENERATION_BITS) - 1)
 #define EVENT_HANDLE_GENERATION_MAX ((1u << EVENT_HANDLE_ID_GENERATION_BITS) - 1)
 #define REGION_HANDLE_ID_BASE 0x10000000u
@@ -1034,7 +1034,11 @@ typedef struct {
 #define MAX_GROUP_SIZE 256 // entities; Warcraft III group enumeration cap used by JASS group handles
 #define JASS_GROUP_INITIAL_CAPACITY 64 // handle pointer slots; grows dynamically while group objects stay at stable addresses
 #define MAX_TRIGGERS 4096 // handles; bounds deterministic per-map trigger registry slots
-#define MAX_TIMERS 1024 // handles; bounds deterministic per-map timer registry slots
+#define MAX_TIMERS 16384 // handles; ORDR preallocates 1024 timers plus globals and may pool up to 8190
+#define MAX_ORDR_SYNC_REGISTRATIONS 128 // map-local offline channel registrations
+#define MAX_ORDR_SYNC_PREFIX 96 // bytes, including terminator
+#define MAX_ORDR_FRAMES 2048 // per-map logical dynamic DzFrame registry
+#define MAX_ORDR_FRAME_SCRIPT_EVENTS 8 // callbacks per frame (render/input bridge pending)
 #define MAX_TIMERDIALOGS 64 // handles; bounds map-lifetime timer-dialog registry slots
 #define MAX_LEADERBOARDS 32 // handles; fixed save-stable leaderboard registry
 #define MAX_LEADERBOARD_ITEMS 24 // rows; covers classic player/campaign boards
@@ -1054,7 +1058,9 @@ typedef struct {
 #define WC3_LAYER_TIMERDIALOG LAYER_GAME_0
 #define WC3_LAYER_LEADERBOARD LAYER_GAME_1
 #define WC3_LAYER_MULTIBOARD LAYER_GAME_3 // custom multiboard / Team Resources; LAYER_GAME_2 belongs to WC3_LAYER_COMMAND_ERROR
-#define MAX_EVENTS 1024 // handlers; region-event tokens allow safe reuse of retired handler slots
+#define MAX_EVENTS 2048 // handlers; ORDR startup registers 1054, before later gameplay registrations
+_Static_assert(MAX_EVENTS <= (1u << (EVENT_TOKEN_SLOT_BITS - 2)), "event token must fit every handler slot");
+_Static_assert(EVENT_TOKEN_SLOT_BITS - 2 + EVENT_HANDLE_ID_GENERATION_BITS == 28, "event IDs must stay within their 28-bit namespace");
 #define MAX_QUESTS 256 // quests; fixed quest slots preserve stable pointers across removal
 #define MAX_QUESTITEMS 16 // items per quest; matches the practical quest objective display capacity
 #define MAX_WAYPOINTS 256 // entities; fixed g_edicts ring used by point-target movement
@@ -2350,7 +2356,42 @@ typedef struct {
     vec3_t color;
 } wc3EnvironmentFogParams_t;
 
+typedef struct {
+    trigger_t *trigger;
+    char prefix[MAX_ORDR_SYNC_PREFIX];
+    bool server;
+} ordrSyncRegistration_t;
+
+/* Backend-independent logical frame state. These handles and parent/anchor
+ * relationships are real map-local objects, but the client paint/gesture
+ * transport is a separate remaining implementation task. */
+typedef struct {
+    int32_t event_id;
+    struct jass_function const *func;
+    bool sync;
+} ordrFrameEvent_t;
+
+typedef struct {
+    uint32_t handle_id;
+    uint32_t parent;
+    int32_t create_context;
+    int32_t relative_point;
+    uint32_t relative_frame;
+    int32_t anchor;
+    float x, y, width, height, font_height;
+    int32_t alpha, priority, text_alignment, font_flags;
+    bool visible, enabled, focused, absolute;
+    char type[24], name[96], template_name[96];
+    char text[512], texture[256], font[128], model[256];
+    ordrFrameEvent_t callbacks[MAX_ORDR_FRAME_SCRIPT_EVENTS];
+    uint32_t callback_count;
+} ordrFrame_t;
+
 struct level_locals {
+    ordrFrame_t ordr_frames[MAX_ORDR_FRAMES];
+    uint32_t ordr_num_frames;
+    ordrSyncRegistration_t ordr_sync_registrations[MAX_ORDR_SYNC_REGISTRATIONS];
+    uint32_t ordr_num_sync_registrations;
     jass_t *vm;
     ggroup_t **groups;
     uint32_t num_groups;
@@ -2459,6 +2500,11 @@ typedef struct {
 // g_main.c
 player_t *G_GetPlayerByNumber(uint32_t);
 void G_InitJassHost(void);
+void G_JassDiagnosticReset(cstring_t map);
+void G_JassPlayerChat(player_t *player, cstring_t message);
+void G_JassDiagnosticNote(cstring_t stage);
+void G_JassDiagnosticError(cstring_t stage);
+void G_JassExecutionProgress(jass_t *vm, cstring_t function, uint64_t operations);
 edict_t *G_GetPlayerEntityByNumber(uint32_t);
 gameClient_t *G_GetPlayerClientByNumber(uint32_t);
 void G_SetClientConnected(edict_t *player, bool connected);
@@ -3237,7 +3283,7 @@ void UI_LoadHudLeaderboards(void);
 void UI_WriteLeaderboard(edict_t *ent);
 void UI_WriteLoadingLayout(edict_t *ent, mapInfo_t const *info);
 void UI_ParseFDF(cstring_t);
-void UI_ParseFDF_Buffer(cstring_t, string_t);
+bool UI_ParseFDF_Buffer(cstring_t, string_t);
 void UI_SetAllPoints(frameDef_t *);
 void UI_SetParent(frameDef_t *, frameDef_t const *);
 void UI_SetText(frameDef_t *, cstring_t, ...);
@@ -3444,6 +3490,7 @@ void G_UpdateUnitResponsePresentation(void);
 void G_QueueSelectionSound(edict_t *, bool);
 void G_QueueAttackOrderSound(edict_t *);
 void G_ClientCommand(edict_t *, uint32_t, cstring_t[]);
+void G_OrdrFrameEvent(edict_t *, uint32_t, int32_t);
 bool G_CheatsEnabled(void);
 void G_ClientSetCameraPosition(edict_t *, vec2_t const *);
 

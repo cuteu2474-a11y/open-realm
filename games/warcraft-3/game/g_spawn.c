@@ -148,6 +148,7 @@ void G_InitJassHost(void) {
         .LoadHandle = G_LoadJassHandle,
         .CoroutineTrace = G_JassCoroutineTrace,
         .FunctionTrace = G_JassFunctionTrace,
+        .ExecutionProgress = G_JassExecutionProgress,
         .VariableChanged = G_JassVariableChanged,
     ));
 }
@@ -946,24 +947,36 @@ void G_SpawnEntities(void) {
     S_MineOverlayBindPreplaced();
     SP_worldspawn(NULL);
     
-    jass_dofile(level.vm, "Scripts\\common.j");
+    if (!jass_dofile(level.vm, "Scripts\\common.j"))
+        G_JassDiagnosticError("Scripts/common.j");
     gi.LoadingFrame();
-    jass_dofile(level.vm, "Scripts\\Blizzard.j");
+    if (!jass_dofile(level.vm, "Scripts\\Blizzard.j"))
+        G_JassDiagnosticError("Scripts/Blizzard.j");
     gi.LoadingFrame();
 //    jass_dofilenative(level.vm, "/Users/igor/Desktop/war3map.j");
     G_DumpPrologue02BurrowHandoffSource(level.mapinfo->mapscript);
     if (level.mapinfo->mapscript) {
         G_FixOrc07BridgeRestoreScript(level.mapinfo->mapscript);
-        jass_dobuffer(level.vm, level.mapinfo->mapscript);
-    } else
+        if (!jass_dobuffer(level.vm, level.mapinfo->mapscript))
+            G_JassDiagnosticError("war3map.j parse/initialization");
+        else
+            G_JassDiagnosticNote("war3map.j loaded");
+    } else {
         fprintf(stderr, "G_SpawnEntities: missing mapscript; skipping jass_dobuffer\n");
+        G_JassDiagnosticNote("missing war3map.j");
+    }
     gi.LoadingFrame();
 
     /* Warcraft executes config before main; this phase owns authored player colors, teams, and slots. */
     if (!level.scriptsConfigured && level.mapinfo && level.mapinfo->mapscript &&
         strstr(level.mapinfo->mapscript, "function config")) {
         jass_callbyname(level.vm, "config", false);
-        if (!jass_rterror_pending(level.vm)) level.scriptsConfigured = true;
+        if (!jass_rterror_pending(level.vm)) {
+            level.scriptsConfigured = true;
+            G_JassDiagnosticNote("config completed");
+        } else {
+            G_JassDiagnosticError("config");
+        }
     }
 
     UI_Init();

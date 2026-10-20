@@ -34,6 +34,7 @@ static viewDef_t captured_glue_view;
 static uint32_t captured_glue_views;
 static PATHSTR captured_entity_anim;
 static float captured_sprite_x[2];
+static float captured_sprite_scale;
 static PATHSTR captured_sprite_anim[2];
 static size2_t test_window_size = { 1000, 750 };
 static UICANVASPOLICY test_canvas_policy = UI_CANVAS_STRETCH;
@@ -254,6 +255,7 @@ static void test_draw_image_ex(drawImage_t const *draw_image) {
 }
 
 static void test_draw_sprite(drawSprite_t const *sprite) {
+    captured_sprite_scale = sprite->scale;
     cstring_t anim = sprite->anim;
     float x = sprite->x;
     if (captured_sprite_calls < 2) {
@@ -422,6 +424,7 @@ static void reset_ui_state(void) {
     captured_stand_sprites = 0;
     captured_realm_panel_sprites = 0;
     captured_sprite_calls = 0;
+    captured_sprite_scale = 0;
     captured_glue_views = 0;
     captured_entity_anim[0] = '\0';
     memset(captured_sprite_x, 0, sizeof(captured_sprite_x));
@@ -3708,6 +3711,159 @@ TEST(menu_fdf, utf16le_fdf_is_parsed_correctly) {
     T_EQ(frame->Type, FT_BACKDROP);
     T_FEQ(frame->Width, 0.75f, 0.01f);
     T_FEQ(frame->Height, 0.50f, 0.01f);
+}
+
+/* A private-map FDF with unsupported properties exposed a false cache hit:
+ * loading reported success even though parsing had stopped before later frames. */
+TEST(menu_fdf, failed_template_parse_is_not_cached_as_loaded) {
+    menuImport_t saved = mi;
+    FOR_LOOP(edition, 2) {
+        reset_ui_state();
+        UI_ClearTemplates();
+        test_fs_expansion = edition != 0;
+        mi.FS_ReadFile = utf16le_fs_read;
+        mi.FS_FreeFile = utf16le_fs_free;
+        mi.MemAlloc = test_ui_mem_alloc;
+        mi.MemFree = test_ui_mem_free;
+        mi.Cvar_String = test_cvar_string;
+        utf16le_src_ascii =
+            "Frame \"BACKDROP\" \"BrokenTemplate\" { UnsupportedProperty 1, }";
+        T_ASSERT(!UI_EnsureFDF("template_retry.fdf"));
+        utf16le_src_ascii =
+            "Frame \"BACKDROP\" \"RecoveredTemplate\" { Width 0.37, Height 0.19, }";
+        T_ASSERT(UI_EnsureFDF("template_retry.fdf"));
+        frameDef_t *recovered = UI_FindFrame("RecoveredTemplate");
+        T_NOT_NULL(recovered);
+        if (recovered) {
+            T_FEQ(recovered->Width, 0.37f, 0.001f);
+            T_FEQ(recovered->Height, 0.19f, 0.001f);
+        }
+        /* A successful load still uses the cache rather than reparsing. */
+        utf16le_src_ascii = "ThisIsNotFDF";
+        T_ASSERT(UI_EnsureFDF("template_retry.fdf"));
+        T_ASSERT(UI_FindFrame("RecoveredTemplate") == recovered);
+    }
+    test_fs_expansion = false;
+    mi = saved;
+}
+
+TEST(menu_fdf, layer_style_passes_input_to_underlying_frame) {
+    menuImport_t saved = mi;
+    FOR_LOOP(edition, 2) {
+        char source[] =
+            "Frame \"FRAME\" \"StyleRoot\" { Width 0.8, Height 0.6,"
+            " Frame \"FRAME\" \"LowerButton\" { Width 0.2, Height 0.1, }"
+            " Frame \"FRAME\" \"Overlay\" { Width 0.2, Height 0.1,"
+            "  LayerStyle \"IGNORETRACKEVENTS\", } }";
+        reset_ui_state();
+        test_fs_expansion = edition != 0;
+        mi.GetRenderer = test_get_renderer;
+        T_ASSERT(UI_ParseFDF_Buffer("layer_style.fdf", source));
+        frameDef_t *root = UI_FindFrame("StyleRoot");
+        frameDef_t *lower = UI_FindFrame("LowerButton");
+        frameDef_t *overlay = UI_FindFrame("Overlay");
+        if (root && lower && overlay) {
+            UI_SetOnClick(lower, "lower_click");
+            UI_SetOnClick(overlay, "overlay_click");
+            UI_DrawFrame(root);
+            T_ASSERT(UI_HitTest(0.1f, 0.05f) == lower);
+            overlay->ui_flags &= ~UIFLAG_PASSTHROUGH;
+            T_ASSERT(UI_HitTest(0.1f, 0.05f) == overlay);
+        } else T_ASSERT(false);
+    }
+    test_fs_expansion = false;
+    mi = saved;
+}
+
+TEST(menu_fdf, sprite_scale_keeps_following_templates_and_draws_model) {
+    menuImport_t saved = mi;
+    FOR_LOOP(edition, 2) {
+        char source[] =
+            "Frame \"SPRITE\" \"ScaledSprite\" {"
+            " BackgroundArt \"SyntheticSprite.mdl\","
+            " LayerStyle \"NOSHADING|IGNORETRACKEVENTS\","
+            " SpriteScale 0.037 0 0, Width 0.2, Height 0.1, }"
+            "Frame \"BACKDROP\" \"FollowingTemplate\" { Width 0.41, }"
+            "Frame \"SPRITE\" \"DefaultSprite\" { BackgroundArt \"SyntheticSprite.mdl\", }"
+            "Frame \"SPRITE\" \"ZeroSprite\" { BackgroundArt \"SyntheticSprite.mdl\", SpriteScale 0 0 0, }";
+        reset_ui_state();
+        test_fs_expansion = edition != 0;
+        mi.GetRenderer = test_get_renderer;
+        T_ASSERT(UI_ParseFDF_Buffer("sprite_scale.fdf", source));
+        frameDef_t *sprite = UI_FindFrame("ScaledSprite");
+        frameDef_t *following = UI_FindFrame("FollowingTemplate");
+        T_NOT_NULL(sprite);
+        T_NOT_NULL(following);
+        if (following) T_FEQ(following->Width, 0.41f, 0.001f);
+        if (sprite) {
+            UI_DrawFrame(sprite);
+            T_EQ(captured_sprite_calls, (uint32_t)1);
+            T_FEQ(captured_sprite_scale, 0.037f, 0.000001f);
+        }
+        UI_DrawFrame(UI_FindFrame("DefaultSprite"));
+        T_EQ(captured_sprite_calls, (uint32_t)2);
+        T_FEQ(captured_sprite_scale, 1.0f, 0.000001f);
+        UI_DrawFrame(UI_FindFrame("ZeroSprite"));
+        T_EQ(captured_sprite_calls, (uint32_t)2);
+    }
+    test_fs_expansion = false;
+    mi = saved;
+}
+
+/* Unsupported clipping must not turn an incomplete template into a cache hit. */
+TEST(menu_fdf, unsupported_layer_style_reports_parse_failure) {
+    FOR_LOOP(edition, 2) {
+        char source[] = "Frame \"FRAME\" \"Clipped\" { LayerStyle \"SETSVIEWPORT\", }";
+        reset_ui_state();
+        test_fs_expansion = edition != 0;
+        T_ASSERT(!UI_ParseFDF_Buffer("unsupported_style.fdf", source));
+    }
+    test_fs_expansion = false;
+}
+
+/* Optional private-map probe; the extracted FDF is never part of public fixtures. */
+TEST(menu_fdf, ordr_private_fdf_from_file) {
+    cstring_t path = getenv("ORDR_FDF_PATH");
+    if (!path || !*path) {
+        fprintf(stderr, "ORDR_PRIVATE_FDF SKIP: ORDR_FDF_PATH not provided\n");
+        return;
+    }
+    FILE *in = fopen(path, "rb");
+    if (!in) { T_ASSERT(false); return; }
+    long size;
+    if (fseek(in, 0, SEEK_END) || (size = ftell(in)) <= 0 || size > 1024 * 1024 ||
+        fseek(in, 0, SEEK_SET)) {
+        fclose(in); T_ASSERT(false); return;
+    }
+    char *source = malloc((size_t)size + 1);
+    if (!source) { fclose(in); T_ASSERT(false); return; }
+    size_t read = fread(source, 1, (size_t)size, in);
+    fclose(in);
+    if (read != (size_t)size) { free(source); T_ASSERT(false); return; }
+    source[size] = '\0';
+    menuImport_t saved = mi;
+    FOR_LOOP(edition, 2) {
+        reset_ui_state();
+        test_fs_expansion = edition != 0;
+        mi.GetRenderer = test_get_renderer;
+        T_ASSERT(UI_ParseFDF_Buffer("private_ordr.fdf", source));
+        frameDef_t *sprite = UI_FindFrame("DashBoardSprite");
+        T_NOT_NULL(sprite);
+        T_NOT_NULL(UI_FindFrame("ORDRTooltipBack"));
+        T_NOT_NULL(UI_FindFrame("ORDRDashBoardBTN"));
+        T_NOT_NULL(UI_FindFrame("ORDRDashBoardPanel"));
+        T_NOT_NULL(UI_FindFrame("ORDRDashBoardPanelBlack"));
+        if (sprite) {
+            sprite->Portrait.model = UI_LoadModel("SyntheticSprite.mdl", false);
+            UI_DrawFrame(sprite);
+            T_EQ(captured_sprite_calls, (uint32_t)1);
+            T_FEQ(captured_sprite_scale, 0.0005f, 0.0000001f);
+            T_ASSERT(sprite->ui_flags & UIFLAG_PASSTHROUGH);
+        }
+    }
+    test_fs_expansion = false;
+    mi = saved;
+    free(source);
 }
 
 /* Parsing a template must not fetch art that an instantiated frame overrides. */
