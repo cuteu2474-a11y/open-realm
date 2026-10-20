@@ -2299,15 +2299,17 @@ TEST(client_input, two_finger_touch_pans_camera) {
     FOR_LOOP(j, 2) { cl.viewDef.camerastate[j].origin.x = 500; cl.viewDef.camerastate[j].origin.y = 400; }
     SZ_Init(&cls.netchan.message, data, sizeof(data));
 
-    /* First finger: SDL's synthetic left press starts an ordinary selection. */
+    /* First finger: delay selection until finger-up so a second finger
+     * can turn this contact into a camera pan without issuing a click.
+     * SDL's synthetic mouse press is intentionally ignored. */
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1, .fingerId = 1, .x = 0.4f, .y = 0.5f } };
     T_EQ(SDL_PushEvent(&event), 1);
     event = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONDOWN, .which = SDL_TOUCH_MOUSEID,
         .button = SDL_BUTTON_LEFT, .x = 410, .y = 384 } };
     T_EQ(SDL_PushEvent(&event), 1);
     CL_Input(); Cbuf_Execute();
-    T_ASSERT(input.select && !camera_drag.active);
-    T_ASSERT(mouse_button_keys[SDL_BUTTON_LEFT] != 0);
+    T_ASSERT(!input.select && !camera_drag.active);
+    T_EQ(mouse_button_keys[SDL_BUTTON_LEFT], 0);
 
     /* Second finger: the selection is cancelled and the midpoint anchors a pan. */
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1, .fingerId = 2, .x = 0.6f, .y = 0.5f } };
