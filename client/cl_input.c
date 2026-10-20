@@ -321,6 +321,7 @@ static struct {
     uint32_t count;
     bool gesture;
     bool synthetic_down_seen;
+    bool synthetic_up_seen;
     bool fallback_sent;
 } touch_pan;
 
@@ -332,6 +333,26 @@ static bool (*touch_is_direct)(SDL_TouchID) = CL_TouchIsDirect;
 static vec2_t CL_TouchPanCenter(void) {
     return (vec2_t){ (touch_pan.pos[0].x + touch_pan.pos[1].x) * 0.5f,
                      (touch_pan.pos[0].y + touch_pan.pos[1].y) * 0.5f };
+}
+
+/* SDL's iOS backend may emit SDL_FINGER* without a matching synthetic
+ * mouse click (or omit only its release). Route the fallback through the
+ * normal SDL mouse pipeline, rather than calling IN_SelectDown/Up directly:
+ * in-game F10/quest windows, modal dialogs and gameplay units all depend on
+ * the same UI mouse DOWN/UP event handling. Use a distinct which ID so late
+ * SDL_TOUCH_MOUSEID events can be discarded without suppressing our pair. */
+#define CL_FINGER_FALLBACK_MOUSEID (SDL_TOUCH_MOUSEID - 1u)
+static bool CL_QueueFingerMouseButton(SDL_TouchFingerEvent const *finger,
+                                      vec2_t point, uint32_t type) {
+    SDL_Event evt = { 0 };
+    evt.button.type = type;
+    evt.button.timestamp = finger->timestamp;
+    evt.button.which = CL_FINGER_FALLBACK_MOUSEID;
+    evt.button.button = SDL_BUTTON_LEFT;
+    evt.button.state = type == SDL_MOUSEBUTTONDOWN ? SDL_PRESSED : SDL_RELEASED;
+    evt.button.x = (int)point.x;
+    evt.button.y = (int)point.y;
+    return SDL_PushEvent(&evt) == 1;
 }
 
 static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
@@ -346,6 +367,7 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             if (slot >= 0 || touch_pan.count >= 2) return;
             if (!touch_pan.count) {
                 touch_pan.synthetic_down_seen = false;
+                touch_pan.synthetic_up_seen = false;
                 touch_pan.fallback_sent = false;
             }
             touch_pan.id[touch_pan.count] = finger->fingerId;
@@ -369,17 +391,15 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             break;
         case SDL_FINGERUP:
             if (slot < 0) return;
-            /* Some iPad SDL builds send only SDL_FINGER* (no synthesized
-             * SDL_TOUCH_MOUSEID press). Fire one ordinary world selection
-             * tap on release in that case; never double-send if SDL has
-             * already supplied the mouse press, nor after two-finger pan. */
+            /* Do not gate this on CL_GameplayInputReady: the player may be
+             * tapping the F10 pause menu, a modal, or the out-of-game menu.
+             * If SDL sent a down but omitted its up, synthesize only up. */
             if (touch_pan.count == 1 && !touch_pan.gesture &&
-                !touch_pan.synthetic_down_seen && CL_GameplayInputReady()) {
-                mouse.origin = pos;
-                input.touch_pointer = true;
-                IN_SelectDown();
-                IN_SelectUp();
-                touch_pan.fallback_sent = true;
+                !touch_pan.synthetic_up_seen) {
+                bool pressed = touch_pan.synthetic_down_seen ||
+                    CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONDOWN);
+                if (pressed && CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONUP))
+                    touch_pan.fallback_sent = true;
             }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
@@ -783,10 +803,12 @@ void CL_Input(void) {
                         touch_pan.synthetic_down_seen = true;
                     }
                     keyCode_t mousevt = CL_MouseButtonKey(&event.button);
-                    input.touch_pointer = event.button.which == SDL_TOUCH_MOUSEID;
+                    bool const touch_mouse = event.button.which == SDL_TOUCH_MOUSEID ||
+                                             event.button.which == CL_FINGER_FALLBACK_MOUSEID;
+                    input.touch_pointer = touch_mouse;
                     mouse.origin.x = event.button.x;
                     mouse.origin.y = event.button.y;
-                    if (event.button.which == SDL_TOUCH_MOUSEID &&
+                    if (touch_mouse &&
                         event.button.button == SDL_BUTTON_LEFT &&
                         CL_GameplayInputReady() && CL_iPadChatHit(event.button.x, event.button.y)) {
                         ipad_chat_touch_down = true;
@@ -803,9 +825,13 @@ void CL_Input(void) {
             case SDL_MOUSEBUTTONUP:
                 {
                     if (event.button.which == SDL_TOUCH_MOUSEID &&
-                        event.button.button == SDL_BUTTON_LEFT && touch_pan.fallback_sent)
-                        continue;
-                    if (ipad_chat_touch_down && event.button.which == SDL_TOUCH_MOUSEID &&
+                        event.button.button == SDL_BUTTON_LEFT) {
+                        if (touch_pan.fallback_sent) continue;
+                        touch_pan.synthetic_up_seen = true;
+                    }
+                    if (ipad_chat_touch_down &&
+                        (event.button.which == SDL_TOUCH_MOUSEID ||
+                         event.button.which == CL_FINGER_FALLBACK_MOUSEID) &&
                         event.button.button == SDL_BUTTON_LEFT) {
                         ipad_chat_touch_down = false;
                         continue;
@@ -2262,6 +2288,13 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     uint8_t data[512];
     SDL_Event event;
     char command[128];
+    UINAME select_binding;
+    bool const add_select_down = !Cmd_Exists("+select");
+    bool const add_select_up = !Cmd_Exists("-select");
+    strlcpy(select_binding, Key_GetBinding(K_MOUSE1, 0), sizeof(select_binding));
+    if (add_select_down) Cmd_AddCommand("+select", IN_SelectDown);
+    if (add_select_up) Cmd_AddCommand("-select", IN_SelectUp);
+    Key_SetBinding(K_MOUSE1, 0, "+select");
     T_ASSERT(old_cl != NULL);
     if (!old_cl) return;
     memcpy(old_cl, &cl, sizeof(cl));
@@ -2284,7 +2317,7 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERUP, .touchId = 1,
         .fingerId = 11, .x = 0.45f, .y = 0.40f } };
     T_EQ(SDL_PushEvent(&event), 1);
-    CL_Input();
+    CL_Input(); Cbuf_Execute();
     T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
     MSG_ReadString(&cls.netchan.message, command);
     T_STREQ(command, "select 7");
@@ -2296,6 +2329,48 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     input = old_input;
     touch_pan = old_touch;
     mouse = old_mouse;
+    touch_is_direct = old_direct;
+    Key_SetBinding(K_MOUSE1, 0, select_binding);
+    if (add_select_down) Cmd_RemoveCommand("+select");
+    if (add_select_up) Cmd_RemoveCommand("-select");
+    SDL_QuitSubSystem(SDL_INIT_EVENTS);
+}
+
+/* A single direct touch with no SDL-synthesized mouse buttons must also
+ * reach native UI/menu button processing, not just world-unit selection. */
+TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
+    struct client_state *old_cl = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    menuExport_t old_menu = menu;
+    refExport_t old_re = re;
+    __typeof__(input) old_input = input;
+    __typeof__(touch_pan) old_touch = touch_pan;
+    mouseEvent_t old_mouse = mouse;
+    bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    SDL_Event event;
+    T_ASSERT(old_cl != NULL);
+    if (!old_cl) return;
+    memcpy(old_cl, &cl, sizeof(cl));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0);
+    memset(&cl, 0, sizeof(cl));
+    input = (__typeof__(input)){ .focus = true };
+    touch_pan = (__typeof__(touch_pan)){ 0 };
+    touch_is_direct = CL_TestTouchDirect;
+    cls.state = ca_disconnected; cls.key_dest = key_menu;
+    re.GetWindowSize = CL_TestWindowSize;
+    menu.MouseEvent = CL_TestMenuMouse;
+    test_menu_mouse = 0;
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
+        .touchId = 1, .fingerId = 19, .x = 0.25f, .y = 0.25f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERUP;
+    T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input();
+    T_EQ(test_menu_mouse, 2); /* DOWN + UP delivered to menu callback */
+    T_ASSERT(touch_pan.fallback_sent);
+    cl = *old_cl; MemFree(old_cl);
+    cls = old_cls; menu = old_menu; re = old_re;
+    input = old_input; touch_pan = old_touch; mouse = old_mouse;
     touch_is_direct = old_direct;
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
