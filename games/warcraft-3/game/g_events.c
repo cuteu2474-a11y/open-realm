@@ -394,7 +394,13 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
 }
 
 static void G_TouchTriggers(edict_t *ent) {
+    /* A region filter can register new events during this very crossing.
+     * Newly created handlers must not observe a movement that predates their
+     * registration, regardless of whether they reuse a retired slot or use
+     * a fresh high-index slot in ORDR's enlarged event arena. */
+    uint32_t const registrations_before_crossing = level.events.registration_sequence;
     FOR_EACH_EVENT(evt) {
+        if (evt->registration_sequence > registrations_before_crossing) continue;
         switch (evt->type) {
             case EVENT_GAME_ENTER_REGION: {
                 handle_t event_handle, region_handle;
