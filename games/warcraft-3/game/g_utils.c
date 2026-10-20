@@ -157,6 +157,8 @@ event_t *G_MakeEvent(EVENTTYPE type) {
         evt->inuse = true;
         evt->type = type;
         evt->registration_sequence = ++level.events.registration_sequence;
+        if (i + 1 > level.events.handler_scan_limit)
+            level.events.handler_scan_limit = i + 1;
         level.events.next_handler_hint = (i + 1) % MAX_EVENTS;
         return evt;
     }
