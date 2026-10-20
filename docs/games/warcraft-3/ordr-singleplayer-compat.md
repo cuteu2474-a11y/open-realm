@@ -55,3 +55,7 @@ The original ORDR choice UI uses nine selectable neutral-passive models (`u000..
 ### Warcraft III native fog queries — six real implementations
 
 `IsVisibleToPlayer`, `IsLocationVisibleToPlayer`, `IsFoggedToPlayer`, `IsLocationFoggedToPlayer`, `IsMaskedToPlayer`, and `IsLocationMaskedToPlayer` previously returned a hardcoded false. They now read the canonical gameplay FOW grid (current sight vs previously explored cells), respect out-of-world points and `FogEnable(false)`, and reuse its packed grid when enabled. Their tests check visible, fogged, masked, outside world, and unexplored transitions. This fixes actual JASS-visible world-state behavior rather than adding temporary gameplay balance.
+
+### 2026-10-20 JASS native implementation pass: additional classic game functions
+
+Implemented the six `IssueNeutral{Immediate,Point,Target}Order{,ById}` variants by routing validated neutral-passive shop structures through the existing server order and stock engine. Implemented the string `IssueBuildOrder` variant by decoding the authored four-character unit ID and forwarding it to `G_IssueBuildOrder` (numeric variant already existed). Added real `GetUnitPointValue` and `GetUnitPointValueByType` reads from original `UnitData.points` (`upoi`). Implemented `IsUnitVisible`, `IsUnitFogged`, `IsUnitMasked`, `IsUnitRace` using real fog/race and entity metadata. These are 13 formerly hardcoded false/zero native function bodies in this change (6+1+2+3+1). The numeric/boolean routes still require full live ORDR gameplay testing.

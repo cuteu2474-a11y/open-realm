@@ -158,48 +158,76 @@ uint32_t GetPlayerName(jass_t *j) {
     }
     return jass_pushstring(j, name);
 }
+/* WC3 neutral shops accept a purchaser player and an independently owned
+ * neutral-passive structure. Do not change its owner or fabricate a purchase:
+ * forward the original order through the existing stock/command system. */
+static bool JassNeutralShopOrderAllowed(player_t const *buyer, edict_t const *shop) {
+    return buyer && shop && shop->inuse && G_UnitIsWorldActive(shop) &&
+           G_UnitIsStructure(shop) &&
+           shop->s.player == PLAYER_NEUTRAL_PASSIVE &&
+           !(shop->svflags & SVF_DEADMONSTER) && !M_IsDead(shop);
+}
 uint32_t IssueNeutralImmediateOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    cstring_t order = jass_checkstring(j,3);
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        order && *order && unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralImmediateOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
+    cstring_t order = G_OrderId2String(order_id);
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        order && *order && unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralPointOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    //float x = jass_checknumber(j, 4);
-    //float y = jass_checknumber(j, 5);
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    cstring_t order = jass_checkstring(j,3);
+    vec2_t point = { jass_checknumber(j,4), jass_checknumber(j,5) };
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        order && *order && unit_issueorder(shop,order,&point));
 }
 uint32_t IssueNeutralPointOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    //float x = jass_checknumber(j, 4);
-    //float y = jass_checknumber(j, 5);
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
+    vec2_t point = { jass_checknumber(j,4), jass_checknumber(j,5) };
+    cstring_t order = G_OrderId2String(order_id);
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        order && *order && unit_issueorder(shop,order,&point));
 }
 uint32_t IssueNeutralTargetOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    //handle_t target = jass_checkhandle(j, 4, "widget");
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    cstring_t order = jass_checkstring(j,3);
+    edict_t *target = jass_checkhandle(j,4,"widget");
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        target && target->inuse && order && *order &&
+        unit_issuetargetorder(shop,order,target));
 }
 uint32_t IssueNeutralTargetOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    //handle_t target = jass_checkhandle(j, 4, "widget");
-    return jass_pushboolean(j, 0);
+    player_t *buyer = jass_checkhandle(j,1,"player");
+    edict_t *shop = jass_checkhandle(j,2,"unit");
+    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
+    edict_t *target = jass_checkhandle(j,4,"widget");
+    cstring_t order = G_OrderId2String(order_id);
+    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
+        target && target->inuse && order && *order &&
+        unit_issuetargetorder(shop,order,target));
 }
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_neutral_orders, require_live_neutral_shop_not_player_unit) {
+    edict_t unit={0};
+    player_t purchaser={0};
+    T_ASSERT(!JassNeutralShopOrderAllowed(NULL,NULL));
+    T_ASSERT(!JassNeutralShopOrderAllowed(&purchaser,NULL));
+    T_ASSERT(!JassNeutralShopOrderAllowed(&purchaser,&unit));
+}
+#endif
 uint32_t Player(jass_t *j) {
     int32_t number = jass_checkinteger(j, 1);
     player_t *player = G_GetPlayerByNumber(number);

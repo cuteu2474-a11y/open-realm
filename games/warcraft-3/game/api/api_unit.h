@@ -756,13 +756,17 @@ uint32_t SetUnitPathing(jass_t *j) {
     if (whichUnit) whichUnit->no_pathing = !flag;
     return 0;
 }
+/* WC3 object editor point values are authored in UnitData (upoi). */
 uint32_t GetUnitPointValue(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    return jass_pushinteger(j, 0);
+    edict_t *unit = jass_checkhandle(j,1,"unit");
+    UnitData_t const *data = unit ? (unit->data.UnitData ?
+        unit->data.UnitData : G_UnitData(unit->class_id)) : NULL;
+    return jass_pushinteger(j,data ? (int32_t)data->points : 0);
 }
 uint32_t GetUnitPointValueByType(jass_t *j) {
-    //int32_t unitType = jass_checkinteger(j, 1);
-    return jass_pushinteger(j, 0);
+    uint32_t rawcode = (uint32_t)jass_checkinteger(j,1);
+    UnitData_t const *data = G_UnitData(rawcode);
+    return jass_pushinteger(j,data ? (int32_t)data->points : 0);
 }
 uint32_t UnitAddItem(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
@@ -978,9 +982,11 @@ uint32_t IsUnitEnemy(jass_t *j) {
         !G_PlayerTreatsPlayerAsAlly(PLAYER_NUM(whichPlayer), whichUnit->s.player));
 }
 uint32_t IsUnitVisible(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    edict_t *unit = jass_checkhandle(j,1,"unit");
+    player_t *viewer = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,unit && unit->inuse && viewer &&
+        G_FowPlayerCanHoverEntity(PLAYER_NUM(viewer),unit) &&
+        !(unit->s.renderfx & RF_HIDDEN));
 }
 uint32_t IsUnitDetected(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
@@ -995,14 +1001,18 @@ uint32_t IsUnitInvisible(jass_t *j) {
     return jass_pushboolean(j, S_UnitIsInvisibleToPlayer(whichUnit, PLAYER_NUM(whichPlayer)));
 }
 uint32_t IsUnitFogged(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    edict_t *unit = jass_checkhandle(j,1,"unit");
+    player_t *viewer = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,unit && unit->inuse && viewer &&
+        G_FowPointState(PLAYER_NUM(viewer),unit->s.origin.x,unit->s.origin.y)
+            == WC3_FOG_STATE_FOGGED);
 }
 uint32_t IsUnitMasked(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    edict_t *unit = jass_checkhandle(j,1,"unit");
+    player_t *viewer = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,unit && unit->inuse && viewer &&
+        G_FowPointState(PLAYER_NUM(viewer),unit->s.origin.x,unit->s.origin.y)
+            == WC3_FOG_STATE_MASKED);
 }
 uint32_t IsUnitSelected(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
@@ -1011,9 +1021,12 @@ uint32_t IsUnitSelected(jass_t *j) {
     return jass_pushboolean(j, (whichUnit->selected >> PLAYER_NUM(whichPlayer)) & 1);
 }
 uint32_t IsUnitRace(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //handle_t whichRace = jass_checkhandle(j, 2, "race");
-    return jass_pushboolean(j, 0);
+    edict_t *unit = jass_checkhandle(j,1,"unit");
+    uint32_t *race = jass_checkhandle(j,2,"race");
+    UnitData_t const *data = unit ? (unit->data.UnitData ?
+        unit->data.UnitData : G_UnitData(unit->class_id)) : NULL;
+    return jass_pushboolean(j,data && race &&
+        WC3_JassRaceFromString(data->race) == (int32_t)*race);
 }
 uint32_t IsUnitType(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
@@ -1262,8 +1275,19 @@ uint32_t IssueInstantTargetOrderById(jass_t *j) {
     //handle_t instantTargetWidget = jass_checkhandle(j, 4, "widget");
     return jass_pushboolean(j, 0);
 }
+/* WC3 string build orders use the four-character unit object id, unlike
+ * normal ability order strings. Route through the same path as ById. */
 uint32_t IssueBuildOrder(jass_t *j) {
-    return jass_pushboolean(j, 0);
+    edict_t *builder = jass_checkhandle(j,1,"unit");
+    cstring_t unit_to_build = jass_checkstring(j,2);
+    vec2_t location = { jass_checknumber(j,3), jass_checknumber(j,4) };
+    uint32_t id;
+    if (!unit_to_build || strlen(unit_to_build) != 4)
+        return jass_pushboolean(j,false);
+    id = MAKEFOURCC(unit_to_build[0],unit_to_build[1],
+                    unit_to_build[2],unit_to_build[3]);
+    return jass_pushboolean(j, G_UnitIsBuilding(id) &&
+        G_IssueBuildOrder(builder,id,&location));
 }
 uint32_t IssueBuildOrderById(jass_t *j) {
     edict_t *whichPeon = jass_checkhandle(j, 1, "unit");
