@@ -668,6 +668,57 @@ TEST(wc3_jass_map, ordr_numeric_a900_ability_dispatch_gate) {
     free_slk_rows(rows);
 }
 
+/* Exercise the actual client 'select N' command (the message sent by
+ * touch/mouse release), not just event injection. Neutral Passive button
+ * clicks must reach the owning human's registered PLAYER_UNIT_SELECTED. */
+TEST(wc3_jass_map, ordr_neutral_button_select_command_delivers_jass_event) {
+    edict_t *button = NULL;
+    cstring_t command[2] = { "select", NULL };
+    char number[24];
+    uint32_t const original_flags = game.clients[0].ps.rdflags;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "  integer clicked = 0\n"
+        "endglobals\n"
+        "function OnClick takes nothing returns nothing\n"
+        "  if GetTriggerPlayer() == Player(0) and GetTriggerUnit() == menuButton then\n"
+        "    set clicked = clicked + 1\n"
+        "  endif\n"
+        "endfunction\n"
+        "function CheckClick takes nothing returns nothing\n"
+        "  call BJassAssert(clicked == 1, \"neutral menu button was selected\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerAddAction(t, function OnClick)\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, globals.num_edicts)
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    T_NOT_NULL(button);
+    if (!button) return;
+    game.clients[0].ps.rdflags |= RDF_NOFOG;
+    game.clients[0].connected = true;
+    g_edicts[0].inuse = true;
+    g_edicts[0].client = &game.clients[0];
+    button->svflags |= SVF_MONSTER;
+    button->health.value = MAX(button->health.value, 100.0f);
+    T_ASSERT(G_UnitCanBeSelected(&game.clients[0], button));
+    snprintf(number, sizeof(number), "%u", (unsigned)button->s.number);
+    command[1] = number;
+    G_ClientCommand(&g_edicts[0], 2, command);
+    G_RunEvents();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "CheckClick", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    game.clients[0].ps.rdflags = original_flags;
+}
+
 TEST(wc3_jass_map, ordr_neutral_button_selection_uses_clicking_player) {
     edict_t *button = NULL;
     gameEvent_t *evt;
