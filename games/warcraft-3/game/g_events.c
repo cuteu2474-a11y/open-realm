@@ -285,8 +285,18 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                  *    it (e.g. Naga_Victory_Check counts the dying naga). */
                 if (e->type == evt->type) {
                     bool direct = subject && e->subject == subject;
+                    /* Selection belongs to the player who clicked the
+                     * unit, not the unit owner. The original ORDR menu
+                     * renders Neutral Passive button units and registers
+                     * SELECTED on human Players 0-3. Other player-unit event
+                     * types (death, spell, training) still use unit owner. */
+                    bool const player_selection =
+                        evt->type == EVENT_PLAYER_UNIT_SELECTED ||
+                        evt->type == EVENT_PLAYER_UNIT_DESELECTED;
+                    uint32_t const event_player = player_selection && evt->dialog_player
+                        ? evt->dialog_player - 1 : (subject ? subject->s.player : 0);
                     bool owner_match = subject &&
-                        e->subject == G_GetPlayerEntityByNumber(subject->s.player);
+                        e->subject == G_GetPlayerEntityByNumber(event_player);
                     int32_t quest_trigger_ordinal = e->trigger
                         ? (int32_t)(e->trigger - level.triggers) : -1L;
                     if (misha_summon_event) {
