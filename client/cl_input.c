@@ -2336,18 +2336,27 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
 
-/* A single direct touch with no SDL-synthesized mouse buttons must also
- * reach native UI/menu button processing, not just world-unit selection. */
+/* The in-game F10 menu button is an authored HUD layout control, not
+ * the disconnected-state frontend menu. Verify a finger-only press reaches
+ * its server 'menu' onclick command through SDL mouse DOWN/UP, using the
+ * exact layout/packet path the upper button bar uses. */
 TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
     struct client_state *old_cl = MemAlloc(sizeof(cl));
     struct client_static old_cls = cls;
-    menuExport_t old_menu = menu;
     refExport_t old_re = re;
     __typeof__(input) old_input = input;
     __typeof__(touch_pan) old_touch = touch_pan;
     mouseEvent_t old_mouse = mouse;
     bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    uint8_t packet[1024], data[512];
+    sizeBuf_t layout_packet;
+    sizeBuf_t old_msg = cls.netchan.message;
+    uiFrame_t empty = { 0 };
+    uiFrame_t frame = { .number = 1, .flags.type = FT_GLUEBUTTON,
+        .size = { UI_BASE_WIDTH, UI_BASE_HEIGHT }, .onclick = "menu" };
     SDL_Event event;
+    char command[64] = { 0 };
+
     T_ASSERT(old_cl != NULL);
     if (!old_cl) return;
     memcpy(old_cl, &cl, sizeof(cl));
@@ -2356,22 +2365,37 @@ TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
     input = (__typeof__(input)){ .focus = true };
     touch_pan = (__typeof__(touch_pan)){ 0 };
     touch_is_direct = CL_TestTouchDirect;
-    cls.state = ca_disconnected; cls.key_dest = key_menu;
+    cls.state = ca_active; cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME;
     re.GetWindowSize = CL_TestWindowSize;
-    menu.MouseEvent = CL_TestMenuMouse;
-    test_menu_mouse = 0;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet, packet, sizeof(packet));
+    MSG_WriteByte(&layout_packet, LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet, &empty, &frame, true);
+    MSG_WriteByte(&layout_packet, 0);
+    MSG_WriteLong(&layout_packet, 0); MSG_WriteShort(&layout_packet, 0);
+    CL_ParseLayout(&layout_packet);
+    T_ASSERT(SCR_LayoutHitTest(256, 192));
+
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
         .touchId = 1, .fingerId = 19, .x = 0.25f, .y = 0.25f } };
     T_EQ(SDL_PushEvent(&event), 1);
     event.type = SDL_FINGERUP;
     T_EQ(SDL_PushEvent(&event), 1);
     CL_Input();
-    T_EQ(test_menu_mouse, 2); /* DOWN + UP delivered to menu callback */
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "menu");
     T_ASSERT(touch_pan.fallback_sent);
+
+    MemFree(cl.layout[LAYER_CONSOLE]);
     cl = *old_cl; MemFree(old_cl);
-    cls = old_cls; menu = old_menu; re = old_re;
+    cls = old_cls; re = old_re;
+    cls.netchan.message = old_msg;
     input = old_input; touch_pan = old_touch; mouse = old_mouse;
     touch_is_direct = old_direct;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
 
