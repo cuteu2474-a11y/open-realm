@@ -126,8 +126,11 @@ static bool CL_TraceORDRChoiceCard(float x, float y, uint32_t *number) {
         float py = (1.0f - viewport.y - (ndc.y + 1.0f) * viewport.h * 0.5f) * win.height;
         /* Real ORDR button labels occupy a wide, shallow rectangle; avoid
          * accidentally selecting the neighboring 125-world-unit rows. */
-        float rx = MAX(32.0f, MIN(100.0f, win.width * 0.055f));
-        float ry = MAX(18.0f, MIN(37.0f, win.height * 0.027f));
+        /* Difficulty cards are substantially wider than their MDX pivot.
+         * Keep nearest-card precedence when the larger finger target overlaps
+         * an adjacent row; the actual projected unit still sets its center. */
+        float rx = MAX(40.0f, MIN(160.0f, win.width * 0.085f));
+        float ry = MAX(22.0f, MIN(45.0f, win.height * 0.035f));
         float dx = fabsf(x - px) / rx;
         float dy = fabsf(y - py) / ry;
         float score = dx * dx + dy * dy;
@@ -136,7 +139,15 @@ static bool CL_TraceORDRChoiceCard(float x, float y, uint32_t *number) {
             best = score;
         }
     }
-    if (candidates < 6 || !selected) return false;
+    /* The script constructs the first three choice units before the rest.
+     * Do not require six visible models during that interval. The reduced
+     * threshold is allowed only at the original ORDR difficulty-stage camera,
+     * never over ordinary units on the normal playing field. */
+    bool const at_difficulty_stage =
+        fabsf(view->target.x + 6000.0f) < 1800.0f &&
+        fabsf(view->target.y + 8864.0f) < 1800.0f;
+    if ((!at_difficulty_stage && candidates < 6) ||
+        (at_difficulty_stage && candidates < 3) || !selected) return false;
     *number = selected;
     return true;
 }
@@ -350,6 +361,13 @@ static vec2_t CL_TouchPanCenter(void) {
  * mouse button pipeline. */
 static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
     int const x = (int)pos.x, y = (int)pos.y;
+    uint32_t world_choice = 0;
+    /* ORDR's difficulty cards are selectable world units beneath authored
+     * hint/tooltip layouts. A layout hit alone is not permission to swallow
+     * the finger release; let the normal select binding target that unit. */
+    if (cls.state == ca_active && CL_GameplayInputReady() &&
+        CL_TraceORDRChoiceCard(pos.x, pos.y, &world_choice))
+        return false;
     bool const ui = CL_WindowMouseOver(x, y) || SCR_LayoutHitTest(x, y);
     bool const shift = (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
     mouse.origin = pos;
@@ -2344,6 +2362,14 @@ TEST(client_input, ordr_choice_touch_hit_uses_projected_card) {
     T_ASSERT(CL_TraceORDRChoiceCard(512, 384, &hit));
     T_EQ(hit, 200u);
     T_ASSERT(!CL_TraceORDRChoiceCard(150, 384, &hit));
+    /* During early ORDR initialization only three stage cards may be
+     * available. They remain hittable, but cannot activate on a random map. */
+    cl.viewDef.num_entities = 3;
+    T_ASSERT(!CL_TraceORDRChoiceCard(512, 384, &hit));
+    cl.viewDef.target = (vec3_t){ -6000, -8864, 0 };
+    T_ASSERT(CL_TraceORDRChoiceCard(512, 384, &hit));
+    T_EQ(hit, 200u);
+    cl.viewDef.num_entities = 6;
     choices[0].owner = 0; /* a player unit is never a menu card */
     T_ASSERT(!CL_TraceORDRChoiceCard(512, 384, &hit));
     cl.viewDef = old_view;
