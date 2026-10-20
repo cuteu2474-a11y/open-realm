@@ -1160,8 +1160,12 @@ static uint32_t ActiveQuestCount(void) {
 }
 
 static uint32_t ActiveEventCount(void) {
+    /* Save/load sees the full serialized handler array, including fixtures
+     * and restored registrations that were installed without G_MakeEvent.
+     * The runtime scan high-water hint is an optimization, not a save format
+     * invariant, so it must never determine the saved event count. */
     uint32_t count = 0;
-    FOR_EACH_EVENT(event) count++;
+    FOR_LOOP(i, MAX_EVENTS) if (level.events.handlers[i].inuse) count++;
     return count;
 }
 
