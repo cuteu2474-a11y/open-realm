@@ -408,12 +408,23 @@ uint32_t TriggerRegisterPlayerAllianceChange(jass_t *j) {
     return jass_pushnullhandle(j, "event");
 }
 uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //handle_t whichState = jass_checkhandle(j, 3, "playerstate");
-    //handle_t opcode = jass_checkhandle(j, 4, "limitop");
-    //float limitval = jass_checknumber(j, 5);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    player_t *player = jass_checkhandle(j, 2, "player");
+    uint32_t *state = jass_checkhandle(j, 3, "playerstate");
+    uint32_t *opcode = jass_checkhandle(j, 4, "limitop");
+    float value = jass_checknumber(j, 5);
+    event_t *evt;
+    if (!trigger || !player || !state || !opcode ||
+        *state >= MAX_STATS || *opcode > WC3_LIMITOP_NOT_EQUAL)
+        return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_PLAYER_STATE_LIMIT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(player));
+    evt->trigger = trigger;
+    evt->state = *state;
+    evt->limitop = *opcode;
+    evt->limitval = value;
+    return jass_pushlighthandle(j, G_EventHandle(evt), "event");
 }
 uint32_t TriggerRegisterPlayerChatEvent(jass_t *j) {
     trigger_t *trigger = jass_checkhandle(j, 1, "trigger");

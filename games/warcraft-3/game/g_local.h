@@ -2480,6 +2480,7 @@ bool G_RemovePlayerWithResult(uint32_t player_num, uint32_t game_result);
 bool G_GameResultDebugEnabled(void);
 void G_GameResultDebug(cstring_t format, ...);
 bool G_IsSinglePlayer(void);
+void G_JassPlayerStateChanged(uint32_t player_num, uint32_t state, float before, float after);
 /* Offline camera/GetLocalPlayer fallback for callbacks lacking currentplayer. */
 gameClient_t *G_SinglePlayerLocalClient(void);
 void G_RequestEndGame(bool do_score_screen);

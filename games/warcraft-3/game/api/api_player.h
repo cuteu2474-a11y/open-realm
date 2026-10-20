@@ -464,7 +464,11 @@ uint32_t SetPlayerState(jass_t *j) {
             (unsigned)whichPlayer->number, (long)*whichPlayerState,
             (unsigned)client->ps.stats[*whichPlayerState], (long)value);
     }
+    uint16_t const before = client->ps.stats[*whichPlayerState];
     client->ps.stats[*whichPlayerState] = (uint16_t)MIN(MAX(0, value), USHRT_MAX);
+    G_JassPlayerStateChanged(whichPlayer->number, *whichPlayerState,
+                             (float)before,
+                             (float)client->ps.stats[*whichPlayerState]);
     if (*whichPlayerState == PLAYERSTATE_RESOURCE_FOOD_USED) {
         G_RecomputePlayerUpkeep(client);
     }

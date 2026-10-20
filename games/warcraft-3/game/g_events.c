@@ -180,6 +180,25 @@ bool G_LimitMatches(uint32_t op, float value, float limit) {
     }
 }
 
+/* WC3 player-state triggers fire on transitions INTO the registered limit.
+ * Publish the matching registration, not a synthetic global event, so the
+ * callback sees the original player and GetEventPlayerState context. */
+void G_JassPlayerStateChanged(uint32_t player_num, uint32_t state,
+                              float before, float after) {
+    edict_t *player;
+    if (before == after || !level.vm) return;
+    player = G_GetPlayerEntityByNumber(player_num);
+    if (!player) return;
+    FOR_EACH_EVENT(reg) {
+        if (reg->type != EVENT_PLAYER_STATE_LIMIT || reg->subject != player ||
+            reg->state != state || !reg->trigger || reg->trigger->disabled)
+            continue;
+        if (!G_LimitMatches(reg->limitop, before, reg->limitval) &&
+            G_LimitMatches(reg->limitop, after, reg->limitval))
+            G_PublishEventResponse(player, EVENT_PLAYER_STATE_LIMIT, reg);
+    }
+}
+
 void G_JassVariableChanged(cstring_t name, float before, float after) {
     FOR_EACH_EVENT(evt) {
         if (evt->type == EVENT_GAME_VARIABLE_LIMIT && evt->variable && !strcmp(evt->variable, name) &&
@@ -326,7 +345,8 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                 if (evt->responseTo == e) jass_calltriggerevent(level.vm, e->trigger, evt);
                 break;
             case EVENT_GAME_STATE_LIMIT:
-                if (evt->responseTo == e) {
+            case EVENT_PLAYER_STATE_LIMIT:
+                if (evt->type == e->type && evt->responseTo == e) {
                     jass_calltriggerevent(level.vm, e->trigger, evt);
                 }
                 break;

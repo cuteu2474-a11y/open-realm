@@ -474,19 +474,26 @@ static bool G_LoadMap(cstring_t mapFilename) {
         extern uint32_t g_UnitUICount;
         UnitUI_t const *numeric = G_UnitUI(0x75303030u);
         UnitUI_t const *canonical = G_UnitUI(MAKEFOURCC('u','0','0','0'));
-        uint32_t source_bytes = 0;
+        UnitBalance_t const *choice_balance = G_UnitBalance(0x75303030u);
+        extern uint32_t g_UnitBalanceCount;
+        uint32_t source_bytes = 0, balance_source_bytes = 0;
         handle_t source = gi.ReadPriorityFile ?
             gi.ReadPriorityFile("Units\\UnitUI.slk", &source_bytes) : NULL;
-        char detail[360];
+        handle_t balance_source = gi.ReadPriorityFile ?
+            gi.ReadPriorityFile("Units\\UnitBalance.slk", &balance_source_bytes) : NULL;
+        char detail[420];
         snprintf(detail, sizeof(detail),
-                 "UnitUI_rows=%u embedded_bytes=%u u000_numeric_model=%s u000_canonical_model=%s",
+                 "UnitUI_rows=%u embedded_bytes=%u UnitBalance_rows=%u balance_bytes=%u u000_HP=%.0f u000_numeric_model=%s u000_canonical_model=%s",
                  (unsigned)g_UnitUICount, (unsigned)source_bytes,
+                 (unsigned)g_UnitBalanceCount, (unsigned)balance_source_bytes,
+                 choice_balance ? (double)choice_balance->maxHealth : -1.0,
                  numeric && numeric->modelFile && numeric->modelFile[0] ?
                     numeric->modelFile : "(none)",
                  canonical && canonical->modelFile && canonical->modelFile[0] ?
                     canonical->modelFile : "(none)");
         jass_ordr_log_event(level.vm, "MAP_UNIT_DATA_AUDIT", detail);
         if (source) gi.MemFree(source);
+        if (balance_source) gi.MemFree(balance_source);
     }
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
     /* ORDR iPad startup checkpoints: distinguish a completed JASS main()

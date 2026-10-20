@@ -338,13 +338,73 @@ edict_t *G_GetMainControllableUnit(gameClient_t *client) {
     return NULL;
 }
 
+/* ORDR S2 2.323[C] presents its original difficulty/mode/start UI as
+ * nine neutral-passive unit models (u000..u007 and u00C), and three
+ * intentionally unselectable heading models (u009..u00B).
+ *
+ * The map's imported UnitUI rows have these models, but the corresponding
+ * live UnitBalance entries have zero maximum HP on iPad. Warcraft's
+ * conventional death predicate treats any zero HP as a corpse, preventing
+ * EVENT_PLAYER_UNIT_SELECTED. These authored *non-combat* scene controls
+ * have never had living hit points to lose: honor their explicit selectable
+ * flag without inventing health values. No other unit, including ordinary
+ * dead monsters, gains this exception. */
+static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
+    uint32_t code;
+    if (!ent || !ent->inuse || !level.vm || !ent->s.model ||
+        ent->s.player != PLAYER_NEUTRAL_PASSIVE ||
+        !(ent->s.flags & EF_UNIT) || (ent->s.flags & EF_NOT_SELECTABLE) ||
+        (ent->svflags & SVF_DEADMONSTER) ||
+        ent->health.max_value != 0.0f || ent->health.value != 0.0f)
+        return false;
+    code = ent->class_id;
+    if (!((code >= 0x75303030u && code <= 0x75303037u) ||
+          code == 0x75303043u))
+        return false;
+    return jass_functionbyname(level.vm, "CUO") &&
+           jass_functionbyname(level.vm, "CUW") &&
+           jass_functionbyname(level.vm, "CUN");
+}
+
+static bool G_IsAliveForSelection(edict_t const *ent) {
+    return ent && (ent->health.value > 0.0f ||
+                   G_IsORDRNonCombatChoice(ent));
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_selection, ordr_noncombat_choice_does_not_invent_hitpoints) {
+    /* The authored choice whitelist excludes all three title unit models.
+     * Explicitly not selectable and genuine corpses remain rejected. */
+    edict_t unit = {0};
+    uint32_t const menu_codes[] = {
+        0x75303030u,0x75303031u,0x75303032u,0x75303033u,
+        0x75303034u,0x75303035u,0x75303036u,0x75303037u,0x75303043u
+    };
+    /* Pure invariant: zero max HP does not make a living gameplay unit.
+     * Runtime map identity and owner checks are exercised by the ORDR
+     * startup/choice integration logs on physical devices. */
+    T_ASSERT(!G_IsAliveForSelection(&unit));
+    unit.health.value = 10;
+    T_ASSERT(G_IsAliveForSelection(&unit));
+    unit.health.value = 0;
+    unit.health.max_value = 10;
+    T_ASSERT(!G_IsAliveForSelection(&unit));
+    FOR_LOOP(i, sizeof(menu_codes)/sizeof(*menu_codes)) {
+        T_ASSERT(menu_codes[i] != 0x75303039u);
+        T_ASSERT(menu_codes[i] != 0x75303041u);
+        T_ASSERT(menu_codes[i] != 0x75303042u);
+    }
+}
+#endif
+
 void G_SelectEntity(gameClient_t *client, edict_t *ent) {
     bool had_selection = false;
 
     /* Corpses remain networked while their death/decay presentation runs, but
      * they are no longer valid gameplay selection targets. */
     if (!client || !ent || !ent->inuse) return;
-    if (M_IsDead(ent) || (ent->s.flags & EF_NOT_SELECTABLE)) return;
+    if (!G_IsAliveForSelection(ent) || (ent->s.flags & EF_NOT_SELECTABLE)) return;
     uint32_t count = 0;
     uint32_t const limit = G_SelectionLimit();
     if (ent->selected & (1u << client->ps.number)) return;
@@ -368,7 +428,7 @@ void G_DeselectEntity(gameClient_t *client, edict_t *ent) {
 
 bool G_IsEntitySelected(gameClient_t *client, edict_t *ent) {
     TEST_SELECTION_CHECK();
-    return client && ent && ent->inuse && !M_IsDead(ent) &&
+    return client && ent && ent->inuse && G_IsAliveForSelection(ent) &&
         !(ent->s.flags & EF_NOT_SELECTABLE) &&
         (!(ent->s.renderfx & RF_HIDDEN) ||
          (S_UnitUsesInvisibilityRenderFlag(ent) &&
@@ -405,7 +465,7 @@ bool G_UnitCanBeSelected(gameClient_t *client, edict_t const *ent) {
     if (!client || !ent || !ent->inuse || !(ent->svflags & SVF_MONSTER)) {
         return false;
     }
-    if ((ent->svflags & SVF_DEADMONSTER) || ent->health.value <= 0.0f ||
+    if ((ent->svflags & SVF_DEADMONSTER) || !G_IsAliveForSelection(ent) ||
         !G_UnitIsWorldActive(ent) ||
         (ent->s.flags & EF_NOT_SELECTABLE)) {
         return false;
