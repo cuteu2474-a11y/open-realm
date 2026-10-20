@@ -17,6 +17,7 @@ void setup_test_world(void);
 void reset_entities(void);
 edict_t *alloc_test_unit(uint32_t class_id, float x, float y);
 void CM_ReadDoodadOverrides(handle_t archive);
+bool run_test_jass(cstring_t src);
 
 static void wc3_slk_write_u32(uint8_t **cursor, uint32_t value) {
     memcpy(*cursor, &value, sizeof(value));
@@ -261,6 +262,40 @@ TEST(wc3_slk, map_root_unit_ui_overrides_installed_custom_dataset) {
     gi.SetPriorityArchive(NULL);
     SFileCloseArchive(archive);
     strlcpy(game.data_prefix, saved_prefix, sizeof(game.data_prefix));
+}
+
+
+/* ORDR's protected war3map.j stores object IDs as numeric big-endian FourCCs:
+ * $75303030 denotes "u000", whereas SLK's key is MAKEFOURCC('u','0','0','0').
+ * The entity preserves the numeric script ID; typed lookup must find the art. */
+TEST(wc3_slk, ordr_numeric_fourcc_uses_map_embedded_ui_model) {
+    static cstring_t const slk =
+        "ID;PWXL;N;E\r\n"
+        "B;X3;Y3;D0\r\n"
+        "C;X1;Y1;K\"unitUIID\"\r\n"
+        "C;X3;K\"file\"\r\n"
+        "C;X1;Y2;K\"u000\"\r\n"
+        "C;X3;K\"war3mapImported\\Button Easy.mdl\"\r\n"
+        "C;X1;Y3;K\"hfoo\"\r\n"
+        "C;X3;K\"units\\human\\Footman.mdl\"\r\n"
+        "E\r\n";
+    slkTestData_t *rows, *old;
+    T_ASSERT(run_test_jass(
+        "function CUO takes nothing returns nothing\nendfunction\n"
+        "function CUW takes nothing returns nothing\nendfunction\n"
+        "function CUN takes nothing returns nothing\nendfunction\n"
+        "function main takes nothing returns nothing\nendfunction\n"
+    ));
+    rows = parse_slk_string(slk);
+    old = G_SetSLKRows("UnitUI", rows);
+    T_NOT_NULL(old);
+    T_NOT_NULL(G_UnitUI(0x75303030u)->modelFile);
+    if (G_UnitUI(0x75303030u)->modelFile)
+        T_STREQ(G_UnitUI(0x75303030u)->modelFile, "war3mapImported\\Button Easy.mdl");
+    T_STREQ(G_UnitUI(MAKEFOURCC('h','f','o','o'))->modelFile,
+            "units\\human\\Footman.mdl");
+    G_SetSLKRows("UnitUI", old);
+    free_slk_rows(rows);
 }
 
 TEST(wc3_slk, sheet_reader_prefers_active_map_data_overlay) {
