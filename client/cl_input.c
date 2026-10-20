@@ -342,6 +342,38 @@ static vec2_t CL_TouchPanCenter(void) {
  * the same UI mouse DOWN/UP event handling. Use a distinct which ID so late
  * SDL_TOUCH_MOUSEID events can be discarded without suppressing our pair. */
 #define CL_FINGER_FALLBACK_MOUSEID (SDL_TOUCH_MOUSEID - 1u)
+/* A finger-only SDL backend must not postpone a visible HUD or window click
+ * behind injected mouse events. The player can tap F10 and other server-authored
+ * UI even if the SDL mouse synthesis path is absent. Preserve the normal
+ * window-before-layout dispatch order and leave world hits to the existing
+ * mouse button pipeline. */
+static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
+    int const x = (int)pos.x, y = (int)pos.y;
+    bool const ui = CL_WindowMouseOver(x, y) || CL_WindowModalActive() ||
+                    SCR_LayoutHitTest(x, y);
+    bool const shift = (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
+    mouse.origin = pos;
+    input.touch_pointer = true;
+
+    if (CL_MenuActive() && cls.key_dest == key_menu) {
+        if (!mouse_down_seen)
+            menu.MouseEvent(MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, 0);
+        menu.MouseEvent(MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, 0);
+        return true;
+    }
+    if (cls.state != ca_active || !ui) return false;
+    if (!mouse_down_seen) {
+        mouse.button = SDL_BUTTON_LEFT;
+        if (!CL_WindowMouseEventWithMods(MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, 0))
+            SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+                MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, shift });
+    }
+    mouse.button = 0;
+    if (!CL_WindowMouseEventWithMods(MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, 0))
+        SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+            MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, shift });
+    return true;
+}
 static bool CL_QueueFingerMouseButton(SDL_TouchFingerEvent const *finger,
                                       vec2_t point, uint32_t type) {
     SDL_Event evt = { 0 };
@@ -396,10 +428,14 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
              * If SDL sent a down but omitted its up, synthesize only up. */
             if (touch_pan.count == 1 && !touch_pan.gesture &&
                 !touch_pan.synthetic_up_seen) {
-                bool pressed = touch_pan.synthetic_down_seen ||
-                    CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONDOWN);
-                if (pressed && CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONUP))
+                if (CL_TouchFallbackUI(pos, touch_pan.synthetic_down_seen)) {
                     touch_pan.fallback_sent = true;
+                } else {
+                    bool pressed = touch_pan.synthetic_down_seen ||
+                        CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONDOWN);
+                    if (pressed && CL_QueueFingerMouseButton(finger, pos, SDL_MOUSEBUTTONUP))
+                        touch_pan.fallback_sent = true;
+                }
             }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
