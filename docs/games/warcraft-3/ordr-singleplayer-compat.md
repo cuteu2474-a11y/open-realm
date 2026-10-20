@@ -59,3 +59,10 @@ The original ORDR choice UI uses nine selectable neutral-passive models (`u000..
 ### 2026-10-20 JASS native implementation pass: additional classic game functions
 
 Implemented the six `IssueNeutral{Immediate,Point,Target}Order{,ById}` variants by routing validated neutral-passive shop structures through the existing server order and stock engine. Implemented the string `IssueBuildOrder` variant by decoding the authored four-character unit ID and forwarding it to `G_IssueBuildOrder` (numeric variant already existed). Added real `GetUnitPointValue` and `GetUnitPointValueByType` reads from original `UnitData.points` (`upoi`). Implemented `IsUnitVisible`, `IsUnitFogged`, `IsUnitMasked`, `IsUnitRace` using real fog/race and entity metadata. These are 13 formerly hardcoded false/zero native function bodies in this change (6+1+2+3+1). The numeric/boolean routes still require full live ORDR gameplay testing.
+
+### 2026-10-20 — 네이티브 함수 추가 구현
+
+- 중립 상점 구매 명령은 중립 건물이 아니라 **구매자에게 비용을 청구**하며 기존 상점 재고·조건·아이템 지급·판매 이벤트를 그대로 통과하도록 수정했다.
+- 그룹 생성/필터 2종과 숫자 ID 그룹 주문 4종을 실제 게임의 유닛·건물 명령 엔진에 연결했다.
+- `GetItemPlayer`, `GetOrderTargetItem`은 아이템 소유자와 JASS 이벤트 대상 아이템을 실제 객체에서 조회한다.
+- 전체 함수 등록표는 `api_module.c`의 약 1,289개. 등록과 실제 구현은 분리해 판단한다.

@@ -167,56 +167,73 @@ static bool JassNeutralShopOrderAllowed(player_t const *buyer, edict_t const *sh
            shop->s.player == PLAYER_NEUTRAL_PASSIVE &&
            !(shop->svflags & SVF_DEADMONSTER) && !M_IsDead(shop);
 }
+/* Neutral merchandise must charge the requesting player, not the
+ * Neutral Passive shop. Share the server's stock and purchase validation. */
+static bool JassNeutralPurchase(player_t const *buyer,edict_t *shop,uint32_t id) {
+    edict_t *client_ent;
+    if(!JassNeutralShopOrderAllowed(buyer,shop))return false;
+    client_ent=G_GetPlayerEntityByNumber(PLAYER_NUM(buyer));
+    if(!client_ent||!client_ent->client)return false;
+    if(G_ShopSellsItem(shop,id))return G_ShopPurchaseItem(client_ent,shop,id);
+    if(G_ShopSellsUnit(shop,id))return G_ShopPurchaseUnit(client_ent,shop,id);
+    return false;
+}
 uint32_t IssueNeutralImmediateOrder(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    cstring_t order = jass_checkstring(j,3);
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        order && *order && unit_issueimmediateorder(shop,order));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    if(!JassNeutralShopOrderAllowed(buyer,shop)||!order||!*order)
+        return jass_pushboolean(j,false);
+    if(strlen(order)==4){
+        uint32_t id;memcpy(&id,order,4);
+        if(G_ShopSellsItem(shop,id)||G_ShopSellsUnit(shop,id))
+            return jass_pushboolean(j,JassNeutralPurchase(buyer,shop,id));
+    }
+    return jass_pushboolean(j,unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralImmediateOrderById(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
-    cstring_t order = G_OrderId2String(order_id);
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        order && *order && unit_issueimmediateorder(shop,order));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    uint32_t id=(uint32_t)jass_checkinteger(j,3);
+    cstring_t order=G_OrderId2String(id);
+    if(!JassNeutralShopOrderAllowed(buyer,shop))return jass_pushboolean(j,false);
+    if(G_ShopSellsItem(shop,id)||G_ShopSellsUnit(shop,id))
+        return jass_pushboolean(j,JassNeutralPurchase(buyer,shop,id));
+    return jass_pushboolean(j,order&&*order&&unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralPointOrder(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    cstring_t order = jass_checkstring(j,3);
-    vec2_t point = { jass_checknumber(j,4), jass_checknumber(j,5) };
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        order && *order && unit_issueorder(shop,order,&point));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    vec2_t dest={jass_checknumber(j,4),jass_checknumber(j,5)};
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&order&&*order&&
+        G_IssueUnitPointOrder(shop,order,&dest,false,PLAYER_NUM(buyer),0.0f));
 }
 uint32_t IssueNeutralPointOrderById(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
-    vec2_t point = { jass_checknumber(j,4), jass_checknumber(j,5) };
-    cstring_t order = G_OrderId2String(order_id);
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        order && *order && unit_issueorder(shop,order,&point));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,3));
+    vec2_t dest={jass_checknumber(j,4),jass_checknumber(j,5)};
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&order&&*order&&
+        G_IssueUnitPointOrder(shop,order,&dest,false,PLAYER_NUM(buyer),0.0f));
 }
 uint32_t IssueNeutralTargetOrder(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    cstring_t order = jass_checkstring(j,3);
-    edict_t *target = jass_checkhandle(j,4,"widget");
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        target && target->inuse && order && *order &&
-        unit_issuetargetorder(shop,order,target));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    edict_t *target=jass_checkhandle(j,4,"widget");
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&
+        target&&target->inuse&&order&&*order&&
+        G_IssueUnitTargetOrder(shop,order,target,false,PLAYER_NUM(buyer)));
 }
 uint32_t IssueNeutralTargetOrderById(jass_t *j) {
-    player_t *buyer = jass_checkhandle(j,1,"player");
-    edict_t *shop = jass_checkhandle(j,2,"unit");
-    uint32_t order_id = (uint32_t)jass_checkinteger(j,3);
-    edict_t *target = jass_checkhandle(j,4,"widget");
-    cstring_t order = G_OrderId2String(order_id);
-    return jass_pushboolean(j, JassNeutralShopOrderAllowed(buyer,shop) &&
-        target && target->inuse && order && *order &&
-        unit_issuetargetorder(shop,order,target));
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,3));
+    edict_t *target=jass_checkhandle(j,4,"widget");
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&
+        target&&target->inuse&&order&&*order&&
+        G_IssueUnitTargetOrder(shop,order,target,false,PLAYER_NUM(buyer)));
 }
 #ifdef BZ_TESTS
 #include "shared/test.h"

@@ -26,8 +26,10 @@ uint32_t RemoveItem(jass_t *j) {
     return 0;
 }
 uint32_t GetItemPlayer(jass_t *j) {
-    //handle_t whichItem = jass_checkhandle(j, 1, "item");
-    return jass_pushnullhandle(j, "player");
+    edict_t *item=jass_checkhandle(j,1,"item");
+    player_t *owner=item&&G_IsItem(item)&&item->s.player<MAX_PLAYERS?
+        G_GetPlayerByNumber(item->s.player):NULL;
+    return jass_pushlighthandle(j,owner,"player");
 }
 uint32_t GetItemTypeId(jass_t *j) {
     edict_t *item = jass_checkhandle(j, 1, "item");
@@ -125,7 +127,9 @@ uint32_t GetManipulatedItem(jass_t *j) {
     return item && G_IsItem(item) ? jass_pushlighthandle(j, item, "item") : jass_pushnullhandle(j, "item");
 }
 uint32_t GetOrderTargetItem(jass_t *j) {
-    return jass_pushnullhandle(j, "item");
+    edict_t *target=jass_getcontext(j)->source;
+    return target&&G_IsItem(target)?
+        jass_pushlighthandle(j,target,"item"):jass_pushnullhandle(j,"item");
 }
 uint32_t GetEnumItem(jass_t *j) {
     extern edict_t *currentenumitem;
