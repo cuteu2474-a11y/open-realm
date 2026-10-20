@@ -349,8 +349,7 @@ static vec2_t CL_TouchPanCenter(void) {
  * mouse button pipeline. */
 static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
     int const x = (int)pos.x, y = (int)pos.y;
-    bool const ui = CL_WindowMouseOver(x, y) || CL_WindowModalActive() ||
-                    SCR_LayoutHitTest(x, y);
+    bool const ui = CL_WindowMouseOver(x, y) || SCR_LayoutHitTest(x, y);
     bool const shift = (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
     mouse.origin = pos;
     input.touch_pointer = true;
@@ -362,17 +361,25 @@ static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
         return true;
     }
     if (cls.state != ca_active || !ui) return false;
+    /* Tooltip-only full-screen frames (including ORDR choice-scene hints)
+     * can report a HUD hit without handling clicks. Do not steal those
+     * taps from selectable world units: only stop here if the window/layout
+     * consumed a mouse edge or authored an actual client command. */
+    uint32_t const message_before = cls.netchan.message.cursize;
+    bool consumed = false;
     if (!mouse_down_seen) {
         mouse.button = SDL_BUTTON_LEFT;
-        if (!CL_WindowMouseEventWithMods(MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, 0))
-            SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        consumed = CL_WindowMouseEventWithMods(MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, 0);
+        if (!consumed)
+            consumed = SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
                 MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, shift });
     }
     mouse.button = 0;
-    if (!CL_WindowMouseEventWithMods(MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, 0))
-        SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+    bool released = CL_WindowMouseEventWithMods(MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, 0);
+    if (!released)
+        released = SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
             MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, shift });
-    return true;
+    return consumed || released || cls.netchan.message.cursize > message_before;
 }
 static bool CL_QueueFingerMouseButton(SDL_TouchFingerEvent const *finger,
                                       vec2_t point, uint32_t type) {
