@@ -2523,7 +2523,7 @@ void InitUnitData(void) {
          * tables. Read the mounted member directly: a generic file search
          * may pick the stock Custom_V1 table and silently omit every ORDR
          * custom rawcode even though Units\\UnitUI.slk is present in W3X. */
-        string_t map_slk = FS_ReadPriorityFile(store->path, &map_bytes);
+        string_t map_slk = gi.ReadPriorityFile ? gi.ReadPriorityFile(store->path, &map_bytes) : NULL;
         if (map_slk && map_bytes) {
             *store->count = Stb_SlkLoadBuffer(map_slk, store->schema,
                                                store->rows, store->row_size);
@@ -2533,7 +2533,7 @@ void InitUnitData(void) {
         } else {
             *store->count = 0;
         }
-        if (map_slk) FS_FreeFile(map_slk);
+        if (map_slk) gi.MemFree(map_slk);
         if (!*store->count)
             *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
         if (!*store->count && !store->optional) fprintf(stderr, "SLK: failed to load '%s'\n", store->path);
