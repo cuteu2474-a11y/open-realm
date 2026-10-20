@@ -2522,30 +2522,19 @@ TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
     MSG_ReadString(&cls.netchan.message, command);
     T_STREQ(command, "select 7");
     T_ASSERT(touch_pan.fallback_sent);
-    /* iOS commonly synthesizes a mouse click alongside its FINGER pair.
-     * Test BOTH arrival orders of synthetic mouse-up: the result must be
-     * exactly one world selection and never a permanently held left key. */
-    FOR_LOOP(order, 2) {
-        SZ_Init(&cls.netchan.message, data, sizeof(data));
-        SDL_Event down = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
-            .touchId = 1, .fingerId = 30 + order, .x = 0.45f, .y = 0.40f } };
-        SDL_Event up = down; up.type = SDL_FINGERUP;
-        SDL_Event mouse_down = (SDL_Event){ .button = { .type = SDL_MOUSEBUTTONDOWN,
-            .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT, .x = 461, .y = 307 } };
-        SDL_Event mouse_up = mouse_down; mouse_up.type = SDL_MOUSEBUTTONUP;
-        T_EQ(SDL_PushEvent(&down), 1);
-        T_EQ(SDL_PushEvent(&mouse_down), 1);
-        if (order == 0) T_EQ(SDL_PushEvent(&mouse_up), 1);
-        T_EQ(SDL_PushEvent(&up), 1);
-        if (order == 1) T_EQ(SDL_PushEvent(&mouse_up), 1);
-        CL_Input(); Cbuf_Execute();
-        T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
-        MSG_ReadString(&cls.netchan.message, command);
-        T_STREQ(command, "select 7");
-        T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
-        T_EQ(mouse_button_keys[SDL_BUTTON_LEFT], 0);
-        T_ASSERT(!touch_pan.count);
-    }
+    /* Event-order arbitration is independent of SDL's queue lifetime.
+     * The physical finger now owns the click; both synthetic mouse edges
+     * and motion must be rejected regardless of their relative order. */
+    SDL_Event synthetic = { .button = { .type = SDL_MOUSEBUTTONDOWN,
+        .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT } };
+    T_ASSERT(touch_pan.native_direct_seen);
+    T_ASSERT(CL_TouchGestureOwnsMouse(&synthetic));
+    synthetic.type = SDL_MOUSEBUTTONUP;
+    T_ASSERT(CL_TouchGestureOwnsMouse(&synthetic));
+    synthetic.type = SDL_MOUSEMOTION;
+    T_ASSERT(CL_TouchGestureOwnsMouse(&synthetic));
+    synthetic.motion.which = 0;
+    T_ASSERT(!CL_TouchGestureOwnsMouse(&synthetic));
     cl = *old_cl;
     MemFree(old_cl);
     cls = old_cls;
