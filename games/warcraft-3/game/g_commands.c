@@ -171,6 +171,20 @@ static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
     evt = G_PublishEventWithSource(unit, type,
                                    G_GetPlayerEntityByNumber(client->ps.number));
     if (evt) evt->dialog_player = client->ps.number + 1;
+    if (evt && level.vm && jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW") &&
+        unit->s.player == PLAYER_NEUTRAL_PASSIVE &&
+        (unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u ||
+         unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u)) {
+        char info[200];
+        snprintf(info, sizeof(info),
+                 "player=%u unit=%u type=%u rawcode=0x%08x a900=%u queued=%u",
+                 (unsigned)client->ps.number, (unsigned)unit->s.number,
+                 (unsigned)type, (unsigned)unit->class_id,
+                 (unsigned)G_UnitAbilityLevel(unit, MAKEFOURCC('A','9','0','0')),
+                 (unsigned)(evt != NULL));
+        jass_ordr_log_event(level.vm, "CHOICE_USER_SELECTION", info);
+    }
 }
 
 static void G_PublishSelectionDelta(gameClient_t *client,
