@@ -2497,7 +2497,24 @@ void InitUnitData(void) {
 
     FOR_LOOP(i, sizeof(slk_stores) / sizeof(*slk_stores)) {
         slkStore_t *store = slk_stores + i;
-        *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
+        uint32_t map_bytes = 0;
+        /* The active map archive is authoritative for its own object-data
+         * tables. Read the mounted member directly: a generic file search
+         * may pick the stock Custom_V1 table and silently omit every ORDR
+         * custom rawcode even though Units\\UnitUI.slk is present in W3X. */
+        string_t map_slk = FS_ReadPriorityFile(store->path, &map_bytes);
+        if (map_slk && map_bytes) {
+            *store->count = Stb_SlkLoadBuffer(map_slk, store->schema,
+                                               store->rows, store->row_size);
+            if (!*store->count)
+                fprintf(stderr, "SLK: map override '%s' (%u bytes) could not be decoded; using stock data\n",
+                        store->path, (unsigned)map_bytes);
+        } else {
+            *store->count = 0;
+        }
+        if (map_slk) FS_FreeFile(map_slk);
+        if (!*store->count)
+            *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
         if (!*store->count && !store->optional) fprintf(stderr, "SLK: failed to load '%s'\n", store->path);
         if (!strcmp(store->name, "UnitWeapons"))
             NormalizeWeaponTargetMasks(g_UnitWeapons, g_UnitWeaponsCount);
