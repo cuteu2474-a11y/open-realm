@@ -27,6 +27,8 @@
 #include "../g_local.h"
 
 bool run_test_jass(cstring_t src);
+slkTestData_t *parse_slk_string(char const *text);
+void free_slk_rows(slkTestData_t *data);
 bool run_test_jass_error(cstring_t src, cstring_t expected);
 void setup_test_world(void);
 
@@ -619,17 +621,51 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
  * while object data calls the ability A900. This gate decides whether a
  * selection is dispatched to CUK/CUL/CUM at all. */
 TEST(wc3_jass_map, ordr_numeric_a900_ability_dispatch_gate) {
+    /* The generic test fixture has no custom A900 ability. Mirror ORDR's
+     * actual UnitAbilities.slk by supplying an A900 row instead of relying
+     * on UnitAddAbility to install a nonexistent stock ability. */
+    static cstring_t const ability_slk =
+        "ID;PWXL;N;E\n"
+        "B;X3;Y2;D0\n"
+        "C;X1;Y1;K\"unitAbilID\"\n"
+        "C;X2;K\"abilList\"\n"
+        "C;X1;Y2;K\"hfoo\"\n"
+        "C;X2;K\"Aeth,A900\"\n"
+        "E\n";
+    edict_t *button = NULL;
+    slkTestData_t *rows, *old;
     T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "endglobals\n"
         "function CUO takes nothing returns nothing\nendfunction\n"
         "function CUW takes nothing returns nothing\nendfunction\n"
         "function CUN takes nothing returns nothing\nendfunction\n"
+        "function VerifyButton takes nothing returns nothing\n"
+        "  call BJassAssert(GetUnitAbilityLevel(menuButton, 'A900') > 0, \"canonical A900\")\n"
+        "  call BJassAssert(GetUnitAbilityLevel(menuButton, 0x41393030) > 0, \"ORDR numeric A900\")\n"
+        "endfunction\n"
         "function main takes nothing returns nothing\n"
-        "  local unit button = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
-        "  call UnitAddAbility(button, 'A900')\n"
-        "  call BJassAssert(GetUnitAbilityLevel(button, 'A900') > 0, \"canonical A900\")\n"
-        "  call BJassAssert(GetUnitAbilityLevel(button, 0x41393030) > 0, \"ORDR numeric A900\")\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
         "endfunction\n"
     ));
+    FOR_LOOP(i, globals.num_edicts)
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    T_NOT_NULL(button);
+    if (!button) return;
+    rows = parse_slk_string(ability_slk);
+    T_NOT_NULL(rows);
+    if (!rows) return;
+    old = G_SetSLKRows("UnitAbilities", rows);
+    T_NOT_NULL(old);
+    G_BindEntityData(button);
+    T_EQ(G_UnitAbilityLevel(button, MAKEFOURCC('A','9','0','0')), 1);
+    jass_callbyname(level.vm, "VerifyButton", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    G_SetSLKRows("UnitAbilities", old);
+    G_BindEntityData(button);
+    free_slk_rows(rows);
 }
 
 TEST(wc3_jass_map, ordr_neutral_button_selection_uses_clicking_player) {
