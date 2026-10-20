@@ -464,6 +464,30 @@ static bool G_LoadMap(cstring_t mapFilename) {
     gi.LoadingFrame();
     G_SpawnEntities();
     gi.LoadingFrame();
+    if (level.vm && jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW") &&
+        jass_functionbyname(level.vm, "CUN")) {
+        /* Compare the numeric JASS rawcode against the canonical SLK key.
+         * ORDR's Units\\UnitUI.slk embeds model art for every difficulty
+         * button. This reveals whether the failure is table loading or a
+         * FourCC representation mismatch before rendering begins. */
+        extern uint32_t g_UnitUICount;
+        UnitUI_t const *numeric = G_UnitUI(0x75303030u);
+        UnitUI_t const *canonical = G_UnitUI(MAKEFOURCC('u','0','0','0'));
+        uint32_t source_bytes = 0;
+        handle_t source = gi.ReadPriorityFile ?
+            gi.ReadPriorityFile("Units\\UnitUI.slk", &source_bytes) : NULL;
+        char detail[360];
+        snprintf(detail, sizeof(detail),
+                 "UnitUI_rows=%u embedded_bytes=%u u000_numeric_model=%s u000_canonical_model=%s",
+                 (unsigned)g_UnitUICount, (unsigned)source_bytes,
+                 numeric && numeric->modelFile && numeric->modelFile[0] ?
+                    numeric->modelFile : "(none)",
+                 canonical && canonical->modelFile && canonical->modelFile[0] ?
+                    canonical->modelFile : "(none)");
+        jass_ordr_log_event(level.vm, "MAP_UNIT_DATA_AUDIT", detail);
+        if (source) gi.MemFree(source);
+    }
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
     /* ORDR iPad startup checkpoints: distinguish a completed JASS main()
      * from a crash in loading-frame rendering or world activation. */
