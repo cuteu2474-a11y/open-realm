@@ -160,6 +160,19 @@ static bool G_SelectionListContains(edict_t *const *selection, uint32_t count, e
     return false;
 }
 
+/* Selection is initiated by the viewer, not by the selected unit's
+ * owner. An ORDR difficulty button belongs to Neutral Passive (player 15)
+ * but TriggerRegisterPlayerUnitEvent(Player(0), SELECTED) and
+ * GetTriggerPlayer() must observe the local selecting player (0). */
+static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
+                                         EVENTTYPE type) {
+    gameEvent_t *evt;
+    if (!client || !unit) return;
+    evt = G_PublishEventWithSource(unit, type,
+                                   G_GetPlayerEntityByNumber(client->ps.number));
+    if (evt) evt->dialog_player = client->ps.number + 1;
+}
+
 static void G_PublishSelectionDelta(gameClient_t *client,
                                     edict_t *const *old_selection,
                                     uint32_t old_count) {
@@ -177,7 +190,7 @@ static void G_PublishSelectionDelta(gameClient_t *client,
                     "WC3_QUEST_SELECT publish event=DESELECTED player=%u unit=%u id=%s\n",
                     (unsigned)client->ps.number, (unsigned)ent->s.number, rawcode);
             }
-            G_PublishEvent(ent, EVENT_PLAYER_UNIT_DESELECTED);
+            G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_DESELECTED);
             G_PublishEvent(ent, EVENT_UNIT_DESELECTED);
         }
     }
@@ -191,7 +204,7 @@ static void G_PublishSelectionDelta(gameClient_t *client,
                     "WC3_QUEST_SELECT publish event=SELECTED player=%u unit=%u id=%s\n",
                     (unsigned)client->ps.number, (unsigned)ent->s.number, rawcode);
             }
-            G_PublishEvent(ent, EVENT_PLAYER_UNIT_SELECTED);
+            G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_SELECTED);
             G_PublishEvent(ent, EVENT_UNIT_SELECTED);
         }
     }
@@ -473,7 +486,7 @@ void G_UpdateClientSelections(void) {
                 FOR_LOOP(k, kept) if (keep[k] == ent) { retained = true; break; }
                 if (retained) continue;
                 G_DeselectEntity(client, ent);
-                G_PublishEvent(ent, EVENT_PLAYER_UNIT_DESELECTED);
+                G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_DESELECTED);
                 G_PublishEvent(ent, EVENT_UNIT_DESELECTED);
                 changed = true;
             }
