@@ -1,6 +1,7 @@
 #include "g_local.h"
 #include "common/stb_slk.h"
 #include "g_unitrow.h"
+#include "jass/jass.h"
 
 cstring_t config_files[] = {
     "UI\\WorldEditGameStrings.txt",
@@ -2011,13 +2012,33 @@ void G_SetMapAbilityOverrides(mapInfo_t const *mapinfo) {
  * do not yet have a per-map merge. UnitBalance, UnitProfile, and UnitUI check
  * stable map rows first.
  * =========================================================================*/
+/* ORDR 2.323[C] contains numeric JASS unit IDs written in readable
+ * big-endian FourCC form (e.g. $75303030 for "u000"). UnitUI/Balance/Weapons
+ * SLK keys use the normal engine little-endian MAKEFOURCC representation.
+ * Preserve the JASS-visible numeric ID on the entity and only translate when
+ * looking up typed object data. Never reinterpret a key that already exists.
+ * Keep this fallback map-specific: classic maps legitimately use normal IDs. */
+static uint32_t ResolveORDRNumericUnitID(uint32_t id) {
+    uint32_t reversed;
+    if (!level.vm || !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN") ||
+        FS_SLKLookup(&ui_idx, id)) return id;
+    reversed = ((id & 0x000000ffu) << 24) |
+               ((id & 0x0000ff00u) << 8) |
+               ((id & 0x00ff0000u) >> 8) |
+               ((id & 0xff000000u) >> 24);
+    return FS_SLKLookup(&ui_idx, reversed) ? reversed : id;
+}
+
 static uint32_t ResolveUnitID(uint32_t id) {
-    if (!level.mapinfo) return id;
-    FOR_LOOP(n, level.mapinfo->num_userCreatedUnits) {
-        if (level.mapinfo->userCreatedUnits[n].newUnitID == id)
-            return level.mapinfo->userCreatedUnits[n].originalUnitID;
+    if (level.mapinfo) {
+        FOR_LOOP(n, level.mapinfo->num_userCreatedUnits) {
+            if (level.mapinfo->userCreatedUnits[n].newUnitID == id)
+                return ResolveORDRNumericUnitID(level.mapinfo->userCreatedUnits[n].originalUnitID);
+        }
     }
-    return id;
+    return ResolveORDRNumericUnitID(id);
 }
 
 static uint32_t ResolveDestructableID(uint32_t id) {
