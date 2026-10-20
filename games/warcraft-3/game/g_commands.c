@@ -825,6 +825,30 @@ static bool G_SelectionMembershipUnchanged(gameClient_t *client, edict_t *const 
 
 CLIENTCOMMAND(Select) {
     gameClient_t *client = clent->client;
+    /* Identify whether a genuine ORDR finger selection reaches the server. */
+    if (level.vm && argc >= 2 && jass_functionbyname(level.vm, "CUN")) {
+        uint32_t number = 0;
+        static unsigned ordr_trace_count;
+        if (ordr_trace_count < 32 && G_ParseEntityNumber(argv[1], &number)) {
+            edict_t const *candidate = &globals.edicts[number];
+            if (candidate->s.player == PLAYER_NEUTRAL_PASSIVE &&
+                ((candidate->class_id >= 0x75303030u && candidate->class_id <= 0x75303039u) ||
+                 (candidate->class_id >= 0x75303041u && candidate->class_id <= 0x75303043u))) {
+                char detail[260];
+                snprintf(detail, sizeof(detail),
+                         "unit=%u raw=0x%08x player=%u hp=%.0f active=%u selectable=%u fow=%u flags=0x%x ui=%u",
+                         (unsigned)number, (unsigned)candidate->class_id,
+                         (unsigned)client->ps.number, (double)candidate->health.value,
+                         (unsigned)G_UnitIsWorldActive(candidate),
+                         (unsigned)G_UnitCanBeSelected(client, candidate),
+                         (unsigned)G_FowPlayerCanHoverEntity(client->ps.number, candidate),
+                         (unsigned)candidate->s.flags,
+                         (unsigned)client->ps.client_ui_state);
+                jass_ordr_log_event(level.vm, "CHOICE_SELECT_COMMAND", detail);
+                ordr_trace_count++;
+            }
+        }
+    }
     if (client->menu.on_entity_selected) {
         uint32_t number;
         bool const queued = client->menu.supports_order_queue &&

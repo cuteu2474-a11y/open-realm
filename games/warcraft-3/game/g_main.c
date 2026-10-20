@@ -1503,7 +1503,7 @@ static void G_ORDRShowFlowStatus(void) {
                 if (G_FowPlayerCanHoverEntity(viewer->ps.number, unit)) hovered++;
                 if (examples++ < 3) {
                     snprintf(audit, sizeof(audit),
-                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d",
+                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d hp=%.0f selectable=%d",
                              (int)((unit->class_id >> 24) & 255),
                              (int)((unit->class_id >> 16) & 255),
                              (int)((unit->class_id >> 8) & 255),
@@ -1512,13 +1512,16 @@ static void G_ORDRShowFlowStatus(void) {
                              (unsigned)unit->svflags, (unsigned)unit->s.flags,
                              (unsigned)unit->s.player, (double)unit->s.origin.x,
                              (double)unit->s.origin.y,
-                             (int)G_FowPlayerCanSeeEntity(viewer->ps.number, unit));
+                             (int)G_FowPlayerCanSeeEntity(viewer->ps.number, unit),
+                             (double)unit->health.value,
+                             (int)G_UnitCanBeSelected(viewer, unit));
                     jass_ordr_log_event(level.vm, "CHOICE_MODEL_AUDIT", audit);
                 }
             }
             snprintf(audit, sizeof(audit),
-                     "player=%u connected=%d camera=(%.0f,%.0f) vieworigin=(%.0f,%.0f,%.0f) angles=(%.1f,%.1f,%.1f) distance=%.0f fogflags=0x%x buttons=%u modeled=%u visible=%u hoverable=%u",
+                     "player=%u connected=%d ui=%u camera=(%.0f,%.0f) vieworigin=(%.0f,%.0f,%.0f) angles=(%.1f,%.1f,%.1f) distance=%.0f fogflags=0x%x buttons=%u modeled=%u visible=%u hoverable=%u",
                      (unsigned)viewer->ps.number, (int)viewer->connected,
+                     (unsigned)viewer->ps.client_ui_state,
                      (double)viewer->camera.state.position.x,
                      (double)viewer->camera.state.position.y,
                      (double)viewer->ps.vieworigin.x,

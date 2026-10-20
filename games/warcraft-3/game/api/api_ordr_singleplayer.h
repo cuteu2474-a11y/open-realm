@@ -38,7 +38,24 @@ uint32_t DzFrameShow(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1)
 uint32_t DzFrameSetEnable(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f)f->enabled=b;return 0;}
 uint32_t DzFrameSetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f){snprintf(f->text,sizeof(f->text),"%s",s?s:"");ordr_frame_trace("text",(int)(f-ordr_frames),f->text);}return 0;}
 uint32_t DzFrameGetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));return jass_pushstring(j,f?f->text:"");}
-uint32_t DzFrameSetTexture(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f)snprintf(f->texture,sizeof(f->texture),"%s",s?s:"");return 0;}
+/* Preserve the original authored UI art path in the ORDR execution log.
+ * Frame textures are stored but not yet rendered by the FDF adapter. */
+uint32_t DzFrameSetTexture(jass_t *j) {
+    int id=jass_checkinteger(j,1);
+    ordr_frame_t *f=ordr_frame(id);
+    const char *s=jass_checkstring(j,2);
+    static unsigned seen;
+    if(f){
+        if(s && *s && strcmp(f->texture,s) && seen<120){
+            char detail[320];
+            snprintf(detail,sizeof(detail),"frame=%d name=%.70s asset=%.205s",id,f->name,s);
+            jass_ordr_log_event(j,"ORDR_FRAME_TEXTURE",detail);
+            seen++;
+        }
+        snprintf(f->texture,sizeof(f->texture),"%s",s?s:"");
+    }
+    return 0;
+}
 uint32_t DzFrameSetSize(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));float w=jass_checknumber(j,2),h=jass_checknumber(j,3);if(f){f->width=w;f->height=h;}return 0;}
 uint32_t DzFrameSetAlpha(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int a=jass_checkinteger(j,2);if(f)f->alpha=a<0?0:a>255?255:a;return 0;}
 uint32_t DzFrameFindByName(jass_t *j){const char*s=jass_checkstring(j,1);int id=jass_checkinteger(j,2);for(int i=1;i<ordr_next_frame;i++)if(ordr_frames[i].used&&ordr_frames[i].id==id&&s&&!strcmp(ordr_frames[i].name,s))return jass_pushinteger(j,i);return jass_pushinteger(j,0);}
