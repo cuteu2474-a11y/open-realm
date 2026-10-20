@@ -19,6 +19,8 @@ static bool cam_west, cam_east, cam_north, cam_south;
 
 static void CL_ScrollFrame(void);
 static bool CL_MouseOverGameplayUIAt(int x, int y);
+void IN_SelectDown(void);
+void IN_SelectUp(void);
 
 static struct {
     uint32_t buttons, sent, last_ms;
@@ -79,6 +81,69 @@ static void CL_UpdateCursor(void) {
 static bool CL_ClickTravel(vec2_t delta) {
     float limit = Cvar_Value("cl_click_threshold", 10);
     return delta.x * delta.x + delta.y * delta.y <= limit * limit;
+}
+
+/* An imported ORDR 2.323[C] difficulty button may draw as a thin MDX plane
+ * or carry a collision shape behind its label. The normal triangle/collision
+ * ray test can therefore miss a visibly tappable card on iPad. Only while
+ * six or more original Neutral Passive choice models are on screen, accept a
+ * small screen-space hit rectangle around their *projected model origin*.
+ * No map script state or unit ownership is changed here; the ordinary
+ * authoritative "select N" network command still decides what happens. */
+static bool CL_IsORDRChoiceClass(uint32_t raw) {
+    uint32_t code = raw;
+    if ((code >> 24) != (uint32_t)'u')
+        code = ((raw & 0xffu) << 24) | ((raw & 0xff00u) << 8) |
+               ((raw & 0xff0000u) >> 8) | (raw >> 24);
+    return (code >> 24) == (uint32_t)'u' &&
+           ((code >> 16) & 0xffu) == (uint32_t)'0' &&
+           ((code >> 8) & 0xffu) == (uint32_t)'0' &&
+           (((code & 0xffu) >= (uint32_t)'0' && (code & 0xffu) <= (uint32_t)'9') ||
+            ((code & 0xffu) >= (uint32_t)'A' && (code & 0xffu) <= (uint32_t)'C'));
+}
+
+static bool CL_TraceORDRChoiceCard(float x, float y, uint32_t *number) {
+    viewDef_t const *view = &cl.viewDef;
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    rect_t viewport = view->viewport;
+    float best = FLT_MAX;
+    uint32_t selected = 0, candidates = 0;
+    if (!number || !view->entities || !win.width || !win.height) return false;
+    if (viewport.w <= 0 || viewport.h <= 0)
+        viewport = (rect_t){ 0, 0, 1, 1 };
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+            !ent->model || ent->owner != 15u ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+            !CL_IsORDRChoiceClass(cl.ents[ent->number].current.class_id))
+            continue;
+        candidates++;
+        vec3_t ndc = Matrix4_multiply_vector3(&view->viewProjectionMatrix, &ent->origin);
+        float px = (viewport.x + (ndc.x + 1.0f) * viewport.w * 0.5f) * win.width;
+        float py = (1.0f - viewport.y - (ndc.y + 1.0f) * viewport.h * 0.5f) * win.height;
+        /* Real ORDR button labels occupy a wide, shallow rectangle; avoid
+         * accidentally selecting the neighboring 125-world-unit rows. */
+        float rx = MAX(32.0f, MIN(100.0f, win.width * 0.055f));
+        float ry = MAX(18.0f, MIN(37.0f, win.height * 0.027f));
+        float dx = fabsf(x - px) / rx;
+        float dy = fabsf(y - py) / ry;
+        float score = dx * dx + dy * dy;
+        if (dx <= 1.0f && dy <= 1.0f && score < best) {
+            selected = ent->number;
+            best = score;
+        }
+    }
+    if (candidates < 6 || !selected) return false;
+    *number = selected;
+    return true;
+}
+
+static bool CL_TraceSelectionEntity(float x, float y, uint32_t *number) {
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if (CL_TraceORDRChoiceCard(x, y, number)) return true;
+#endif
+    return re.TraceEntity(&cl.viewDef, x, y, number);
 }
 
 static void IN_LookDown(void) {
@@ -255,6 +320,8 @@ static struct {
     vec2_t pos[2];
     uint32_t count;
     bool gesture;
+    bool synthetic_down_seen;
+    bool fallback_sent;
 } touch_pan;
 
 static bool CL_TouchIsDirect(SDL_TouchID touch) {
@@ -277,6 +344,10 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
     switch (finger->type) {
         case SDL_FINGERDOWN:
             if (slot >= 0 || touch_pan.count >= 2) return;
+            if (!touch_pan.count) {
+                touch_pan.synthetic_down_seen = false;
+                touch_pan.fallback_sent = false;
+            }
             touch_pan.id[touch_pan.count] = finger->fingerId;
             touch_pan.pos[touch_pan.count++] = pos;
             if (touch_pan.count == 2 && CL_GameplayInputReady()) {
@@ -298,6 +369,18 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             break;
         case SDL_FINGERUP:
             if (slot < 0) return;
+            /* Some iPad SDL builds send only SDL_FINGER* (no synthesized
+             * SDL_TOUCH_MOUSEID press). Fire one ordinary world selection
+             * tap on release in that case; never double-send if SDL has
+             * already supplied the mouse press, nor after two-finger pan. */
+            if (touch_pan.count == 1 && !touch_pan.gesture &&
+                !touch_pan.synthetic_down_seen && CL_GameplayInputReady()) {
+                mouse.origin = pos;
+                input.touch_pointer = true;
+                IN_SelectDown();
+                IN_SelectUp();
+                touch_pan.fallback_sent = true;
+            }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
             if (--touch_pan.count < 2 && touch_pan.gesture) CL_EndPan();
@@ -694,6 +777,11 @@ void CL_Input(void) {
                 break;
             case SDL_MOUSEBUTTONDOWN:
                 {
+                    if (event.button.which == SDL_TOUCH_MOUSEID &&
+                        event.button.button == SDL_BUTTON_LEFT) {
+                        if (touch_pan.fallback_sent) continue;
+                        touch_pan.synthetic_down_seen = true;
+                    }
                     keyCode_t mousevt = CL_MouseButtonKey(&event.button);
                     input.touch_pointer = event.button.which == SDL_TOUCH_MOUSEID;
                     mouse.origin.x = event.button.x;
@@ -714,6 +802,9 @@ void CL_Input(void) {
                 break;
             case SDL_MOUSEBUTTONUP:
                 {
+                    if (event.button.which == SDL_TOUCH_MOUSEID &&
+                        event.button.button == SDL_BUTTON_LEFT && touch_pan.fallback_sent)
+                        continue;
                     if (ipad_chat_touch_down && event.button.which == SDL_TOUCH_MOUSEID &&
                         event.button.button == SDL_BUTTON_LEFT) {
                         ipad_chat_touch_down = false;
@@ -731,6 +822,8 @@ void CL_Input(void) {
                 }
                 break;
             case SDL_MOUSEMOTION:
+                if (event.motion.which == SDL_TOUCH_MOUSEID && touch_pan.fallback_sent)
+                    continue;
                 input.touch_pointer = event.motion.which == SDL_TOUCH_MOUSEID;
                 mouse.origin.x = event.motion.x;
                 mouse.origin.y = event.motion.y;
@@ -955,7 +1048,11 @@ void IN_SelectDown(void) {
         cl.selection.in_progress = false;
         return;
     }
-    if (CL_MouseOverGameplayUI()) {
+    /* A decorative/full-screen layout frame must not steal a real ORDR
+     * choice card's tap, but ordinary HUD interactions still take priority. */
+    uint32_t choice = 0;
+    if (CL_MouseOverGameplayUI() &&
+        !CL_TraceORDRChoiceCard(mouse.origin.x, mouse.origin.y, &choice)) {
         CL_ResetSelectClickChain();
         return;
     }
@@ -978,11 +1075,14 @@ void IN_SelectUp(void) {
     /* Release the shared drag before either selection path can return. */
     CL_EndMinimapDrag();
     if (CL_SelectionLimit() == 1) {
-        if (!held || !CL_GameplayInputReady() || CL_MouseOverGameplayUI()) return;
+        uint32_t choice = 0;
+        if (!held || !CL_GameplayInputReady() ||
+            (CL_MouseOverGameplayUI() &&
+             !CL_TraceORDRChoiceCard(mouse.origin.x, mouse.origin.y, &choice))) return;
         vec2_t delta = { mouse.origin.x - input.down.x, mouse.origin.y - input.down.y };
         if (!CL_ClickTravel(delta) || (input.look && !CL_ClickTravel(input.travel))) return;
         uint32_t entnum = 0;
-        bool hit = re.TraceEntity(&cl.viewDef, mouse.origin.x, mouse.origin.y, &entnum);
+        bool hit = CL_TraceSelectionEntity(mouse.origin.x, mouse.origin.y, &entnum);
         CL_ApplySelection(&entnum, hit ? 1 : 0);
         return;
     }
@@ -999,7 +1099,7 @@ void IN_SelectUp(void) {
     if (fabs(r.w)+fabs(r.h) < 10) {
         SDL_Keymod const mods = SDL_GetModState();
         bool const queue = (mods & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
-        if (re.TraceEntity(&cl.viewDef, r.x, r.y, &entnum)) {
+        if (CL_TraceSelectionEntity(r.x, r.y, &entnum)) {
             bool const same_type_enabled = Cvar_Integer("cl_same_type_select", 0) != 0;
             bool const ctrl_same_type = same_type_enabled && !queue &&
                 (mods & (KMOD_LCTRL | KMOD_RCTRL));
@@ -2115,6 +2215,89 @@ TEST(client_input, two_finger_touch_pans_camera) {
     Cvar_SetValue("cl_camera_edge_scroll", old_edge); Cvar_SetValue("cl_camera_scroll_speed", old_speed);
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
     CL_TestWorldBounds(false);
+}
+
+/* Projected ORDR buttons are selectable even if an imported MDX uses an
+ * unpickable billboard mesh; ordinary units never enter this fallback. */
+TEST(client_input, ordr_choice_touch_hit_uses_projected_card) {
+    viewDef_t old_view = cl.viewDef;
+    entityState_t old_states[6];
+    refExport_t old_re = re;
+    renderEntity_t choices[6] = { 0 };
+    uint32_t hit = 0;
+    FOR_LOOP(i, 6) old_states[i] = cl.ents[200 + i].current;
+    re.GetWindowSize = CL_TestWindowSize;
+    memset(&cl.viewDef, 0, sizeof(cl.viewDef));
+    Matrix4_identity(&cl.viewDef.viewProjectionMatrix);
+    cl.viewDef.viewport = (rect_t){ 0, 0, 1, 1 };
+    cl.viewDef.entities = choices;
+    cl.viewDef.num_entities = 6;
+    FOR_LOOP(i, 6) {
+        choices[i].number = 200 + i;
+        choices[i].owner = 15;
+        choices[i].model = (model_t const *)1; /* never dereferenced */
+        choices[i].origin = (vec3_t){ .x = 0.0f, .y = i * 0.15f, .z = 0 };
+        cl.ents[200 + i].current.class_id = 0x75303030u + i;
+    }
+    T_ASSERT(CL_TraceORDRChoiceCard(512, 384, &hit));
+    T_EQ(hit, 200u);
+    T_ASSERT(!CL_TraceORDRChoiceCard(150, 384, &hit));
+    choices[0].owner = 0; /* a player unit is never a menu card */
+    T_ASSERT(!CL_TraceORDRChoiceCard(512, 384, &hit));
+    cl.viewDef = old_view;
+    FOR_LOOP(i, 6) cl.ents[200 + i].current = old_states[i];
+    re = old_re;
+}
+
+/* Direct SDL_FINGER events must still select if iPad's SDL port suppresses
+ * SDL_TOUCH_MOUSEID synthesis. This must not turn a two-finger pan into a tap. */
+TEST(client_input, direct_touch_without_synthetic_mouse_still_selects) {
+    struct client_state *old_cl = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    refExport_t old_re = re;
+    __typeof__(input) old_input = input;
+    __typeof__(touch_pan) old_touch = touch_pan;
+    mouseEvent_t old_mouse = mouse;
+    bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    uint8_t data[512];
+    SDL_Event event;
+    char command[128];
+    T_ASSERT(old_cl != NULL);
+    if (!old_cl) return;
+    memcpy(old_cl, &cl, sizeof(cl));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0);
+    memset(&cl, 0, sizeof(cl));
+    input = (__typeof__(input)){ .focus = true };
+    touch_pan = (__typeof__(touch_pan)){ 0 };
+    touch_is_direct = CL_TestTouchDirect;
+    cls.state = ca_active;
+    cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    re.GetWindowSize = CL_TestWindowSize;
+    re.TraceMinimap = CL_TestNoMinimap;
+    re.TraceEntity = CL_TestSelectEntity;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1,
+        .fingerId = 11, .x = 0.45f, .y = 0.40f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERUP, .touchId = 1,
+        .fingerId = 11, .x = 0.45f, .y = 0.40f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input();
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "select 7");
+    T_ASSERT(touch_pan.fallback_sent);
+    cl = *old_cl;
+    MemFree(old_cl);
+    cls = old_cls;
+    re = old_re;
+    input = old_input;
+    touch_pan = old_touch;
+    mouse = old_mouse;
+    touch_is_direct = old_direct;
+    SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
 
 TEST(client_input, pan_uses_configured_surface) {
