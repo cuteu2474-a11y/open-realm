@@ -530,23 +530,44 @@ uint32_t SelectHeroSkill(jass_t *j) {
     }
     return 0;
 }
+/* Protected ORDR JASS stores integer rawcodes in written big-endian form
+ * ($41393030 = "A900"), whereas decoded UnitAbilities.slk stores ordinary
+ * MAKEFOURCC values. Retain canonical calls unchanged and only try a byte
+ * swap for unknown abilities in the exact ORDR function family. Otherwise
+ * BC6's button selection gate silently fails for every menu button. */
+static uint32_t G_ORDRResolveJassAbilityCode(jass_t *j, edict_t *unit, uint32_t code) {
+    uint32_t swapped;
+    if (!j || !unit || !code || G_UnitAbilityLevel(unit, code) ||
+        !jass_functionbyname(j, "CUO") ||
+        !jass_functionbyname(j, "CUW") ||
+        !jass_functionbyname(j, "CUN")) return code;
+    swapped = ((code & 0x000000ffu) << 24) |
+              ((code & 0x0000ff00u) << 8) |
+              ((code & 0x00ff0000u) >> 8) |
+              ((code & 0xff000000u) >> 24);
+    return G_UnitAbilityLevel(unit, swapped) ? swapped : code;
+}
+
 uint32_t GetUnitAbilityLevel(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    int32_t abilcode = jass_checkinteger(j, 2);
-    return jass_pushinteger(j, whichUnit ? (int32_t)G_UnitAbilityLevel(whichUnit, (uint32_t)abilcode) : 0);
+    uint32_t const code = (uint32_t)jass_checkinteger(j, 2);
+    uint32_t const resolved = G_ORDRResolveJassAbilityCode(j, whichUnit, code);
+    return jass_pushinteger(j, whichUnit ? (int32_t)G_UnitAbilityLevel(whichUnit, resolved) : 0);
 }
 uint32_t SetUnitAbilityLevel(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    int32_t abilcode = jass_checkinteger(j, 2);
+    uint32_t const code = (uint32_t)jass_checkinteger(j, 2);
     int32_t level = jass_checkinteger(j, 3);
-    return jass_pushinteger(j, whichUnit ? (int32_t)G_UnitSetAbilityLevel(whichUnit, (uint32_t)abilcode, level) : 0);
+    uint32_t const resolved = G_ORDRResolveJassAbilityCode(j, whichUnit, code);
+    return jass_pushinteger(j, whichUnit ? (int32_t)G_UnitSetAbilityLevel(whichUnit, resolved, level) : 0);
 }
 uint32_t IncUnitAbilityLevel(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    int32_t abilcode = jass_checkinteger(j, 2);
+    uint32_t const code = (uint32_t)jass_checkinteger(j, 2);
+    uint32_t abilcode = G_ORDRResolveJassAbilityCode(j, whichUnit, code);
     uint32_t cur;
     if (!whichUnit) return jass_pushinteger(j, 0);
-    cur = G_UnitAbilityLevel(whichUnit, (uint32_t)abilcode);
+    cur = G_UnitAbilityLevel(whichUnit, abilcode);
     if (!cur) return jass_pushinteger(j, 0);
     return jass_pushinteger(j, (int32_t)G_UnitSetAbilityLevel(whichUnit, (uint32_t)abilcode, (int32_t)cur + 1));
 }
