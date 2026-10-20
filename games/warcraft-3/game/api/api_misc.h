@@ -737,7 +737,10 @@ uint32_t GetSpellTargetLoc(jass_t *j) {
     return 1;
 }
 uint32_t GetEventPlayerState(jass_t *j) {
-    return jass_pushnullhandle(j, "playerstate");
+    /* WC3 player-state limit events carry the triggering state in the
+     * coroutine's existing eventValue context. No transient native-global
+     * variable is needed: suspended JASS triggers retain the correct state. */
+    return JassPushPlayerStateHandle(j, jass_getcontext(j)->eventValue);
 }
 uint32_t GetEventPlayerChatString(jass_t *j) {
     return jass_pushstring(j, jass_getcontext(j)->chat_text);

@@ -349,6 +349,13 @@ edict_t *G_GetMainControllableUnit(gameClient_t *client) {
  * have never had living hit points to lose: honor their explicit selectable
  * flag without inventing health values. No other unit, including ordinary
  * dead monsters, gains this exception. */
+static bool G_IsORDRMenuChoiceRawcode(uint32_t code) {
+    /* Exactly the nine button rawcodes present in ORDR 2.323[C] CUN.
+     * u009,u00A,u00B are decorative and intentionally not selectable. */
+    return (code >= 0x75303030u && code <= 0x75303037u) ||
+           code == 0x75303043u;
+}
+
 static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
     uint32_t code;
     if (!ent || !ent->inuse || !level.vm || !ent->s.model ||
@@ -358,9 +365,7 @@ static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
         ent->health.max_value != 0.0f || ent->health.value != 0.0f)
         return false;
     code = ent->class_id;
-    if (!((code >= 0x75303030u && code <= 0x75303037u) ||
-          code == 0x75303043u))
-        return false;
+    if (!G_IsORDRMenuChoiceRawcode(code)) return false;
     return jass_functionbyname(level.vm, "CUO") &&
            jass_functionbyname(level.vm, "CUW") &&
            jass_functionbyname(level.vm, "CUN");
@@ -390,11 +395,12 @@ TEST(wc3_selection, ordr_noncombat_choice_does_not_invent_hitpoints) {
     unit.health.value = 0;
     unit.health.max_value = 10;
     T_ASSERT(!G_IsAliveForSelection(&unit));
-    FOR_LOOP(i, sizeof(menu_codes)/sizeof(*menu_codes)) {
-        T_ASSERT(menu_codes[i] != 0x75303039u);
-        T_ASSERT(menu_codes[i] != 0x75303041u);
-        T_ASSERT(menu_codes[i] != 0x75303042u);
-    }
+    FOR_LOOP(i, sizeof(menu_codes)/sizeof(*menu_codes))
+        T_ASSERT(G_IsORDRMenuChoiceRawcode(menu_codes[i]));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303039u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303041u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303042u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(MAKEFOURCC('h','f','o','o')));
 }
 #endif
 

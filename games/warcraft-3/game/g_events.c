@@ -194,8 +194,15 @@ void G_JassPlayerStateChanged(uint32_t player_num, uint32_t state,
             reg->state != state || !reg->trigger || reg->trigger->disabled)
             continue;
         if (!G_LimitMatches(reg->limitop, before, reg->limitval) &&
-            G_LimitMatches(reg->limitop, after, reg->limitval))
-            G_PublishEventResponse(player, EVENT_PLAYER_STATE_LIMIT, reg);
+            G_LimitMatches(reg->limitop, after, reg->limitval)) {
+            gameEvent_t *evt = G_PublishEvent(player, EVENT_PLAYER_STATE_LIMIT);
+            if (evt) {
+                evt->responseTo = reg;
+                /* JASS GetEventPlayerState reads the registered state from
+                 * this existing per-event context value. */
+                evt->value = (int32_t)state;
+            }
+        }
     }
 }
 
