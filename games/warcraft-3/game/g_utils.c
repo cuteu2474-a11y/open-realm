@@ -156,6 +156,7 @@ event_t *G_MakeEvent(EVENTTYPE type) {
         evt->handle_generation = generation;
         evt->inuse = true;
         evt->type = type;
+        evt->registration_sequence = ++level.events.registration_sequence;
         level.events.next_handler_hint = (i + 1) % MAX_EVENTS;
         return evt;
     }
