@@ -2356,6 +2356,9 @@ TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
         .size = { UI_BASE_WIDTH, UI_BASE_HEIGHT }, .onclick = "menu" };
     SDL_Event event;
     char command[64] = { 0 };
+    UINAME old_click_binding;
+    strlcpy(old_click_binding, Key_GetBinding(K_MOUSE1, 0), sizeof(old_click_binding));
+    Key_SetBinding(K_MOUSE1, 0, "");
 
     T_ASSERT(old_cl != NULL);
     if (!old_cl) return;
@@ -2377,6 +2380,18 @@ TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
     CL_ParseLayout(&layout_packet);
     T_ASSERT(SCR_LayoutHitTest(256, 192));
 
+    /* First validate the authored HUD frame itself with direct mouse
+     * events, independently of finger-to-mouse translation. This also
+     * clears any held UI command left by other input fixtures. */
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN, 256, 192, SDL_BUTTON_LEFT, false });
+    SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_UP, 256, 192, SDL_BUTTON_LEFT, false });
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "menu");
+
     SZ_Init(&cls.netchan.message, data, sizeof(data));
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
         .touchId = 1, .fingerId = 19, .x = 0.25f, .y = 0.25f } };
@@ -2395,6 +2410,7 @@ TEST(client_input, finger_only_touch_reaches_menu_mouse_button_pipeline) {
     cls.netchan.message = old_msg;
     input = old_input; touch_pan = old_touch; mouse = old_mouse;
     touch_is_direct = old_direct;
+    Key_SetBinding(K_MOUSE1, 0, old_click_binding);
     FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
