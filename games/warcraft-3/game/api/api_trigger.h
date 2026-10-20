@@ -393,10 +393,18 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterPlayerAllianceChange(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //handle_t whichAlliance = jass_checkhandle(j, 3, "alliancetype");
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    player_t *player=jass_checkhandle(j,2,"player");
+    uint32_t *alliance=jass_checkhandle(j,3,"alliancetype");
+    event_t *reg;
+    if(!trigger||!player||!alliance||*alliance>ALLIANCE_SHARED_VISION_FORCED)
+        return jass_pushnullhandle(j,"event");
+    reg=G_MakeEvent(EVENT_PLAYER_ALLIANCE_CHANGED);
+    if(!reg)return jass_pushnullhandle(j,"event");
+    G_SetPlayerEventSubject(reg,PLAYER_ENT(player));
+    reg->trigger=trigger;
+    reg->state=*alliance;
+    return jass_pushlighthandle(j,G_EventHandle(reg),"event");
 }
 uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
     trigger_t *trigger = jass_checkhandle(j, 1, "trigger");

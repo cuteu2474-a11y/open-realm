@@ -357,6 +357,12 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                     jass_calltriggerevent(level.vm, e->trigger, evt);
                 }
                 break;
+            case EVENT_PLAYER_ALLIANCE_CHANGED:
+                if (evt->type == EVENT_PLAYER_ALLIANCE_CHANGED &&
+                    subject && e->subject == subject &&
+                    e->state == (uint32_t)evt->value)
+                    jass_calltriggerevent(level.vm, e->trigger, evt);
+                break;
             case EVENT_GAME_TIMER_EXPIRED:
                 break;
             case EVENT_GAME_ENTER_REGION:

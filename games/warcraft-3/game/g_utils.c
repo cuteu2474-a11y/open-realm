@@ -638,6 +638,15 @@ void G_SetPlayerAlliance(player_t const *p1, player_t const *p2, PLAYERALLIANCE 
     if (value) level.alliances[p1->number][p2->number] |= flag;
     else level.alliances[p1->number][p2->number] &= ~flag;
 
+    /* Only actual changes publish the registered alliance event, with the
+     * source player as trigger player and the changed alliance enum as
+     * eventValue. No event fires while merely defining initial map alliances. */
+    if (before != level.alliances[p1->number][p2->number] && level.vm) {
+        edict_t *who=G_GetPlayerEntityByNumber(p1->number);
+        if(who)G_PublishEventWithValue(who,EVENT_PLAYER_ALLIANCE_CHANGED,
+                  G_GetPlayerEntityByNumber(p2->number),(int32_t)type);
+    }
+
     /* Warcraft alliance state is directional: SetPlayerAlliance(source, other, ...)
      * changes only source -> other. Consumers such as fog and shared command
      * authority already read the matrix in that direction. */
