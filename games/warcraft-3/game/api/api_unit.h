@@ -351,8 +351,16 @@ uint32_t SetUnitAnimation(jass_t *j) {
     return 0;
 }
 uint32_t SetUnitAnimationByIndex(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //int32_t whichAnimation = jass_checkinteger(j, 2);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    int32_t index = jass_checkinteger(j, 2);
+    animation_t const *animation = unit ? G_GetAnimationByIndex(unit->s.model, index) : NULL;
+    if (animation) {
+        unit->animation = animation;
+        unit->animation_index = (uint32_t)index + 1;
+        strlcpy(unit->animation_request, animation->name, sizeof(unit->animation_request));
+        unit->s.frame = animation->interval[0];
+        unit->animation_override = true;
+    }
     return 0;
 }
 uint32_t SetUnitAnimationWithRarity(jass_t *j) {

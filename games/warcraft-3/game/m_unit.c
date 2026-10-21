@@ -2252,6 +2252,10 @@ bool G_HeroLearnSkill(edict_t *ent, uint32_t abilcode) {
     if (!G_HeroModifySkillPoints(ent, -1)) {
         return false;
     }
+    gameEvent_t *event = G_PublishEventWithValue(ent, EVENT_PLAYER_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
+    event = G_PublishEventWithValue(ent, EVENT_UNIT_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
     return true;
 }
 

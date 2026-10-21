@@ -408,7 +408,7 @@ void G_UpdateTimeOfDay(void) {
             level.timeofday.pending_valid = false;
         } else if (!level.timeofday.suspended) {
             level.timeofday.elapsed = fmodf(
-                level.timeofday.elapsed + (float)FRAMETIME / 1000.0f,
+                level.timeofday.elapsed + level.timeofday.scale * (float)FRAMETIME / 1000.0f,
                 day_length);
         }
     }

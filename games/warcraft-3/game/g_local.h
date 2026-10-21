@@ -979,6 +979,7 @@ typedef struct gameevent_s {
     uint32_t source_spawn_time;
     bool source_spawn_tracked;
     int32_t value; /* scalar JASS callback payload (for example spell/research rawcode) */
+    uint32_t learned_level; /* immutable rank when the skill event was published */
     vec2_t point;
     bool has_point;
     event_t *responseTo;
@@ -1133,6 +1134,7 @@ struct gtrigger_s {
     gTriggerAction_t *actions;
     gTriggerCondition_t *conditions;
     bool disabled;
+    bool destroyed; /* tombstone: active contexts may still reference this stable slot */
     bool wait_on_sleeps; /* TriggerWaitOnSleeps */
     uint32_t evaluation_count; /* TriggerEvaluate/event condition calls */
     uint32_t execution_count;  /* TriggerExecute/accepted event actions */
@@ -1963,6 +1965,7 @@ struct edict_s {
     edict_t *build;
     animation_t const *animation;
     float animation_speed; /* JASS SetUnitTimeScale multiplier for the simulation animation clock */
+    uint32_t animation_index; /* one-based model sequence; zero selects by name */
     bool animation_override; /* JASS presentation animation may advance while gameplay is paused */
     /* Warcraft Required Animation Names (UnitProfile.animProps/uani) plus
      * AddUnitAnimationProperties mutations. The request is retained separately
@@ -2106,6 +2109,7 @@ struct gevent_s {
     EVENTTYPE type;
     trigger_t *trigger;
     gtimer_t *timer;
+    bool owns_timer;
     struct jass_function const *filter;
     handle_t region;
     uint32_t dialog_id, button_id; /* registration target, one-based */
@@ -2327,6 +2331,7 @@ typedef struct {
 
 typedef struct {
     float elapsed;
+    float scale; /* simulation clock multiplier, default 1 */
     float pending;
     bool pending_valid;
     bool suspended;
@@ -2783,6 +2788,7 @@ void G_BlightMarkClientFull(edict_t *ent);
 bool G_BlightDatagramPending(edict_t *ent);
 uint32_t G_BlightWriteDatagram(edict_t *ent, uint8_t *data, uint32_t size);
 trigger_t *G_AllocJassTrigger(void);
+void G_DestroyJassTrigger(trigger_t *trigger);
 gtimer_t *G_AllocJassTimer(void);
 timerdialog_t *G_AllocTimerDialog(gtimer_t *timer);
 void G_FreeTimerDialog(timerdialog_t *dialog);
@@ -2854,6 +2860,7 @@ void monster_think(edict_t *);
 void         G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size);
 int          G_RegisterModel(cstring_t filename);
 animation_t const *G_GetAnimation(uint32_t modelindex, cstring_t animname);
+animation_t const *G_GetAnimationByIndex(uint32_t modelindex, int32_t index);
 animation_t const *G_SelectAnimationForProperties(animation_t const *animations, uint32_t count, cstring_t animname, cstring_t properties);
 animation_t const *G_SelectAnimationVariantForProperties(animation_t const *animations, uint32_t count, cstring_t animname, cstring_t properties, bool randomize);
 animation_t const *G_GetAnimationForProperties(uint32_t modelindex, cstring_t animname, cstring_t properties);

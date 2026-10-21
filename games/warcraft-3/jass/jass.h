@@ -76,6 +76,8 @@ struct jass_context {
     edict_t *enumunit;
     edict_t *source;
     int32_t eventValue;
+    uint32_t event_id; /* event type + 1; zero means no event */
+    uint32_t learned_level;
     uint32_t dialog_id, dialog_button_id;
     char chat_text[256], chat_matched[256];
     vec2_t point;
@@ -95,6 +97,7 @@ bool jass_checkboolean(jass_t *j, int index);
 cstring_t jass_checkstring(jass_t *j, int index);
 jassFunc_t const *jass_checkcode(jass_t *j, int index);
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type);
+bool jass_enumvalue(jass_t *j, int index, uint32_t *value);
 bool jass_toboolean(jass_t *j, int index);
 uint32_t jass_call(jass_t *j, uint32_t args);
 void jass_sethost(jassHost_t const *host);

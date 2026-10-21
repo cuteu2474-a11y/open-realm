@@ -329,6 +329,12 @@ static g_cmodel_t *GetModel(uint32_t modelindex) {
     return entry->animations ? entry : NULL;
 }
 
+animation_t const *G_GetAnimationByIndex(uint32_t modelindex, int32_t index) {
+    g_cmodel_t *model = GetModel(modelindex);
+    return model && index >= 0 && (uint32_t)index < model->num_animations
+        ? &model->animations[index] : NULL;
+}
+
 animation_t const *G_GetAnimation(uint32_t modelindex, cstring_t animname) {
     g_cmodel_t *model = GetModel(modelindex);
     if (!model)
@@ -614,6 +620,7 @@ void G_SetUnitAnimation(edict_t *unit, cstring_t animname) {
     animationTagSet_t request_tags = {0};
 
     if (!unit || !animname) return;
+    unit->animation_index = 0;
     strlcpy(request, animname, sizeof(request));
     strlcpy(unit->animation_request, request, sizeof(unit->animation_request));
     AnimationParseRequest(request, primary, &request_tags);

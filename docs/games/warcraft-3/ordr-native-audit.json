@@ -1,0 +1,4045 @@
+{
+  "schema": 1,
+  "method": "Static call closure; nonempty/registered does not mean implemented or correct.",
+  "sources": [
+    {
+      "name": "war3map.j",
+      "normalized_sha256": "f59f0f059605a24b2360b9f7c493160f1b8776ec5dae621dfe9ccbde0d68f5d5"
+    },
+    {
+      "name": "Blizzard.j",
+      "normalized_sha256": "2940674ddd5d9dbaf84df2490b609d3d606c66db6c70fbf11a7940d4209ddfed"
+    },
+    {
+      "name": "common.txt",
+      "normalized_sha256": "69cbbe7cc75b274e6e8c929d413a828c57a70e99fabbefbe14a211b510433e92"
+    }
+  ],
+  "registered": 1289,
+  "direct_native_count": 453,
+  "referenced_native_count": 514,
+  "placeholder_count": 22,
+  "missing_declared_natives": [
+    "IsItemIdSellable",
+    "UnitDamagePoint"
+  ],
+  "unresolved_calls": [],
+  "natives": [
+    {
+      "name": "AddHeroXP",
+      "registered": true,
+      "direct_calls": 15,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 470,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddItemToStock",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1416,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddSpecialEffect",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_effect.h",
+      "line": 37,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddSpecialEffectLoc",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_effect.h",
+      "line": 42,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddSpecialEffectTarget",
+      "registered": true,
+      "direct_calls": 28,
+      "path": "games/warcraft-3/game/api/api_effect.h",
+      "line": 47,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddUnitAnimationProperties",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 383,
+      "status": "needs_review"
+    },
+    {
+      "name": "AddUnitToStock",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1437,
+      "status": "needs_review"
+    },
+    {
+      "name": "Atan2",
+      "registered": true,
+      "direct_calls": 16,
+      "status": "needs_review"
+    },
+    {
+      "name": "AttachSoundToUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 147,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetSourceNoise",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 741,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetSourceNoiseEx",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 749,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetTargetNoise",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 737,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetTargetNoiseEx",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 745,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetupGetDestPositionX",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 636,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetupGetDestPositionY",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 640,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetupGetField",
+      "registered": true,
+      "direct_calls": 7,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 603,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetupSetDestPosition",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 623,
+      "status": "needs_review"
+    },
+    {
+      "name": "CameraSetupSetField",
+      "registered": true,
+      "direct_calls": 14,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 577,
+      "status": "needs_review"
+    },
+    {
+      "name": "Cheat",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1943,
+      "status": "placeholder"
+    },
+    {
+      "name": "ChooseRandomItemEx",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1504,
+      "status": "needs_review"
+    },
+    {
+      "name": "ClearSelection",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 831,
+      "status": "needs_review"
+    },
+    {
+      "name": "Condition",
+      "registered": true,
+      "direct_calls": 658,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 535,
+      "status": "needs_review"
+    },
+    {
+      "name": "ConvertPlayerColor",
+      "registered": true,
+      "direct_calls": 9,
+      "status": "needs_review"
+    },
+    {
+      "name": "ConvertUnitState",
+      "registered": true,
+      "direct_calls": 6,
+      "status": "needs_review"
+    },
+    {
+      "name": "Cos",
+      "registered": true,
+      "direct_calls": 20,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateBlightedGoldmine",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1471,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateCameraSetup",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 564,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateDestructable",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateDestructableZ",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 12,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateFogModifierRect",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 639,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateForce",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 370,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateGroup",
+      "registered": true,
+      "direct_calls": 43,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 10,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateItem",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateLeaderboard",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 32,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateMIDISound",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 73,
+      "status": "placeholder"
+    },
+    {
+      "name": "CreateMultiboard",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 33,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateQuest",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateRegion",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 82,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateSound",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 3,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateSoundFromLabel",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 49,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateTextTag",
+      "registered": true,
+      "direct_calls": 18,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 192,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateTimer",
+      "registered": true,
+      "direct_calls": 27,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 330,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateTimerDialog",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1754,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateTrigger",
+      "registered": true,
+      "direct_calls": 655,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 59,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateUnit",
+      "registered": true,
+      "direct_calls": 232,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1385,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateUnitAtLoc",
+      "registered": true,
+      "direct_calls": 2291,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1445,
+      "status": "needs_review"
+    },
+    {
+      "name": "CreateUnitPool",
+      "registered": true,
+      "direct_calls": 14,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1311,
+      "status": "needs_review"
+    },
+    {
+      "name": "DecUnitAbilityLevel",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 454,
+      "status": "needs_review"
+    },
+    {
+      "name": "DefineStartLocation",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 187,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyEffect",
+      "registered": true,
+      "direct_calls": 39,
+      "path": "games/warcraft-3/game/api/api_effect.h",
+      "line": 55,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyGroup",
+      "registered": true,
+      "direct_calls": 20,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 35,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyTextTag",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 201,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyTimer",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 335,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyTimerDialog",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1763,
+      "status": "needs_review"
+    },
+    {
+      "name": "DestroyTrigger",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 64,
+      "status": "needs_review"
+    },
+    {
+      "name": "DialogAddButton",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1088,
+      "status": "needs_review"
+    },
+    {
+      "name": "DialogClear",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1078,
+      "status": "needs_review"
+    },
+    {
+      "name": "DialogCreate",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1067,
+      "status": "needs_review"
+    },
+    {
+      "name": "DialogDisplay",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1103,
+      "status": "needs_review"
+    },
+    {
+      "name": "DialogSetMessage",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1082,
+      "status": "needs_review"
+    },
+    {
+      "name": "DisableTrigger",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 105,
+      "status": "needs_review"
+    },
+    {
+      "name": "DisplayCineFilter",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 105,
+      "status": "needs_review"
+    },
+    {
+      "name": "DisplayTextToPlayer",
+      "registered": true,
+      "direct_calls": 40,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 693,
+      "status": "needs_review"
+    },
+    {
+      "name": "DisplayTimedTextToPlayer",
+      "registered": true,
+      "direct_calls": 554,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 711,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzCreateFrame",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 35,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzCreateFrameByTagName",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 36,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameClearAllPoints",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 78,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameFindByName",
+      "registered": true,
+      "direct_calls": 48,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 61,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameGetText",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 40,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetAbsolutePoint",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 68,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetAlpha",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 60,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetEnable",
+      "registered": true,
+      "direct_calls": 124,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 38,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetFocus",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 62,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetFont",
+      "registered": true,
+      "direct_calls": 83,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 86,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetModel",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 108,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetPoint",
+      "registered": true,
+      "direct_calls": 200,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 57,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetPriority",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 103,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetScriptByCode",
+      "registered": true,
+      "direct_calls": 86,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 128,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetSize",
+      "registered": true,
+      "direct_calls": 139,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 59,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetText",
+      "registered": true,
+      "direct_calls": 162,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 39,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetTextAlignment",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 98,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameSetTexture",
+      "registered": true,
+      "direct_calls": 79,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 43,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzFrameShow",
+      "registered": true,
+      "direct_calls": 278,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 37,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetGameUI",
+      "registered": true,
+      "direct_calls": 11,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 34,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetTriggerKeyPlayer",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 238,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetTriggerSyncData",
+      "registered": true,
+      "direct_calls": 18,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 190,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetTriggerSyncPlayer",
+      "registered": true,
+      "direct_calls": 22,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 193,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetTriggerUIEventFrame",
+      "registered": true,
+      "direct_calls": 122,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 139,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzGetTriggerUIEventPlayer",
+      "registered": true,
+      "direct_calls": 67,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 142,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzLoadToc",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 119,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzSyncData",
+      "registered": true,
+      "direct_calls": 23,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 169,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzTriggerRegisterKeyEventByCode",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 207,
+      "status": "needs_review"
+    },
+    {
+      "name": "DzTriggerRegisterSyncData",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 158,
+      "status": "needs_review"
+    },
+    {
+      "name": "EXPauseUnit",
+      "registered": true,
+      "direct_calls": 132,
+      "status": "needs_review"
+    },
+    {
+      "name": "EXSetUnitFacing",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "EnableDragSelect",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 907,
+      "status": "placeholder"
+    },
+    {
+      "name": "EnableOcclusion",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1702,
+      "status": "placeholder"
+    },
+    {
+      "name": "EnableSelect",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 909,
+      "status": "placeholder"
+    },
+    {
+      "name": "EnableTrigger",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 76,
+      "status": "needs_review"
+    },
+    {
+      "name": "EnableUserControl",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1593,
+      "status": "needs_review"
+    },
+    {
+      "name": "ExecuteFunc",
+      "registered": true,
+      "direct_calls": 83,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 509,
+      "status": "needs_review"
+    },
+    {
+      "name": "Filter",
+      "registered": true,
+      "direct_calls": 13,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 543,
+      "status": "needs_review"
+    },
+    {
+      "name": "FirstOfGroup",
+      "registered": true,
+      "direct_calls": 86,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 377,
+      "status": "needs_review"
+    },
+    {
+      "name": "FlushChildHashtable",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 282,
+      "status": "needs_review"
+    },
+    {
+      "name": "FogEnable",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 602,
+      "status": "needs_review"
+    },
+    {
+      "name": "FogMaskEnable",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 592,
+      "status": "needs_review"
+    },
+    {
+      "name": "FogModifierStart",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 683,
+      "status": "needs_review"
+    },
+    {
+      "name": "ForForce",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 443,
+      "status": "needs_review"
+    },
+    {
+      "name": "ForGroup",
+      "registered": true,
+      "direct_calls": 28,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 348,
+      "status": "needs_review"
+    },
+    {
+      "name": "ForceAddPlayer",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 375,
+      "status": "needs_review"
+    },
+    {
+      "name": "ForceEnumPlayers",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 399,
+      "status": "needs_review"
+    },
+    {
+      "name": "ForcePlayerStartLocation",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 27,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetAbilityEffectById",
+      "registered": true,
+      "direct_calls": 7,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 447,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetAttacker",
+      "registered": true,
+      "direct_calls": 631,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 601,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetBuyingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 771,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCameraBoundMaxX",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 844,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCameraBoundMaxY",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 847,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCameraBoundMinX",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 838,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCameraBoundMinY",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 841,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCameraMargin",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 808,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetCancelledStructure",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 619,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetChangingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 658,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetChangingUnitPrevOwner",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 661,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetClickedButton",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 577,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetClickedDialog",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 580,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetConstructedStructure",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 622,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetConstructingStructure",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 616,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDecayingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 613,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDestructableLife",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 117,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDestructableMaxLife",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 132,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDestructableX",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 103,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDestructableY",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 107,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetDetectedUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 641,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEnteringUnit",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 568,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEnumUnit",
+      "registered": true,
+      "direct_calls": 564,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 490,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventDamage",
+      "registered": true,
+      "direct_calls": 161,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 758,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventDamageSource",
+      "registered": true,
+      "direct_calls": 67,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 761,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventDetectingPlayer",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 799,
+      "status": "placeholder"
+    },
+    {
+      "name": "GetEventPlayerChatString",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 747,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventPlayerChatStringMatched",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 750,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventPlayerState",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 741,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetEventTargetUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 802,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetExpiredTimer",
+      "registered": true,
+      "direct_calls": 26,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 367,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetFilterDestructable",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 494,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetFilterUnit",
+      "registered": true,
+      "direct_calls": 225,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 487,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetFloatGameState",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1016,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetGameSpeed",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 292,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHandleId",
+      "registered": true,
+      "direct_calls": 483,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 154,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHeroAgi",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 588,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHeroInt",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 594,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHeroLevel",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 519,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHeroStr",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 582,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetHeroXP",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 445,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetIssuedOrderId",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 672,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetItemCharges",
+      "registered": true,
+      "direct_calls": 42,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 54,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetItemTypeId",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 34,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetKillingUnit",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 610,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLearnedSkill",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 589,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLearnedSkillLevel",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 592,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLearningUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 586,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLeavingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 571,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLevelingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 583,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLoadedUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 653,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLocalPlayer",
+      "registered": true,
+      "direct_calls": 214,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 253,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLocationX",
+      "registered": true,
+      "direct_calls": 214,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 179,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetLocationY",
+      "registered": true,
+      "direct_calls": 214,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 183,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetManipulatedItem",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 125,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetManipulatingUnit",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 666,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetObjectName",
+      "registered": true,
+      "direct_calls": 168,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 764,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderPointX",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 675,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderPointY",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 680,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderTargetDestructable",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 695,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderTargetItem",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 129,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderTargetUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 700,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOrderedUnit",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 669,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetOwningPlayer",
+      "registered": true,
+      "direct_calls": 1074,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 926,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerController",
+      "registered": true,
+      "direct_calls": 46,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 119,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerId",
+      "registered": true,
+      "direct_calls": 924,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 328,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerName",
+      "registered": true,
+      "direct_calls": 98,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 150,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerSlotState",
+      "registered": true,
+      "direct_calls": 18,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 123,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerStartLocation",
+      "registered": true,
+      "direct_calls": 14,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 104,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerState",
+      "registered": true,
+      "direct_calls": 205,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 417,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerTechCount",
+      "registered": true,
+      "direct_calls": 26,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 484,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetPlayerTechResearched",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 474,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRandomInt",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1254,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRandomReal",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1260,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectCenterX",
+      "registered": true,
+      "direct_calls": 122,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 58,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectCenterY",
+      "registered": true,
+      "direct_calls": 124,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 62,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectMaxX",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 74,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectMaxY",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 78,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectMinX",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 66,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRectMinY",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 70,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRescuer",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 604,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetResearched",
+      "registered": true,
+      "direct_calls": 13,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 628,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetResearchingUnit",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 625,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRevivableUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 595,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetRevivingUnit",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 598,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSellingUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 768,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSoldItem",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 777,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSoldUnit",
+      "registered": true,
+      "direct_calls": 16,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 774,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSoundFileDuration",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 265,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellAbilityId",
+      "registered": true,
+      "direct_calls": 200,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 709,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellAbilityUnit",
+      "registered": true,
+      "direct_calls": 127,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 706,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetDestructable",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 717,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetItem",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 722,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetLoc",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 735,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetUnit",
+      "registered": true,
+      "direct_calls": 64,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 712,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetX",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 727,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSpellTargetY",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 731,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetStartLocationLoc",
+      "registered": true,
+      "direct_calls": 57,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 320,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetStartLocationX",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 304,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetStartLocationY",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 312,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSummonedUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 647,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetSummoningUnit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 644,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTrainedUnit",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 636,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTrainedUnitType",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 631,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTriggerEventId",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 170,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTriggerPlayer",
+      "registered": true,
+      "direct_calls": 505,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 371,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTriggerUnit",
+      "registered": true,
+      "direct_calls": 1233,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 750,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTriggeringRegion",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 311,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetTriggeringTrigger",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 158,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitAbilityLevel",
+      "registered": true,
+      "direct_calls": 551,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 559,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitAcquireRange",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitCurrentOrder",
+      "registered": true,
+      "direct_calls": 79,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 606,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitDefaultAcquireRange",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 232,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitDefaultFlyHeight",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 245,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitFacing",
+      "registered": true,
+      "direct_calls": 313,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 112,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitFlyHeight",
+      "registered": true,
+      "direct_calls": 51,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 93,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitLoc",
+      "registered": true,
+      "direct_calls": 995,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 914,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitMoveSpeed",
+      "registered": true,
+      "direct_calls": 9,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitName",
+      "registered": true,
+      "direct_calls": 80,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 944,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitPointValue",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 768,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitPropWindow",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 107,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitRace",
+      "registered": true,
+      "direct_calls": 28,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 938,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitState",
+      "registered": true,
+      "direct_calls": 193,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 210,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitTurnSpeed",
+      "registered": true,
+      "direct_calls": 7,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitTypeId",
+      "registered": true,
+      "direct_calls": 269,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 933,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitUserData",
+      "registered": true,
+      "direct_calls": 161,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 317,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitX",
+      "registered": true,
+      "direct_calls": 70,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetUnitY",
+      "registered": true,
+      "direct_calls": 70,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetWidgetLife",
+      "registered": true,
+      "direct_calls": 7,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 805,
+      "status": "needs_review"
+    },
+    {
+      "name": "GetWorldBounds",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 482,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupAddUnit",
+      "registered": true,
+      "direct_calls": 30,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 40,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupClear",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 62,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupEnumUnitsInRangeOfLoc",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 180,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupEnumUnitsInRect",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 123,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupEnumUnitsOfPlayer",
+      "registered": true,
+      "direct_calls": 18,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 91,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupEnumUnitsOfType",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 79,
+      "status": "needs_review"
+    },
+    {
+      "name": "GroupRemoveUnit",
+      "registered": true,
+      "direct_calls": 22,
+      "path": "games/warcraft-3/game/api/api_group.h",
+      "line": 45,
+      "status": "needs_review"
+    },
+    {
+      "name": "HaveSavedBoolean",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 238,
+      "status": "needs_review"
+    },
+    {
+      "name": "HaveSavedHandle",
+      "registered": true,
+      "direct_calls": 11,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 246,
+      "status": "needs_review"
+    },
+    {
+      "name": "HaveSavedInteger",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 230,
+      "status": "needs_review"
+    },
+    {
+      "name": "HaveSavedReal",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 234,
+      "status": "needs_review"
+    },
+    {
+      "name": "I2R",
+      "registered": true,
+      "direct_calls": 368,
+      "status": "needs_review"
+    },
+    {
+      "name": "I2S",
+      "registered": true,
+      "direct_calls": 293,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 118,
+      "status": "needs_review"
+    },
+    {
+      "name": "IncUnitAbilityLevel",
+      "registered": true,
+      "direct_calls": 35,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 572,
+      "status": "needs_review"
+    },
+    {
+      "name": "InitHashtable",
+      "registered": true,
+      "direct_calls": 67,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 148,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsFogEnabled",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 620,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsFogMaskEnabled",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 612,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsItemIdSellable",
+      "registered": false,
+      "direct_calls": 0,
+      "status": "missing"
+    },
+    {
+      "name": "IsPlayerInForce",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 275,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsTerrainPathable",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 938,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitEnemy",
+      "registered": true,
+      "direct_calls": 163,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 985,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitInGroup",
+      "registered": true,
+      "direct_calls": 17,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 957,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitInRange",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1073,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitInRangeLoc",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1088,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitOwnedByPlayer",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 972,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitPaused",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 757,
+      "status": "needs_review"
+    },
+    {
+      "name": "IsUnitType",
+      "registered": true,
+      "direct_calls": 27,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1039,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssueImmediateOrder",
+      "registered": true,
+      "direct_calls": 140,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1199,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssueImmediateOrderById",
+      "registered": true,
+      "direct_calls": 16,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1204,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssuePointOrder",
+      "registered": true,
+      "direct_calls": 29,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1209,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssuePointOrderById",
+      "registered": true,
+      "direct_calls": 128,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1224,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssuePointOrderByIdLoc",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1236,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssuePointOrderLoc",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1217,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssueTargetOrder",
+      "registered": true,
+      "direct_calls": 142,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1245,
+      "status": "needs_review"
+    },
+    {
+      "name": "IssueTargetOrderById",
+      "registered": true,
+      "direct_calls": 54,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1251,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNLogin",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 347,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterGetInt",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 385,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterGetString",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 373,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterInit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 353,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterSave",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 390,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterSetInt",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 378,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNObjectCharacterSetString",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 367,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNStringCount",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 63,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNStringRegex",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 418,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNStringReplace",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 65,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNStringSplit",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer.h",
+      "line": 64,
+      "status": "needs_review"
+    },
+    {
+      "name": "JNUse",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 342,
+      "status": "placeholder"
+    },
+    {
+      "name": "KillUnit",
+      "registered": true,
+      "direct_calls": 42,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 137,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardAddItem",
+      "registered": true,
+      "direct_calls": 50,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 45,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardClear",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 56,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardDisplay",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 41,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardGetItemCount",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 43,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardRemoveItem",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 54,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardSetLabel",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 62,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardSetSizeByItemCount",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 44,
+      "status": "needs_review"
+    },
+    {
+      "name": "LeaderboardSetStyle",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 68,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadBoolean",
+      "registered": true,
+      "direct_calls": 21,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 218,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadEffectHandle",
+      "registered": true,
+      "direct_calls": 18,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadForceHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadGroupHandle",
+      "registered": true,
+      "direct_calls": 102,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadInteger",
+      "registered": true,
+      "direct_calls": 890,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 206,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadItemHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadLightningHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadLocationHandle",
+      "registered": true,
+      "direct_calls": 4112,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadPlayerHandle",
+      "registered": true,
+      "direct_calls": 79,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadReal",
+      "registered": true,
+      "direct_calls": 1759,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 212,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadSoundHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadStr",
+      "registered": true,
+      "direct_calls": 23,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 224,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadTextTagHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadTimerHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadTriggerHandle",
+      "registered": true,
+      "direct_calls": 36,
+      "status": "needs_review"
+    },
+    {
+      "name": "LoadUnitHandle",
+      "registered": true,
+      "direct_calls": 7612,
+      "status": "needs_review"
+    },
+    {
+      "name": "Location",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 164,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardDisplay",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 47,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardGetItem",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 96,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardReleaseItem",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 108,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetColumnCount",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 91,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetItemIcon",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 164,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetItemStyle",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 113,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetItemValue",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 126,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetItemWidth",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 152,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetItemsStyle",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 176,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetRowCount",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 86,
+      "status": "needs_review"
+    },
+    {
+      "name": "MultiboardSetTitleText",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 76,
+      "status": "needs_review"
+    },
+    {
+      "name": "NewSoundEnvironment",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1914,
+      "status": "placeholder"
+    },
+    {
+      "name": "OrderId",
+      "registered": true,
+      "direct_calls": 212,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 105,
+      "status": "needs_review"
+    },
+    {
+      "name": "PanCameraToTimed",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 483,
+      "status": "needs_review"
+    },
+    {
+      "name": "PauseTimer",
+      "registered": true,
+      "direct_calls": 27,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 361,
+      "status": "needs_review"
+    },
+    {
+      "name": "PauseUnit",
+      "registered": true,
+      "direct_calls": 23,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 751,
+      "status": "needs_review"
+    },
+    {
+      "name": "PingMinimap",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1658,
+      "status": "needs_review"
+    },
+    {
+      "name": "PlaceRandomUnit",
+      "registered": true,
+      "direct_calls": 13,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1348,
+      "status": "needs_review"
+    },
+    {
+      "name": "Player",
+      "registered": true,
+      "direct_calls": 1802,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 248,
+      "status": "needs_review"
+    },
+    {
+      "name": "PlayerSetLeaderboard",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_leaderboard.h",
+      "line": 64,
+      "status": "needs_review"
+    },
+    {
+      "name": "Pow",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "QuestSetDescription",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 17,
+      "status": "needs_review"
+    },
+    {
+      "name": "QuestSetDiscovered",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 43,
+      "status": "needs_review"
+    },
+    {
+      "name": "QuestSetIconPath",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 24,
+      "status": "needs_review"
+    },
+    {
+      "name": "QuestSetRequired",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 31,
+      "status": "needs_review"
+    },
+    {
+      "name": "QuestSetTitle",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_quest.h",
+      "line": 10,
+      "status": "needs_review"
+    },
+    {
+      "name": "QueueUnitAnimation",
+      "registered": true,
+      "direct_calls": 12,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 339,
+      "status": "needs_review"
+    },
+    {
+      "name": "R2I",
+      "registered": true,
+      "direct_calls": 69,
+      "status": "needs_review"
+    },
+    {
+      "name": "R2S",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 124,
+      "status": "needs_review"
+    },
+    {
+      "name": "R2SW",
+      "registered": true,
+      "direct_calls": 75,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 130,
+      "status": "needs_review"
+    },
+    {
+      "name": "Rect",
+      "registered": true,
+      "direct_calls": 143,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "RegionAddRect",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 118,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveDestructable",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_destructable.h",
+      "line": 46,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveItem",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 23,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveItemFromStock",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1427,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveLocation",
+      "registered": true,
+      "direct_calls": 383,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 170,
+      "status": "placeholder"
+    },
+    {
+      "name": "RemoveRegion",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_math.h",
+      "line": 96,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveSavedBoolean",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 259,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveSavedHandle",
+      "registered": true,
+      "direct_calls": 22,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 267,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveSavedInteger",
+      "registered": true,
+      "direct_calls": 18,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 251,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveSavedReal",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 255,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveSavedString",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 263,
+      "status": "needs_review"
+    },
+    {
+      "name": "RemoveUnit",
+      "registered": true,
+      "direct_calls": 19,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 145,
+      "status": "needs_review"
+    },
+    {
+      "name": "ResetToGameCamera",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 447,
+      "status": "needs_review"
+    },
+    {
+      "name": "ResetUnitLookAt",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 409,
+      "status": "placeholder"
+    },
+    {
+      "name": "ResumeTimer",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 364,
+      "status": "needs_review"
+    },
+    {
+      "name": "S2I",
+      "registered": true,
+      "direct_calls": 43,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveBoolean",
+      "registered": true,
+      "direct_calls": 78,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 178,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveEffectHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveForceHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveGroupHandle",
+      "registered": true,
+      "direct_calls": 4,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveInteger",
+      "registered": true,
+      "direct_calls": 336,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 164,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveItemHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveLightningHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveLocationHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SavePlayerHandle",
+      "registered": true,
+      "direct_calls": 3,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveReal",
+      "registered": true,
+      "direct_calls": 33,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 171,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveSoundHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveStr",
+      "registered": true,
+      "direct_calls": 238,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 185,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveTextTagHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveTimerHandle",
+      "registered": true,
+      "direct_calls": 1,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveTriggerHandle",
+      "registered": true,
+      "direct_calls": 9,
+      "status": "needs_review"
+    },
+    {
+      "name": "SaveUnitHandle",
+      "registered": true,
+      "direct_calls": 6,
+      "status": "needs_review"
+    },
+    {
+      "name": "SelectUnit",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 843,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetAllItemTypeSlots",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1396,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetAllUnitTypeSlots",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1401,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCameraBounds",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 422,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCameraField",
+      "registered": true,
+      "direct_calls": 7,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 542,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCameraPosition",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_camera.h",
+      "line": 403,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterBlendMode",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 42,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterDuration",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 96,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterEndColor",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 87,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterEndUV",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 65,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterStartColor",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 78,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterStartUV",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 52,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterTexMapFlags",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 47,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetCineFilterTexture",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_cinefilter.h",
+      "line": 27,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetDayNightModels",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1563,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetFloatGameState",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1009,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetGamePlacement",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 247,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetHeroAgi",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 431,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetHeroInt",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 438,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetHeroStr",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 424,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetHeroXP",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 449,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetItemCharges",
+      "registered": true,
+      "direct_calls": 25,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 58,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetItemUserData",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_item.h",
+      "line": 165,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetMapDescription",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 175,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetMapFlag",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 239,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetMapMusic",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 223,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetMapName",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 171,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerAbilityAvailable",
+      "registered": true,
+      "direct_calls": 34,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 493,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerAlliance",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 43,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerColor",
+      "registered": true,
+      "direct_calls": 11,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 33,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerController",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 80,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerHandicapXP",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 442,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerName",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 86,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerRacePreference",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 69,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerRaceSelectable",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 75,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerStartLocation",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 21,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerState",
+      "registered": true,
+      "direct_calls": 114,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 500,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerTeam",
+      "registered": true,
+      "direct_calls": 9,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 15,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerTechMaxAllowed",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 447,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayerTechResearched",
+      "registered": true,
+      "direct_calls": 74,
+      "path": "games/warcraft-3/game/api/api_player.h",
+      "line": 467,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetPlayers",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 183,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetSoundChannel",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 96,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundConeAngles",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 118,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundConeOrientation",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 125,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundDistanceCutoff",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 91,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundDistances",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 112,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundDuration",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 256,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetSoundPitch",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 107,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetSoundPosition",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 132,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetSoundVolume",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 101,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetStartLocPrio",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 212,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetStartLocPrioCount",
+      "registered": true,
+      "direct_calls": 4,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 207,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTeams",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 179,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTerrainFogEx",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1538,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagColor",
+      "registered": true,
+      "direct_calls": 11,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 219,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagFadepoint",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 285,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagLifespan",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 275,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagPermanent",
+      "registered": true,
+      "direct_calls": 22,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 265,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagPos",
+      "registered": true,
+      "direct_calls": 14,
+      "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
+      "line": 436,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagPosUnit",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 230,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagText",
+      "registered": true,
+      "direct_calls": 22,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 206,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagVelocity",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 247,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTextTagVisibility",
+      "registered": true,
+      "direct_calls": 17,
+      "path": "games/warcraft-3/game/api/api_multiboard.h",
+      "line": 258,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetTimeOfDayScale",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1621,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitAbilityLevel",
+      "registered": true,
+      "direct_calls": 122,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 565,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitAnimation",
+      "registered": true,
+      "direct_calls": 337,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 347,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitAnimationByIndex",
+      "registered": true,
+      "direct_calls": 108,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 353,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitFacing",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 122,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitFacingTimed",
+      "registered": true,
+      "direct_calls": 6,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 129,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitFlyHeight",
+      "registered": true,
+      "direct_calls": 625,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 80,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitLookAt",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 400,
+      "status": "placeholder"
+    },
+    {
+      "name": "SetUnitMoveSpeed",
+      "registered": true,
+      "direct_calls": 5,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitOwner",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 250,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitPathing",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 761,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitPropWindow",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 102,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitScale",
+      "registered": true,
+      "direct_calls": 831,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 273,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitState",
+      "registered": true,
+      "direct_calls": 243,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 180,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitTimeScale",
+      "registered": true,
+      "direct_calls": 356,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 285,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitTurnSpeed",
+      "registered": true,
+      "direct_calls": 6,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitUserData",
+      "registered": true,
+      "direct_calls": 113,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 312,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitVertexColor",
+      "registered": true,
+      "direct_calls": 412,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 298,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitX",
+      "registered": true,
+      "direct_calls": 71,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetUnitY",
+      "registered": true,
+      "direct_calls": 70,
+      "status": "needs_review"
+    },
+    {
+      "name": "SetWaterBaseColor",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1552,
+      "status": "placeholder"
+    },
+    {
+      "name": "ShowInterface",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1629,
+      "status": "needs_review"
+    },
+    {
+      "name": "ShowUnit",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 154,
+      "status": "needs_review"
+    },
+    {
+      "name": "Sin",
+      "registered": true,
+      "direct_calls": 20,
+      "status": "needs_review"
+    },
+    {
+      "name": "SquareRoot",
+      "registered": true,
+      "direct_calls": 10,
+      "status": "needs_review"
+    },
+    {
+      "name": "StartSound",
+      "registered": true,
+      "direct_calls": 141,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 156,
+      "status": "needs_review"
+    },
+    {
+      "name": "StopSound",
+      "registered": true,
+      "direct_calls": 125,
+      "path": "games/warcraft-3/game/api/api_sound.h",
+      "line": 186,
+      "status": "placeholder"
+    },
+    {
+      "name": "StringCase",
+      "registered": true,
+      "direct_calls": 2,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 784,
+      "status": "needs_review"
+    },
+    {
+      "name": "StringHash",
+      "registered": true,
+      "direct_calls": 12,
+      "path": "games/warcraft-3/game/api/api_hashtable.h",
+      "line": 160,
+      "status": "needs_review"
+    },
+    {
+      "name": "StringLength",
+      "registered": true,
+      "direct_calls": 17,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 780,
+      "status": "needs_review"
+    },
+    {
+      "name": "SubString",
+      "registered": true,
+      "direct_calls": 12,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 143,
+      "status": "needs_review"
+    },
+    {
+      "name": "SuspendTimeOfDay",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1610,
+      "status": "needs_review"
+    },
+    {
+      "name": "TimerDialogDisplay",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1811,
+      "status": "needs_review"
+    },
+    {
+      "name": "TimerDialogSetTitle",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1767,
+      "status": "needs_review"
+    },
+    {
+      "name": "TimerGetElapsed",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 349,
+      "status": "needs_review"
+    },
+    {
+      "name": "TimerGetRemaining",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 353,
+      "status": "needs_review"
+    },
+    {
+      "name": "TimerStart",
+      "registered": true,
+      "direct_calls": 67,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 340,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerAddAction",
+      "registered": true,
+      "direct_calls": 427,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 601,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerAddCondition",
+      "registered": true,
+      "direct_calls": 314,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 551,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerClearActions",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 636,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerEvaluate",
+      "registered": true,
+      "direct_calls": 90,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 681,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerExecute",
+      "registered": true,
+      "direct_calls": 407,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 710,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterDeathEvent",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 461,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterDialogEvent",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 260,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterEnterRegion",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 296,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterGameStateEvent",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 243,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterPlayerChatEvent",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 445,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterPlayerEvent",
+      "registered": true,
+      "direct_calls": 8,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 341,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterPlayerUnitEvent",
+      "registered": true,
+      "direct_calls": 10,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 374,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterTimerEvent",
+      "registered": true,
+      "direct_calls": 5,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 201,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterTimerExpireEvent",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 231,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRegisterUnitEvent",
+      "registered": true,
+      "direct_calls": 7,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 504,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerRemoveAction",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 630,
+      "status": "needs_review"
+    },
+    {
+      "name": "TriggerSleepAction",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_trigger.h",
+      "line": 643,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitAddAbility",
+      "registered": true,
+      "direct_calls": 385,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1130,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitAddIndicator",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1353,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitAddItem",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 779,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitAddItemToSlotById",
+      "registered": true,
+      "direct_calls": 11,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 800,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitAddType",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 647,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitApplyTimedLife",
+      "registered": true,
+      "direct_calls": 664,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1187,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitCountBuffsEx",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 661,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitDamagePoint",
+      "registered": false,
+      "direct_calls": 0,
+      "status": "missing"
+    },
+    {
+      "name": "UnitDamageTarget",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 632,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitId",
+      "registered": true,
+      "direct_calls": 0,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitMakeAbilityPermanent",
+      "registered": true,
+      "direct_calls": 17,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1140,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitPoolAddUnitType",
+      "registered": true,
+      "direct_calls": 379,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 1322,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitRemoveAbility",
+      "registered": true,
+      "direct_calls": 119,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1135,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitRemoveBuffs",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1146,
+      "status": "placeholder"
+    },
+    {
+      "name": "UnitRemoveBuffsEx",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1152,
+      "status": "placeholder"
+    },
+    {
+      "name": "UnitRemoveItemFromSlot",
+      "registered": true,
+      "direct_calls": 3,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 830,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitResetCooldown",
+      "registered": true,
+      "direct_calls": 1,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 699,
+      "status": "needs_review"
+    },
+    {
+      "name": "UnitSuspendDecay",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_unit.h",
+      "line": 1125,
+      "status": "placeholder"
+    },
+    {
+      "name": "VersionGet",
+      "registered": true,
+      "direct_calls": 0,
+      "path": "games/warcraft-3/game/api/api_misc.h",
+      "line": 2204,
+      "status": "needs_review"
+    }
+  ]
+}

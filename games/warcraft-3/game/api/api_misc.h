@@ -587,10 +587,10 @@ uint32_t GetLearningUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
 }
 uint32_t GetLearnedSkill(jass_t *j) {
-    return jass_pushinteger(j, 0);
+    return jass_pushinteger(j, jass_getcontext(j)->learned_level ? jass_getcontext(j)->eventValue : 0);
 }
 uint32_t GetLearnedSkillLevel(jass_t *j) {
-    return jass_pushinteger(j, 0);
+    return jass_pushinteger(j, jass_getcontext(j)->learned_level);
 }
 uint32_t GetRevivableUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
@@ -1619,11 +1619,12 @@ uint32_t SetFalseTimeOfDay(jass_t *j) {
     return 0;
 }
 uint32_t SetTimeOfDayScale(jass_t *j) {
-    //float r = jass_checknumber(j, 1);
+    float scale = jass_checknumber(j, 1);
+    if (isfinite(scale) && scale >= 0.0f) level.timeofday.scale = scale;
     return 0;
 }
 uint32_t GetTimeOfDayScale(jass_t *j) {
-    return jass_pushnumber(j, 0);
+    return jass_pushnumber(j, level.timeofday.scale);
 }
 uint32_t ShowInterface(jass_t *j) {
     bool flag = jass_checkboolean(j, 1);

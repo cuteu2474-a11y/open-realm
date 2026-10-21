@@ -464,3 +464,9 @@ $(RENDERER_LIB): $(WC3_DIR)/common/wc3_coords.h renderer/r_game.h
 $(BIN_DIR)/test_renderer_model$(EXE_EXT) $(BIN_DIR)/test_renderer_shadows$(EXE_EXT): $(wildcard vendor/gl_shader/*.[ch])
 
 $(eval $(call test_schema,test-gl-shader,$(wildcard vendor/gl_shader/*.[ch]),$(TEST_CFLAGS),$(BIN_DIR)/test_gl_shader$(EXE_EXT),tests/test_runner.c tests/test_gl_shader.c shared/test.c,$(LIBS),))
+
+.PHONY: test-ordr-native-audit
+test-ordr-native-audit:
+	@python3 -m unittest discover -s tests -p test_ordr_native_audit.py
+
+test: test-ordr-native-audit

@@ -930,6 +930,7 @@ void G_SpawnEntities(void) {
     G_FowShutdown();
     G_BlightShutdown();
     memset(&level, 0, sizeof(level));
+    level.timeofday.scale = 1.0f;
     G_ResetSelectionSoundState();
     G_CommandErrorReset();
     G_ResetHeroPassiveCaches();

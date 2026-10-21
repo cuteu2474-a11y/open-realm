@@ -564,6 +564,26 @@ trigger_t *G_AllocJassTrigger(void) {
     memset(trigger, 0, sizeof(*trigger)); return trigger;
 }
 
+void G_DestroyJassTrigger(trigger_t *trigger) {
+    if (!trigger || trigger->destroyed) return;
+    trigger->destroyed = trigger->disabled = true;
+    FOR_EACH_EVENT(event) if (event->trigger == trigger) {
+        if (event->owns_timer && event->timer) G_TimerDestroy(event->timer);
+        /* Retired registration slots may be reused before the queue drains. */
+        FOR_LOOP(i, MAX_EVENT_QUEUE)
+            if (level.events.queue[i].responseTo == event) level.events.queue[i].responseTo = NULL;
+        if (event->variable) gi.MemFree((void *)event->variable);
+        event->variable = NULL; event->trigger = NULL; event->timer = NULL;
+        event->inuse = false;
+        if (event->handle_generation == EVENT_HANDLE_GENERATION_MAX) event->generation_exhausted = true;
+        else event->handle_generation++;
+    }
+    DELETE_LIST(gTriggerAction_t, trigger->actions, gi.MemFree);
+    DELETE_LIST(gTriggerCondition_t, trigger->conditions, gi.MemFree);
+    trigger->actions = NULL;
+    trigger->conditions = NULL;
+}
+
 bool G_RegionContains(region_t const *region, vec2_t const *point) {
     FOR_LOOP(i, region->num_rects) {
         if (Box2_containsPoint(region->rects+i, point)) {

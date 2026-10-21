@@ -174,8 +174,8 @@ static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
     if (evt && level.vm && jass_functionbyname(level.vm, "CUO") &&
         jass_functionbyname(level.vm, "CUW") &&
         unit->s.player == PLAYER_NEUTRAL_PASSIVE &&
-        (unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u ||
-         unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u)) {
+        ((unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u) ||
+         (unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u))) {
         char info[200];
         snprintf(info, sizeof(info),
                  "player=%u unit=%u type=%u rawcode=0x%08x a900=%u queued=%u",

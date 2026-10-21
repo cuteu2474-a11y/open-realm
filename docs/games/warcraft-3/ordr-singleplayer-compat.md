@@ -2,7 +2,7 @@
 
 Branch: `feature/ordr-singleplayer-compat`. This work is intentionally separate from `main`.
 
-## Added in source (NOT run or built yet)
+## Source implementation (device integration still incomplete)
 
 - All 43 native names explicitly declared by the map: 29 Dz, 12 JN, 2 EX have native registrations.
 - The 2 EX natives forward to existing Warcraft III unit APIs.
@@ -19,14 +19,14 @@ Branch: `feature/ordr-singleplayer-compat`. This work is intentionally separate 
 - DZ frame state has **no WC3 HUD renderer adapter**. Creating frames in JASS does not yet display them. The client UI surface and touch/click callback routing must be connected.
 - DZ key-dispatch function is not wired to actual game input. Registered events are inert without that adapter.
 - TOC/FDF template loading retains file references but does not yet instantiate template child frames. `DzFrameFindByName` can only find frames explicitly created in the local registry.
-- Some stock Warcraft III natives outside this map's initial missing-name list remain partial/empty. In particular, audio stop/fade and animation-by-index need native subsystem work.
+- Some stock Warcraft III natives outside this map's initial missing-name list remain partial/empty. In particular, audio stop/fade still needs native subsystem work. Animation-by-index now resolves actual model sequences.
 - JavaScript/vJASS to Lua translation has not been attempted; current code uses the original JASS runtime.
 - Local JN profile serialization is not a replacement for a network account, and was not exercised on an iPad.
 - The exact map configuration, renderer, input, persistence and frame lifecycle have not been tested.
 
 ## Test policy
 
-Per the user's request, do not build, run, or device-test until the function-implementation pass is complete. Registration is **not** proof of semantic correctness.
+The user requested implementation first and independent verification. Run headless regression tests during implementation. Successful compilation is not working iPad gameplay; registration is **not** proof of semantic correctness. See [native handoff](ordr-native-handoff.md) for verified changes, remaining functions and continuation commands.
 
 ### 2026-10-20 — physical-touch arbitration and source-asset audit
 
@@ -66,3 +66,13 @@ Implemented the six `IssueNeutral{Immediate,Point,Target}Order{,ById}` variants 
 - 그룹 생성/필터 2종과 숫자 ID 그룹 주문 4종을 실제 게임의 유닛·건물 명령 엔진에 연결했다.
 - `GetItemPlayer`, `GetOrderTargetItem`은 아이템 소유자와 JASS 이벤트 대상 아이템을 실제 객체에서 조회한다.
 - 전체 함수 등록표는 `api_module.c`의 약 1,289개. 등록과 실제 구현은 분리해 판단한다.
+
+### 2026-10-22 — event routing and native lifecycle
+
+Implemented `GetTriggerEventId`, `GetLearnedSkill`, `GetLearnedSkillLevel`,
+`SetTimeOfDayScale`, `GetTimeOfDayScale`, `SetUnitAnimationByIndex`, and
+`DestroyTrigger`. Enum `GetHandleId` now returns the scalar value required by
+ORDR’s `GE[GetHandleId(GetTriggerEventId())]` router. Conditions, nested calls,
+waits and save/load retain the original response context. The client select
+command is exercised through the real frame scheduler. Full headless tests pass;
+iPad touch and complete ORDR gameplay remain unverified. See the handoff.

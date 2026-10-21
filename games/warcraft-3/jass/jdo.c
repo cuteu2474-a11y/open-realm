@@ -22,7 +22,7 @@
 #define INF_LOOP_PROTECTION 1000000  /* SC2 Galaxy scripts have large but legitimate loops */
 #define SYNTAX_C_OPERATORS 1 // bitmask; enables Galaxy symbolic logic and shift operators
 #define SYNTAX_INCLUDES    2 // bitmask; enables Galaxy include preprocessing
-#define BZ_JASS_SNAPSHOT_VERSION 8 // format version; v8 persists GetEnumUnit callback context
+#define BZ_JASS_SNAPSHOT_VERSION 9 // v9 persists event identity and learned rank
 #define BZ_JASS_SNAPSHOT_MAX_COUNT (1u << 20) // records; bounds allocations and list walks from corrupt snapshots
 #define BZ_JASS_SNAPSHOT_MAX_STRING (1u << 20) // bytes; bounds strings from corrupt snapshots
 
@@ -31,6 +31,7 @@ typedef struct {
     edict_t *unit;
     edict_t *source;
     int32_t value;
+    uint32_t event_id, learned_level;
     uint32_t dialog_id, dialog_button_id;
     cstring_t chat_text, chat_matched;
     player_t *event_player;
@@ -229,7 +230,7 @@ JASS_CMPOP(__lt, <);
 
 static bool jass_valuehandle(cstring_t type) {
     static cstring_t const value_handles[] = {
-        "race", "alliancetype", "racepreference", "igamestate", "fgamestate", "playerstate",
+        "eventid", "race", "alliancetype", "racepreference", "igamestate", "fgamestate", "playerstate",
         "playergameresult", "unitstate", "gameevent", "playerevent", "playerunitevent", "widgetevent",
         "dialogevent", "unitevent", "limitop", "unittype", "gamespeed", "placement", "startlocprio",
         "gamedifficulty", "aidifficulty", "gametype", "mapflag", "mapvisibility", "mapsetting", "mapdensity", "mapcontrol",
@@ -237,6 +238,12 @@ static bool jass_valuehandle(cstring_t type) {
         "texmapflags", "fogstate", "effecttype", "itemtype"
     };
     FOR_LOOP(i, sizeof(value_handles) / sizeof(value_handles[0])) if (!strcmp(type, value_handles[i])) return true;
+    return false;
+}
+
+static bool jass_eventtype(jassType_t const *type) {
+    for (; type; type = type->inherit)
+        if (!strcmp(type->name, "eventid")) return true;
     return false;
 }
 
@@ -255,6 +262,8 @@ static bool var_eq(jassVar_t const *a, jassVar_t const *b) {
         case jasstype_cfunction: return !memcmp(a->value, b->value, sizeof(handle_t));
         case jasstype_handle:
             if (a->value == b->value) return true;
+            if (jass_eventtype(a->type) && jass_eventtype(b->type))
+                return !memcmp(a->value, b->value, sizeof(uint32_t));
             if (a->type != b->type) return false;
             /* Galaxy opaque types have no JASS declaration; unequal identities must not dereference a null type. */
             return a->type && jass_valuehandle(a->type->name) && !memcmp(a->value, b->value, sizeof(uint32_t));
@@ -779,7 +788,7 @@ jassFunc_t const *jass_functionbyname(jass_t *j, cstring_t name) { return find_f
 void jass_settimercontext(handle_t timer) { currenttimer = timer; }
 
 bool jass_triggerdisabled(trigger_t *trigger) {
-    return trigger ? trigger->disabled : false;
+    return trigger ? trigger->destroyed || trigger->disabled : false;
 }
 
 /* =========================================================================
@@ -1319,7 +1328,7 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
      * main ends with ConditionalTriggerExecute(ve), where ve stays null.
      * TriggerEvaluate(null) must fail cleanly rather than dereferencing
      * params->trigger->conditions and crashing the app at game time zero. */
-    if (!params || !params->trigger) {
+    if (!params || !params->trigger || params->trigger->destroyed) {
         jass_ordr_log_event(j, "NULL_TRIGGER_EVAL", "null trigger handle ignored");
         return false;
     }
@@ -1337,6 +1346,8 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.unit = params->unit;
         tmp_state->context.source = params->source;
         tmp_state->context.eventValue = params->value;
+        tmp_state->context.event_id = params->event_id;
+        tmp_state->context.learned_level = params->learned_level;
         tmp_state->context.dialog_id = params->dialog_id;
         tmp_state->context.dialog_button_id = params->dialog_button_id;
         snprintf(tmp_state->context.chat_text, sizeof(tmp_state->context.chat_text), "%s", params->chat_text ? params->chat_text : "");
@@ -1345,13 +1356,15 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.hasPoint = params->has_point;
         tmp_state->context.playerState = player;
         tmp_state->context.localPlayerState = currentplayer;
-        tmp_state->context.timer = currenttimer;
+        tmp_state->context.timer = params->timer ? params->timer : currenttimer;
         tmp_state->context.region = params->region ? params->region : jass_getcontext(j)->region;
         jass_pushfunction(tmp_state, cond->expr);
         edict_t *previous_unit = currentunit;
         currentunit = params->unit;
         uint32_t result_count = jass_call(tmp_state, 0);
         currentunit = previous_unit;
+        /* A condition may destroy its own list: do not dereference cond again. */
+        if (params->trigger->destroyed) { jass_free(tmp_state); return false; }
         /* ORDR registers initialization procedures that return nothing as
          * trigger conditions. They still have required side effects, so a
          * missing boolean result must not suppress later registered
@@ -1370,17 +1383,24 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
     return all_true;
 }
 
+static jassTriggerContextParams_t jass_inherittriggercontext(jass_t *j, trigger_t *trigger, edict_t *unit) {
+    jassTriggerContextParams_t p = { .trigger = trigger, .unit = unit };
+    jassContext_t const *c = jass_getcontext(j);
+    if (c && c->unit == unit) {
+        p.source = c->source; p.value = c->eventValue;
+        p.event_id = c->event_id; p.learned_level = c->learned_level;
+        p.event_player = c->playerState;
+        p.dialog_id = c->dialog_id; p.dialog_button_id = c->dialog_button_id;
+        p.chat_text = c->chat_text; p.chat_matched = c->chat_matched;
+        p.point = &c->point; p.has_point = c->hasPoint;
+        p.timer = c->timer; p.region = c->region;
+    }
+    return p;
+}
+
 bool jass_evaluatetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    jassContext_t const *caller = jass_getcontext(j);
-    /* Nested TriggerEvaluate(J8) in ORDR's BC6 runs while an actual human
-     * clicks a Neutral Passive menu unit. Preserve GetTriggerPlayer() from
-     * the outer selection event: recomputing from unit ownership incorrectly
-     * turns the triggering player into Neutral Passive and fails Bcw(). */
-    player_t *trigger_player = caller && caller->unit == unit
-        ? caller->playerState : NULL;
-    return jass_evaluatetriggercontext(j, &(jassTriggerContextParams_t){
-        .trigger = trigger, .unit = unit, .event_player = trigger_player
-    });
+    jassTriggerContextParams_t p = jass_inherittriggercontext(j, trigger, unit);
+    return jass_evaluatetriggercontext(j, &p);
 }
 
 /* Scratch VMs are heap allocated: the two 4096-slot hash tables and value
@@ -1454,7 +1474,7 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
     /* TriggerExecute(null) is a no-op in JASS, not a reason to crash. */
-    if (!params || !params->trigger) return;
+    if (!params || !params->trigger || params->trigger->destroyed) return;
     if (params->trigger->execution_count < UINT32_MAX)
         params->trigger->execution_count++;
     jasscoroutine_t *first = NULL, *last = NULL;
@@ -1466,6 +1486,8 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
                                   .unit = params->unit,
                                   .source = params->source,
                                   .eventValue = params->value,
+                                  .event_id = params->event_id,
+                                  .learned_level = params->learned_level,
                                   .dialog_id = params->dialog_id,
                                   .dialog_button_id = params->dialog_button_id,
                                   .point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f },
@@ -1505,7 +1527,8 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
 }
 
 void jass_executetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    jass_executetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit }, true);
+    jassTriggerContextParams_t p = jass_inherittriggercontext(j, trigger, unit);
+    jass_executetriggercontext(j, &p, true);
 }
 
 static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
@@ -1513,7 +1536,7 @@ static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const 
      * evaluation/execution is separate: Blizzard.j queue helpers evaluate a
      * trigger before executing it, and maps can intentionally queue disabled
      * triggers for later scripted execution. */
-    if (!params->trigger || params->trigger->disabled)
+    if (!params->trigger || params->trigger->destroyed || params->trigger->disabled)
         return false;
     if (!jass_evaluatetriggercontext(j, params))
         return false;
@@ -1534,6 +1557,7 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
     if (!event) return false;
     return jass_calltriggercontext(j, &(jassTriggerContextParams_t){
         .trigger = trigger, .unit = event->edict, .source = event->source, .value = event->value,
+        .event_id = (uint32_t)event->type + 1, .learned_level = event->learned_level,
         .dialog_id = event->dialog_id, .dialog_button_id = event->button_id,
         .chat_text = event->type == EVENT_PLAYER_CHAT ? event->chat_text : NULL,
         .chat_matched = event->type == EVENT_PLAYER_CHAT && event->responseTo ? event->responseTo->chat_match : NULL,
@@ -1546,7 +1570,8 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
 
 bool jass_calltriggerwithtimer(jass_t *j, trigger_t *trigger, handle_t timer) {
     bool queued;
-    jassTriggerContextParams_t params = { .trigger = trigger, .timer = timer, .timer_pending = true };
+    jassTriggerContextParams_t params = { .trigger = trigger, .timer = timer, .timer_pending = true,
+        .event_id = EVENT_GAME_TIMER_EXPIRED + 1 };
     currenttimer = timer;
     queued = jass_calltriggercontext(j, &params);
     currenttimer = NULL;
@@ -1995,6 +2020,15 @@ jassFunc_t const *jass_checkcode(jass_t *j, int index) {
     jassVar_t const *var = jass_stackvalue(j, index);
     assert_type(var, jasstype_code);
     return var->value;
+}
+
+/* Value handles use their enum payload as GetHandleId, including event zero.
+ * Object handles still use their registry identity; never hash enum storage. */
+bool jass_enumvalue(jass_t *j, int index, uint32_t *value) {
+    jassVar_t const *var = jass_stackvalue(j, index);
+    if (!var->value || !var->type || !jass_valuehandle(var->type->name)) return false;
+    *value = *(uint32_t const *)var->value;
+    return true;
 }
 
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type) {
@@ -3045,6 +3079,8 @@ static bool jass_snapshot_writecontext(jassSnapshot_t *snapshot, jassContext_t c
     };
     if (!jass_snapshot_writestr(snapshot, jass_functionname(context->func)) ||
         !jass_snapshot_io(snapshot, (void *)&context->eventValue, sizeof(context->eventValue)) ||
+        !jass_snapshot_io(snapshot, (void *)&context->event_id, sizeof(context->event_id)) ||
+        !jass_snapshot_io(snapshot, (void *)&context->learned_level, sizeof(context->learned_level)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->point, sizeof(context->point)) ||
@@ -3072,6 +3108,8 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
     SAFE_DELETE(func, jass_free);
     if (has_func && !context->func) return false;
     if (!jass_snapshot_io(snapshot, &context->eventValue, sizeof(context->eventValue)) ||
+        !jass_snapshot_io(snapshot, &context->event_id, sizeof(context->event_id)) ||
+        !jass_snapshot_io(snapshot, &context->learned_level, sizeof(context->learned_level)) ||
         !jass_snapshot_io(snapshot, &context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, &context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, &context->point, sizeof(context->point)) ||

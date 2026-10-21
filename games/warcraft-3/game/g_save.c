@@ -117,7 +117,7 @@ static uint32_t const save_commit = MAKEFOURCC('W', '3', 'O', 'K');
 /* Version 87 persists creep guard return recovery state. */
 /* Version 88 stores a single creep guard lifecycle phase. */
 /* Version 89 retains entity identity for ability-owned point-spell approaches. */
-static uint32_t const save_version = 89;
+static uint32_t const save_version = 90;
 #define SAVE_STREAM_BUFFER (1u << 20) // bytes; save files are several MB of field writes, so a large stdio buffer avoids per-4 KB syscalls
 #define MAX_SAVE_STRING (1u << 20) // bytes; bounds quest-string allocations from corrupt saves
 #define MAX_SAVE_GROUP_HANDLES 65536u // corrupt-save bound only; runtime group registry itself grows dynamically
@@ -322,6 +322,7 @@ static field_t const lightning_fields[] = {
 
 static field_t const save_event_fields[] = {
     F(gevent_s, type, F_INT),
+    F(gevent_s, owns_timer, F_INT),
     F(gevent_s, subject, F_EDICT, 0, FIELD_NONE),
     F(gevent_s, subject_spawn_time, F_INT),
     F(gevent_s, subject_spawn_tracked, F_INT),
@@ -363,6 +364,7 @@ static field_t const save_game_event_fields[] = {
     F(gameevent_s, source_spawn_time, F_INT),
     F(gameevent_s, source_spawn_tracked, F_INT),
     F(gameevent_s, value, F_INT),
+    F(gameevent_s, learned_level, F_INT),
     F(gameevent_s, point, F_VECTOR),
     F(gameevent_s, has_point, F_INT),
     F(gameevent_s, responseTo, F_EVENT, 0, FIELD_NONE),
@@ -381,6 +383,7 @@ static field_t const group_fields[] = {
 
 static field_t const trigger_fields[] = {
     F(gtrigger_s, disabled, F_INT),
+    F(gtrigger_s, destroyed, F_INT),
     F(gtrigger_s, actions, F_FUNCTION_LIST),
     F(gtrigger_s, conditions, F_FUNCTION_LIST),
     { NULL, 0, 0, 0, 0, 0 }
@@ -521,6 +524,7 @@ static field_t const level_fields[] = {
     F(level_locals, stock.item_slots, F_INT),
     F(level_locals, stock.unit_slots, F_INT),
     F(level_locals, timeofday.elapsed, F_FLOAT),
+    F(level_locals, timeofday.scale, F_FLOAT),
     F(level_locals, timeofday.pending, F_FLOAT),
     F(level_locals, timeofday.pending_valid, F_INT),
     F(level_locals, timeofday.suspended, F_INT),
@@ -962,6 +966,7 @@ field_t edict_fields[] = {
     F(edict_s, mana_regen_bonus, F_FLOAT),
     F(edict_s, animation_speed, F_FLOAT),
     F(edict_s, animation_override, F_INT),
+    F(edict_s, animation_index, F_INT),
     F(edict_s, animation, F_IGNORE, 0, FIELD_RUNTIME),
     F(edict_s, currentmove, F_MMOVE),
     F(edict_s, stand, F_CFUNCTION),
@@ -2067,7 +2072,9 @@ static bool ReadEdict(FILE *f, edict_t *ent) {
         G_BindEntityData(ent);
         /* animation is a process-owned model pointer and is deliberately not serialized.
          * Re-resolve it from the persisted logical request plus per-unit animation tags. */
-        if (ent->animation_request[0])
+        if (ent->animation_index)
+            ent->animation = G_GetAnimationByIndex(ent->s.model, (int32_t)ent->animation_index - 1);
+        else if (ent->animation_request[0])
             ent->animation = G_GetUnitAnimation(ent, ent->animation_request);
     }
     return true;
