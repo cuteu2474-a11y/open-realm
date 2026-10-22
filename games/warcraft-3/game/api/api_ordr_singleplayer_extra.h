@@ -63,6 +63,10 @@ uint32_t DzFrameSetPoint(jass_t *j) {
     e=&ordr_frame_extra[id];
     e->anchors[point]=(ordr_anchor_t){1,point,relative,relative_point,x,y};
     if(e->anchor_count<point+1)e->anchor_count=point+1;
+    if(ordr_frames[id].ui && point<=FRAMEPOINT_BOTTOMRIGHT && relative_point>=0 &&
+       relative_point<=FRAMEPOINT_BOTTOMRIGHT)
+        UI_SetPoint(ordr_frames[id].ui,point,ordr_parent_ui(relative),relative_point,x,y);
+    ordr_frames_dirty=true;
     return 0;
 }
 uint32_t DzFrameSetAbsolutePoint(jass_t *j) {
@@ -73,6 +77,9 @@ uint32_t DzFrameSetAbsolutePoint(jass_t *j) {
     e=&ordr_frame_extra[id];
     e->anchors[point]=(ordr_anchor_t){1,point,0,0,x,y};
     if(e->anchor_count<point+1)e->anchor_count=point+1;
+    if(ordr_frames[id].ui && point<=FRAMEPOINT_BOTTOMRIGHT)
+        UI_SetPoint(ordr_frames[id].ui,point,NULL,FRAMEPOINT_BOTTOMLEFT,x,y);
+    ordr_frames_dirty=true;
     return 0;
 }
 uint32_t DzFrameClearAllPoints(jass_t *j) {
@@ -80,6 +87,11 @@ uint32_t DzFrameClearAllPoints(jass_t *j) {
     if(ordr_frame(id)){
         memset(ordr_frame_extra[id].anchors,0,sizeof(ordr_frame_extra[id].anchors));
         ordr_frame_extra[id].anchor_count=0;
+        if(ordr_frames[id].ui){
+            memset(&ordr_frames[id].ui->Points,0,sizeof(ordr_frames[id].ui->Points));
+            ordr_frames[id].ui->AnyPointsSet=false;
+        }
+        ordr_frames_dirty=true;
     }
     return 0;
 }
@@ -92,12 +104,28 @@ uint32_t DzFrameSetFont(jass_t *j) {
         ordr_frame_extra_t *e=&ordr_frame_extra[id];
         snprintf(e->font,sizeof(e->font),"%s",file?file:"");
         e->font_height=h;e->font_flag=flag;
+        if(ordr_frames[id].ui){
+            ordr_frames[id].ui->Font.Size=h;
+            ordr_frames[id].ui->Font.Index=UI_FdfFontIndex(file,(uint32_t)(h*UI_FONT_COORD_SCALE));
+            ordr_frames_dirty=true;
+        }
     }
     return 0;
 }
 uint32_t DzFrameSetTextAlignment(jass_t *j) {
     int id=jass_checkinteger(j,1),align=jass_checkinteger(j,2);
-    if(ordr_frame(id))ordr_frame_extra[id].text_align=align;
+    if(ordr_frame(id)){
+        ordr_frame_extra[id].text_align=align;
+        if(ordr_frames[id].ui && align>=0 && align<=10 && (align&3)!=3){
+            /* Dz FRAME_ALIGN is a three-by-three point grid (0/1/2,
+             * 4/5/6, 8/9/10); FDF font justification has different enums. */
+            static uiFontJustificationH_t const h[]={FONT_JUSTIFYLEFT,FONT_JUSTIFYCENTER,FONT_JUSTIFYRIGHT};
+            static uiFontJustificationV_t const v[]={FONT_JUSTIFYTOP,FONT_JUSTIFYMIDDLE,FONT_JUSTIFYBOTTOM};
+            ordr_frames[id].ui->Font.Justification.Horizontal=h[align&3];
+            ordr_frames[id].ui->Font.Justification.Vertical=v[align>>2];
+            ordr_frames_dirty=true;
+        }
+    }
     return 0;
 }
 uint32_t DzFrameSetPriority(jass_t *j) {
@@ -113,16 +141,49 @@ uint32_t DzFrameSetModel(jass_t *j) {
         ordr_frame_extra_t *e=&ordr_frame_extra[id];
         snprintf(e->model,sizeof(e->model),"%s",model?model:"");
         e->model_type=kind;e->model_flag=flag;
+        if(ordr_frames[id].ui){
+            ordr_frames[id].ui->Portrait.model=UI_LoadModel(model,false);
+            ordr_frames_dirty=true;
+        }
     }
     return 0;
 }
 uint32_t DzLoadToc(jass_t *j) {
     cstring_t toc=jass_checkstring(j,1);
-    if(toc && *toc)ordr_frame_trace("load-toc",0,toc);
-    if(toc && *toc && ordr_toc_count<32)
-        snprintf(ordr_tocs[ordr_toc_count++],sizeof(ordr_tocs[0]),"%s",toc);
-    /* TOC parsing and materializing frame templates require the renderer
-     * adapter; keeping its path here prevents silently losing the request. */
+    uint32_t size=0;
+    void *data;
+    char *copy,*line;
+    if(!toc || !*toc)return 0;
+    data=gi.ReadFile(toc,&size);
+    if(!data || !size || size>1024*1024){
+        fprintf(stderr,"ORDR DzLoadToc: cannot read %s (%u bytes)\n",toc,(unsigned)size);
+        if(data)gi.MemFree(data);
+        return 0;
+    }
+    copy=gi.MemAlloc(size+1);
+    memcpy(copy,data,size);copy[size]='\0';
+    gi.MemFree(data);
+    /* A TOC lists actual archive-relative FDF files, not a UI template name.
+     * UI_EnsureFDF caches the data and shares its parser with the stock HUD. */
+    for(line=copy;line<copy+size;){
+        char *end=strpbrk(line,"\r\n"),*start=line,*last;
+        if(end){*end++='\0';while(*end=='\r'||*end=='\n')end++;}
+        else end=copy+size;
+        if((unsigned char)start[0]==0xef && (unsigned char)start[1]==0xbb &&
+           (unsigned char)start[2]==0xbf)start+=3;
+        while(*start==' '||*start=='\t')start++;
+        last=start+strlen(start);
+        while(last>start && (last[-1]==' '||last[-1]=='\t'))*--last='\0';
+        if(*start && *start!='#' && strncmp(start,"//",2)){
+            for(char *p=start;*p;p++)if(*p=='/')*p='\\';
+            if(!UI_EnsureFDF(start))
+                fprintf(stderr,"ORDR DzLoadToc: missing FDF %s (from %s)\n",start,toc);
+        }
+        line=end;
+    }
+    gi.MemFree(copy);
+    ordr_frame_trace("load-toc",0,toc);
+    if(ordr_toc_count<32)snprintf(ordr_tocs[ordr_toc_count++],sizeof(ordr_tocs[0]),"%s",toc);
     return 0;
 }
 uint32_t DzFrameSetScriptByCode(jass_t *j) {
@@ -133,6 +194,12 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
         ordr_frame_trace("register-callback",id,ordr_frame(id)->name);
         ordr_frame_extra[id].callbacks[event]=callback;
         ordr_frame_extra[id].callback_sync[event]=(unsigned char)sync;
+        if(event==1 && ordr_frames[id].ui){
+            /* The universal client reports actual button clicks via OnClick;
+             * the game command validates the source before dispatching JASS. */
+            UI_SetOnClick(ordr_frames[id].ui,"dzframe %d",id);
+            ordr_frames_dirty=true;
+        }
     }
     return 0;
 }
@@ -237,6 +304,61 @@ void ORDR_DispatchKeyEvent(jass_t *j,int key,int status) {
 }
 uint32_t DzGetTriggerKeyPlayer(jass_t *j){
     return jass_pushlighthandle(j,ordr_last_key_player?ordr_last_key_player:currentplayer,"player");
+}
+
+/* Retire map-owned handles before UI_ResetHud clears their FDF backing pool.
+ * A prior map's callbacks must never target a replacement map's JASS VM. */
+void ORDR_DzReset(void) {
+    memset(ordr_frames,0,sizeof(ordr_frames));
+    memset(ordr_frame_extra,0,sizeof(ordr_frame_extra));
+    memset(ordr_sync_handlers,0,sizeof(ordr_sync_handlers));
+    memset(ordr_key_bindings,0,sizeof(ordr_key_bindings));
+    ordr_next_frame=2;
+    ordr_frame_trace_count=0;
+    ordr_frames_dirty=false;
+    ordr_last_ui_frame=0;
+    ordr_last_ui_player=ordr_last_key_player=ordr_sync_player=NULL;
+    ordr_sync_handler_count=ordr_sync_depth=ordr_key_binding_count=0;
+    ordr_toc_count=0;
+}
+
+/* The game materializes scripted FDF roots using the existing svc_layout
+ * serializer. UI text, texture and anchors are evaluated before transmission;
+ * the universal client does not need to know what a DzAPI function is. */
+void ORDR_DzRenderFrames(void) {
+    ordr_frame_t *root=ordr_frame(1);
+    bool emitted=false;
+    if(!ordr_frames_dirty || !root || !root->ui || ordr_next_frame<=2)return;
+    FOR_LOOP(i,game.max_clients) {
+        gameClient_t *client=&game.clients[i];
+        if(!client->connected)continue;
+        edict_t *ent=G_GetPlayerEntityByNumber(client->ps.number);
+        if(!ent || !ent->client)continue;
+        UI_SetCurrentClient(ent->client);
+        UI_WriteLayout(ent,root->ui,LAYER_GAME_3);
+        UI_SetCurrentClient(NULL);
+        emitted=true;
+    }
+    if(emitted)ordr_frames_dirty=false;
+}
+
+/* Only a live, visible, enabled clickable frame may forward client input into
+ * the current script. This prevents fabricated/stale button handles from
+ * calling registered JASS code outside the actual displayed frame tree. */
+void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
+    ordr_frame_t *f=ordr_frame(handle);
+    player_t *old;
+    if(!ent || !ent->client || !ent->client->connected || !level.vm || !G_IsSinglePlayer() ||
+       !f || !f->ui || !ordr_frame_extra[handle].callbacks[1])return;
+    for(int p=(int)handle;p>0;){
+        ordr_frame_t *ancestor=ordr_frame(p);
+        if(!ancestor || !ancestor->visible || !ancestor->enabled)return;
+        p=ancestor->parent;
+    }
+    old=currentplayer;
+    currentplayer=&ent->client->ps;
+    ORDR_DispatchFrameEvent(level.vm,(int)handle,1);
+    currentplayer=old;
 }
 
 /* Solo profile backend: isolates profiles by user/character and map in

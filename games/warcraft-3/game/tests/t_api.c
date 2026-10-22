@@ -57,6 +57,166 @@ static player_t *test_player(int idx) {
     return &game.clients[idx].ps;
 }
 
+/* DzAPI names and TOC imports must resolve the original FDF template tree;
+ * returning a synthetic handle with no child frames left real ORDR UI code inert. */
+static __typeof__(gi.ReadFile) dz_saved_read_file;
+static void *dz_test_read_file(cstring_t name, uint32_t *size) {
+    static char const toc[] = "// map UI\r\n  UI\\FrameDef\\UI\\ScriptDialog.fdf  \r\n";
+    if (!strcmp(name, "war3mapImported\\ordr_test.toc")) {
+        void *copy = gi.MemAlloc(sizeof(toc));
+        memcpy(copy, toc, sizeof(toc));
+        *size = sizeof(toc) - 1;
+        return copy;
+    }
+    return dz_saved_read_file(name, size);
+}
+
+TEST(wc3_api, dz_toc_and_frame_creation_find_real_template_children) {
+    setup_test_world();
+    UI_ClearTemplates();
+    dz_saved_read_file = gi.ReadFile;
+    gi.ReadFile = dz_test_read_file;
+    T_ASSERT(run_test_jass(
+        "native DzLoadToc takes string path returns nothing\n"
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrame takes string name, integer parent, integer id returns integer\n"
+        "native DzCreateFrameByTagName takes string frameType, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameFindByName takes string name, integer id returns integer\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer root = DzGetGameUI()\n"
+        "  local integer choice\n"
+        "  local integer tagged\n"
+        "  local integer duplicate\n"
+        "  call DzLoadToc(\"war3mapImported\\\\ordr_test.toc\")\n"
+        "  set choice = DzCreateFrame(\"ScriptDialog\", root, 73)\n"
+        "  call BJassAssert(choice != 0, \"DzCreateFrame has no handle\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ScriptDialog\", 73) == choice, \"template root missing\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ScriptDialogText\", 73) != 0, \"template child missing\")\n"
+        "  set tagged = DzCreateFrameByTagName(\"BACKDROP\", \"ordrTaggedFrame\", root, \"\", 91)\n"
+        "  call BJassAssert(tagged != 0, \"tag frame has no handle\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ordrTaggedFrame\", 91) == tagged, \"tag name was ignored\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"BACKDROP\", 91) == 0, \"type used as name\")\n"
+        "  set duplicate = DzCreateFrameByTagName(\"BACKDROP\", \"ordrTaggedFrame\", root, \"\", 91)\n"
+        "  call BJassAssert(DzFrameFindByName(\"ordrTaggedFrame\", 91) == duplicate, \"newest name ignored\")\n"
+        "endfunction\n"));
+    gi.ReadFile = dz_saved_read_file;
+    UI_ClearTemplates();
+}
+
+static uint32_t dz_written_frames, dz_written_backdrops, dz_written_texts, dz_written_unicasts, dz_textured_backdrops;
+static bool dz_layout_layer_pending;
+static int32_t dz_layout_layer;
+static void dz_test_write(pfWriteType_t type, void const *value) {
+    if(!value)return;
+    if(type==PF_BYTE){
+        int32_t value_byte=*(int32_t const *)value;
+        if(dz_layout_layer_pending){dz_layout_layer=value_byte;dz_layout_layer_pending=false;}
+        else if(value_byte==svc_layout)dz_layout_layer_pending=true;
+        return;
+    }
+    if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
+    uiFrame_t const *frame=value;
+    dz_written_frames++;
+    if(frame->flags.type==FT_BACKDROP && frame->size.width>0.09f){
+        dz_written_backdrops++;
+        if(frame->buffer.data && ((uiBackdrop_t const *)frame->buffer.data)->Background)dz_textured_backdrops++;
+    }
+    if(frame->flags.type==FT_TEXT && frame->text && !strcmp(frame->text,"ORDR sample"))dz_written_texts++;
+}
+static void dz_test_unicast(edict_t *ent) { (void)ent; dz_written_unicasts++; }
+
+TEST(wc3_api, dz_frames_emit_real_ui_payloads) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    dz_written_frames=dz_written_backdrops=dz_written_texts=dz_written_unicasts=dz_textured_backdrops=0;
+    dz_layout_layer_pending=false;
+    dz_layout_layer=-1;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetSize takes integer frame, real width, real height returns nothing\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetTexture takes integer frame, string path, integer tiled returns nothing\n"
+        "native DzFrameSetAbsolutePoint takes integer frame, integer point, real x, real y returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer root = DzGetGameUI()\n"
+        " local integer background = DzCreateFrameByTagName(\"BACKDROP\", \"background\", root, \"\", 0)\n"
+        " local integer title = DzCreateFrameByTagName(\"TEXT\", \"title\", root, \"\", 0)\n"
+        " call DzFrameSetSize(background, 0.12, 0.06)\n"
+        " call DzFrameSetTexture(background, \"Textures\\\\TestBackdrop.blp\", 0)\n"
+        " call DzFrameSetAbsolutePoint(background, 8, 0.04, 0.05)\n"
+        " call DzFrameSetSize(title, 0.12, 0.03)\n"
+        " call DzFrameSetText(title, \"ORDR sample\")\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    /* Drive the actual 100ms game scheduler, which owns dirty Dz UI flushes. */
+    level.started=true;
+    level.scriptsStarted=true;
+    globals.RunFrame();
+    uint32_t first_backdrops=dz_written_backdrops;
+    level.time+=FRAMETIME;
+    globals.RunFrame();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(dz_written_frames>=3);
+    T_EQ(dz_written_backdrops,1u);
+    T_EQ(dz_written_backdrops,first_backdrops);
+    T_EQ(dz_textured_backdrops,1u);
+    T_EQ(dz_written_texts,1u);
+    T_ASSERT(dz_written_unicasts>=1);
+}
+
+TEST(wc3_api, dz_click_flows_through_actual_client_command_and_respects_visibility) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzGetTriggerUIEventPlayer takes nothing returns player\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "globals\n"
+        " integer clicked = 0\n"
+        " integer buttonId = 0\n"
+        "endglobals\n"
+        "function hit takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == buttonId, \"wrong clicked frame\")\n"
+        " call BJassAssert(DzGetTriggerUIEventPlayer() == Player(0), \"wrong clicked player\")\n"
+        " set clicked = clicked + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set buttonId = DzCreateFrameByTagName(\"TEXTBUTTON\", \"ordrButton\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(buttonId, 1, function hit, false)\n"
+        "endfunction\n"
+        "function verifyOnce takes nothing returns nothing\n"
+        " call BJassAssert(clicked == 1, \"first click not delivered\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(buttonId, false)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    G_ClientCommand(g_edicts,2,(cstring_t[]){"dzframe","2"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verifyOnce",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,2,(cstring_t[]){"dzframe","2"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verifyOnce",false);
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 static uint32_t selection_native_packet_count;
 static uint32_t selection_native_packet_units;
 static int selection_native_packet_stage;

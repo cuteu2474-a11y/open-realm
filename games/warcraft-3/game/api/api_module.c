@@ -1,4 +1,5 @@
 #include "jass/jass.h"
+#include "common/ui_constants.h"
 
 #include "api_ai.h"
 #include "api_test.h"

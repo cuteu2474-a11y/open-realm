@@ -7,7 +7,7 @@ Branch: `feature/ordr-singleplayer-compat`. This work is intentionally separate 
 - All 43 native names explicitly declared by the map: 29 Dz, 12 JN, 2 EX have native registrations.
 - The 2 EX natives forward to existing Warcraft III unit APIs.
 - DZ local sync transports prefix/payload into locally invoked JASS trigger actions.
-- DZ frame state: create/find/show, text, geometry/anchors, alpha, texture, font, model and callback registration. A callback-dispatch entry point is available.
+- DZ FDF frames: TOC/FDF loading, template child-frame cloning, synthetic tag types, visual property updates and dirty-frame `svc_layout` serialization. Click event 1 is routed back via the validated `dzframe` game command. See [DzAPI contract](ordr-dzapi-compat.md).
 - DZ key event registration and dispatch entry points. The platform input path is not yet wired.
 - JN login uses local profile identity without network calls; character fields can be saved to an engine-private disk path. JN regex/count/split/replace are implemented.
 - Three map-referenced stock natives absent from the original registry: `GetAbilityEffectById`, `SetTextTagPos`, `DecUnitAbilityLevel`.
@@ -16,9 +16,9 @@ Branch: `feature/ordr-singleplayer-compat`. This work is intentionally separate 
 
 ## Remaining integration requirements before claiming a working game
 
-- DZ frame state has **no WC3 HUD renderer adapter**. Creating frames in JASS does not yet display them. The client UI surface and touch/click callback routing must be connected.
+- DZ has a WC3 HUD serializer/OnClick adapter, verified headlessly. The **actual ORDR imported art, iPad rendering and touch event delivery** still require device/map testing.
 - DZ key-dispatch function is not wired to actual game input. Registered events are inert without that adapter.
-- TOC/FDF template loading retains file references but does not yet instantiate template child frames. `DzFrameFindByName` can only find frames explicitly created in the local registry.
+- TOC/FDF parsing and cloned child lookup are implemented; the original map's actual TOC imports, template inheritance and prioritization remain untested.
 - Some stock Warcraft III natives outside this map's initial missing-name list remain partial/empty. In particular, audio stop/fade still needs native subsystem work. Animation-by-index now resolves actual model sequences.
 - JavaScript/vJASS to Lua translation has not been attempted; current code uses the original JASS runtime.
 - Local JN profile serialization is not a replacement for a network account, and was not exercised on an iPad.
@@ -48,7 +48,7 @@ Implementation and regression are separate from registration. `TriggerRegisterPl
 
 The original ORDR choice UI uses nine selectable neutral-passive models (`u000..u007,u00C`) and three unselectable heading models (`u009..u00B`), all observed with zero max HP in the physical iPad log. These noncombat models are now eligible for *selection only*, without manufacturing HP or changing damage mechanics, when the original ORDR script is loaded, their exact rawcode matches, and they are explicitly selectable in the authored object flags. Ordinary dead Warcraft units remain unselectable. The next device log will also show UnitBalance row count and embedded source size to determine the underlying object data problem.
 
-**Unfinished function families:** `DzLoadToc` still does not materialize FDF frame templates; `DzFrameSetTexture` still only stores a path without presenting a textured UI element; `DzFrameSetScriptByCode` requires a fully wired render-to-input UI event adapter. The offline JN profile store does not implement the unavailable original online service. No completeness claim for all ORDR natives, unit systems or gameplay is justified.
+**Unfinished function families:** Dz keyboard event integration, edit-field focus, frame priority/z-order, non-click UI events and on-device texture/model presentation remain to be verified or implemented. Frame templates, backdrop textures and click event 1 now use the existing HUD/UI bridge. The offline JN profile store does not implement the unavailable original online service. No completeness claim for all ORDR natives, unit systems or gameplay is justified.
 
 `GetEventPlayerState` now returns a typed JASS player-state handle sourced from the event's coroutine-local context value. It no longer silently returns null for a valid `TriggerRegisterPlayerStateEvent` callback. As in classic JASS, callers should only use this getter while handling a player-state event; outside that event its value is undefined.
 

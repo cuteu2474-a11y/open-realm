@@ -445,6 +445,7 @@ static bool G_LoadMap(cstring_t mapFilename) {
     gi.ClearWorld();
     /* Old edicts can retain pointers into typed rows, so clear the world and
      * HUD before swapping the map-selected object-data overlay. */
+    ORDR_DzReset();
     UI_ResetHud();
     G_ApplyMapGameDataSet(CM_GetMapInfo());
     G_ApplyTilesetWaterHeight(CM_GetMapInfo());
@@ -1630,6 +1631,7 @@ static void G_RunFrame(void) {
 
     G_UpdateClientInfoPanels();
     G_UpdateClientResourceBars();
+    ORDR_DzRenderFrames();
     /* After the resource compare pass so Team Resources follows an owner's
      * gold/lumber/food change in the same frame as that owner's console. */
     G_UpdateMultiboards();

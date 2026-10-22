@@ -3136,6 +3136,17 @@ static void CMD_JassDialogChoice(edict_t *ent, uint32_t argc, cstring_t argv[]) 
     G_JassDialogClick(ent, (uint32_t)dialog, (uint32_t)button);
 }
 
+/* The client sends only the opaque Dz frame handle; the game validates it
+ * against visible, enabled JASS-owned FDF frames before invoking the callback. */
+static void CMD_DzFrameClick(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end;
+    unsigned long handle;
+    if (!ent || !ent->client || argc != 2 || !argv[1][0] || argv[1][0] == '-') return;
+    handle = strtoul(argv[1], &end, 10);
+    if (*end || handle > UINT32_MAX) return;
+    ORDR_DzClickFrame(ent, (uint32_t)handle);
+}
+
 /* Touch-friendly WC3 chat: the stock upper Chat button opens a modal edit
  * window. CL_WindowOpen auto-focuses its FT_EDITBOX, which activates SDL text
  * input / the iPad software keyboard. The editor's {wc3_chat} value is
@@ -3265,6 +3276,7 @@ clientCommand_t clientCommands[] = {
     { "gameresult_load", CMD_GameResultLoad },
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
+    { "dzframe", CMD_DzFrameClick },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },
     { "eclear", CMD_EnemiesClear },
