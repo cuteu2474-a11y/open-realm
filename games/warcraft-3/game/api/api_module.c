@@ -1263,6 +1263,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitAbilityLevel", SetUnitAbilityLevel },
     { "IncUnitAbilityLevel", IncUnitAbilityLevel },
     { "UnitDamageTarget", UnitDamageTarget },
+    { "UnitDamagePoint", UnitDamagePoint },
     { "GetUnitCurrentOrder", GetUnitCurrentOrder },
     { "GetUnitLevel", GetUnitLevel },
     { "UnitAddType", UnitAddType },

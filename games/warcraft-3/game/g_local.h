@@ -3480,6 +3480,7 @@ void G_ResetHeroPassiveCaches(void);
 int G_AttackDamage(edict_t *, edict_t *, int);
 int G_AttackDamageWithType(edict_t *, edict_t *, int, uint32_t);
 void T_Damage(edict_t *, edict_t *, int);
+void JassUnitDamagePointThink(edict_t *);
 
 // g_utils.c
 bool G_UnitIsWorldActive(edict_t const *);

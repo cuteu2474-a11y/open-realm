@@ -644,6 +644,90 @@ uint32_t UnitDamageTarget(jass_t *j) {
     T_Damage(target, whichUnit, (int)amount);
     return jass_pushboolean(j, 1);
 }
+
+/* The JASS attacktype enum does not have the internal ATK_NONE slot. Damage
+ * type NORMAL uses attack/armor mitigation, while UNIVERSAL bypasses it.
+ * Other damage-type immunities and attack/ranged event flags remain separate
+ * compatibility work (UnitDamageTarget does not model them yet either). */
+static uint32_t jass_point_attack_type(uint32_t type) {
+    static uint32_t const types[] = {
+        ATK_NORMAL, ATK_NORMAL, ATK_PIERCE, ATK_SIEGE, ATK_MAGIC, ATK_CHAOS, ATK_HERO
+    };
+    return type < sizeof(types) / sizeof(types[0]) ? types[type] : ATK_SPELLS;
+}
+
+static bool jass_point_damage_apply(edict_t *attacker, vec2_t const *point, float radius,
+                                    float amount, uint32_t attack_type, uint32_t damage_type) {
+    bool hit = false;
+    if (!attacker || !attacker->inuse || !point) return false;
+    /* Do not filter by alliance. JASS point damage selects units in range,
+     * including allies; map script authors explicitly filter when desired. */
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t *target = &globals.edicts[i];
+        int damage = (int)amount;
+        if (!target->inuse || !(target->svflags & SVF_MONSTER) || G_IsDeferredFree(target) ||
+            target->invulnerable || M_IsDead(target) ||
+            Vector2_distance(&target->s.origin2, point) > radius) continue;
+        if (damage_type == 4) damage = G_AttackDamageWithType(attacker, target, damage,
+                                                              jass_point_attack_type(attack_type));
+        if (damage <= 0) continue;
+        T_Damage(target, attacker, damage);
+        hit = true;
+    }
+    return hit;
+}
+
+/* The game scheduler drives deferred point damage through an ordinary hidden
+ * edict. All payload fields are existing persisted scalar edict fields:
+ * wait=radius, velocity=amount, damage=JASS attacktype,
+ * projectile_attack_type=JASS damagetype, resources=source spawn generation.
+ * Owner generation must be checked because edict slots are reusable. */
+void JassUnitDamagePointThink(edict_t *thinker) {
+    edict_t *attacker;
+    if (!thinker || !thinker->inuse || G_Time() < thinker->freetime) return;
+    attacker = thinker->owner;
+    if (attacker && attacker->inuse && attacker->spawn_time == thinker->resources)
+        jass_point_damage_apply(attacker, &thinker->s.origin2, thinker->wait, thinker->velocity,
+                                thinker->damage, thinker->projectile_attack_type);
+    G_FreeEdict(thinker);
+}
+
+uint32_t UnitDamagePoint(jass_t *j) {
+    edict_t *attacker = jass_checkhandle(j, 1, "unit");
+    float const delay = jass_checknumber(j, 2);
+    float const radius = jass_checknumber(j, 3);
+    float const x = jass_checknumber(j, 4);
+    float const y = jass_checknumber(j, 5);
+    float const amount = jass_checknumber(j, 6);
+    uint32_t *attack_type;
+    uint32_t *damage_type;
+    edict_t *thinker;
+    (void)jass_checkboolean(j, 7);
+    (void)jass_checkboolean(j, 8);
+    attack_type = jass_checkhandle(j, 9, "attacktype");
+    damage_type = jass_checkhandle(j, 10, "damagetype");
+    (void)jass_checkhandle(j, 11, "weapontype");
+    if (!attacker || !attacker->inuse || !isfinite(delay) || !isfinite(radius) ||
+        !isfinite(x) || !isfinite(y) || !isfinite(amount) || radius < 0.0f || amount <= 0.0f)
+        return jass_pushboolean(j, false);
+    if (delay <= 0.0f)
+        return jass_pushboolean(j, jass_point_damage_apply(attacker, &MAKE(vec2_t, x, y), radius,
+                                                           amount, attack_type ? *attack_type : 0,
+                                                           damage_type ? *damage_type : 26));
+    thinker = G_Spawn();
+    if (!thinker) return jass_pushboolean(j, false);
+    thinker->owner = attacker;
+    thinker->resources = attacker->spawn_time;
+    thinker->s.origin2 = MAKE(vec2_t, x, y);
+    thinker->s.player = attacker->s.player;
+    thinker->wait = radius;
+    thinker->velocity = amount;
+    thinker->damage = attack_type ? *attack_type : 0;
+    thinker->projectile_attack_type = damage_type ? *damage_type : 26;
+    thinker->freetime = G_Time() + (uint32_t)(delay * 1000.0f);
+    thinker->think = JassUnitDamagePointThink;
+    return jass_pushboolean(j, true);
+}
 uint32_t UnitAddType(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
     uint32_t *whichUnitType = jass_checkhandle(j, 2, "unittype");

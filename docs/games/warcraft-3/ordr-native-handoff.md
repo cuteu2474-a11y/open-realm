@@ -75,16 +75,17 @@ python3 tools/ordr/audit_natives.py /tmp/ordr-audit/war3map.j \
 
 | 구분 | 함수 |
 | --- | --- |
-| 등록 누락 (현재) | `UnitDamagePoint` (`IsItemIdSellable`은 2026-10-23 구현) |
+| 과거 감사에서 등록 누락 | `UnitDamagePoint`, `IsItemIdSellable` — 둘 다 2026-10-23 등록·부분 기능 구현 |
 | 수명/게임 규칙 | `RemoveLocation`, `UnitRemoveBuffs`, `UnitRemoveBuffsEx`, `UnitSuspendDecay`, `Cheat`, `GetEventDetectingPlayer` |
 | 선택/화면/자세 | `EnableSelect`, `EnableDragSelect`, `EnableOcclusion`, `SetWaterBaseColor`, `SetUnitLookAt`, `ResetUnitLookAt` |
 | 오디오 | `StopSound`, `SetSoundPitch`, `SetSoundChannel`, `SetSoundDistances`, `SetSoundDistanceCutoff`, `SetSoundConeAngles`, `SetSoundConeOrientation`, `NewSoundEnvironment`, `CreateMIDISound` |
 | 원본 온라인 서비스 | `JNUse` |
 
 1. **범위 피해부터:** 원본 `UnitDamagePointLoc`는 `UnitDamagePoint`를 수백 곳에서
-   호출한다. 지연 시간, 범위, 피해 유형, 실제 피해 이벤트와 저장/복구를 구현해야 한다.
-   기존 `UnitDamageTarget`도 attack/ranged/type 인수를 무시한다. 단순히 `T_Damage`를
-   호출한 뒤 원작 피해 공식까지 완료했다고 하지 않는다.
+   호출한다. 지연 시간, 범위, 실제 피해 이벤트와 저장/복구의 1차 경로를 구현했다.
+   기존 `UnitDamageTarget`은 attack/ranged/type 인수를 무시하며, `UnitDamagePoint`도
+   공격/사거리/무기 유형별 이벤트 및 모든 피해 타입별 면역/저항까지 구현된 것은 아니다.
+   원작 피해 공식 전체가 완료되었다고 하지 않는다.
 2. **핸들 수명:** `RemoveLocation`/`RemoveRect`를 단순 `free`로 바꾸지 않는다.
    `SaveLocationHandle`/`LoadLocationHandle`은 VM 참조를 유지하지 않는 원시 포인터다.
    먼저 VM·해시테이블의 소유권/무효화와 별칭·중복 삭제·저장/복구를 고쳐야 한다.
@@ -129,6 +130,25 @@ python3 tools/ordr/audit_natives.py /tmp/ordr-audit/war3map.j \
 
 여전히 미검증: 실제 iPad 물리 터치, 선택 결과 UI 표시, 강제 종료 해결, 난이도-모드-전투의 전체 플레이.
 GitHub Actions 실행/취소나 IPA 빌드는 이번 작업에서 하지 않았다.
+
+## 2026-10-23 — `UnitDamagePoint` 범위·지연 피해 1차 구현
+
+- `UnitDamagePoint` 네이티브를 등록했다. 즉시 호출은 중심점/반경에 있는 살아 있는
+  유닛을 열거해 실제 `T_Damage`·피해 이벤트 경로로 전달한다. 무적 유닛은 공격하지 않는다.
+  동맹 여부를 임의로 필터링하지 않으며, 피해 발생 시점의 현재 위치를 판정한다.
+- 지연 호출은 서버 프레임에서 실행되는 숨겨진 엔티티에 시전 위치·반경·피해량·피해 유형·
+  출처 유닛 세대를 저장한다. 같은 슬롯이 다른 유닛으로 재사용되면 새 유닛을 출처로
+  잘못 판단하지 않는다. 기존 저장 형식의 엔티티 필드와 C 함수 저장 목록 끝에 등록하여
+  저장/복구 후에도 지연 피해를 처리한다. 기존 함수 목록 인덱스는 바꾸지 않았다.
+- `DAMAGE_TYPE_NORMAL`은 기본 공격 유형별 방어 상성/방어력 처리 함수를 이용하고,
+  `DAMAGE_TYPE_UNIVERSAL`은 현재의 원시 `T_Damage` 경로를 이용한다.
+  그 외 피해 유형은 동일한 원시 경로를 공유하는 **부분 구현**이다. 실제 소수점 피해,
+  `attack`/`ranged` 플래그와 무기 유형별 효과, 각종 피해 면역/트리거 분류는 추가 대조가 필요하다.
+- 새 회귀 테스트는 수정 전 `unknown function: UnitDamagePoint`로 실패했고,
+  수정 후 즉시 범위/무적/범위 밖, 지연 위치 재평가, 저장/복구 후 지연 실행을 통과했다.
+- 등록 네이티브는 이제 **1,295개**다. 감사 JSON은 여전히 이전 시점의 기준 스냅샷이다.
+- 원본 `war3map.j`의 `UnitDamagePointLoc` 199회 직접 호출 및 지연 `.42`, `.7`,
+  `ATTACK_TYPE_NORMAL`/`CHAOS`, `DAMAGE_TYPE_NORMAL`/`UNIVERSAL` 근거는 위 1차 분석과 동일하다.
 
 ## 다음 채팅에 붙여 넣을 문장
 

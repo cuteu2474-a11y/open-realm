@@ -8801,6 +8801,77 @@ TEST(wc3_api, dota_unit_damage_target_and_invulnerable) {
     T_ASSERT(target->health.value <= life_before - 39.0f);
 }
 
+TEST(wc3_api, jass_unit_damage_point_immediate_hits_radius_only) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit near = CreateUnit(Player(1), 'hfoo', 32.0, 0.0, 0.0)\n"
+        "  local unit far = CreateUnit(Player(1), 'hfoo', 256.0, 0.0, 0.0)\n"
+        "  local unit protected = CreateUnit(Player(1), 'hfoo', -32.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(near, 500.0)\n"
+        "  call SetWidgetLife(far, 500.0)\n"
+        "  call SetWidgetLife(protected, 500.0)\n"
+        "  call SetUnitInvulnerable(protected, true)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.0, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"registered\")\n"
+        "  call BJassAssert(GetWidgetLife(near) < 500.0, \"near hit\")\n"
+        "  call BJassAssert(GetWidgetLife(far) == 500.0, \"far safe\")\n"
+        "  call BJassAssert(GetWidgetLife(protected) == 500.0, \"invulnerable safe\")\n"
+        "endfunction\n"));
+}
+
+TEST(wc3_api, jass_unit_damage_point_delayed_uses_impact_positions) {
+    edict_t *entering, *leaving;
+    extern void G_RunEntities(void);
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit inside = CreateUnit(Player(1), 'Hpal', 32.0, 0.0, 0.0)\n"
+        "  local unit outside = CreateUnit(Player(1), 'hfoo', 256.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(inside, 500.0)\n"
+        "  call SetWidgetLife(outside, 500.0)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.7, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"queued\")\n"
+        "  call BJassAssert(GetWidgetLife(inside) == 500.0, \"no premature hit\")\n"
+        "endfunction\n"));
+    entering = find_test_unit(MAKEFOURCC('h','f','o','o'));
+    leaving = find_test_unit(MAKEFOURCC('H','p','a','l'));
+    T_NOT_NULL(entering); T_NOT_NULL(leaving);
+    if (!entering || !leaving) return;
+    entering->s.origin2 = MAKE(vec2_t, 16.0f, 0.0f);
+    leaving->s.origin2 = MAKE(vec2_t, 256.0f, 0.0f);
+    level.time += 699; G_RunEntities();
+    T_EQ((int)entering->health.value, 500);
+    T_EQ((int)leaving->health.value, 500);
+    level.time += 1; G_RunEntities();
+    T_ASSERT(entering->health.value < 500.0f);
+    T_EQ((int)leaving->health.value, 500);
+}
+
+TEST(wc3_api, jass_unit_damage_point_delayed_survives_save_restore) {
+    cstring_t path = Test_TempPath("wc3-jass-point-damage.sav");
+    edict_t *target;
+    uint32_t target_index;
+    extern void G_RunEntities(void);
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit t = CreateUnit(Player(1), 'Hpal', 32.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(t, 500.0)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.5, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"queued\")\n"
+        "endfunction\n"));
+    target = find_test_unit(MAKEFOURCC('H','p','a','l'));
+    T_NOT_NULL(target);
+    if (!target) return;
+    target_index = target->s.number;
+    T_ASSERT(WriteGame(path));
+    T_ASSERT(ReadGame(path));
+    target = g_edicts + target_index;
+    T_EQ((int)target->health.value, 500);
+    level.time += 500; G_RunEntities();
+    T_ASSERT(target->health.value < 500.0f);
+}
+
 TEST(wc3_api, dota_item_user_data_visibility_and_stock) {
     T_ASSERT(run_test_jass(
         "function main takes nothing returns nothing\n"
