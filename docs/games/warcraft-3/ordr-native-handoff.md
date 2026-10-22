@@ -69,13 +69,13 @@ python3 tools/ordr/audit_natives.py /tmp/ordr-audit/war3map.j \
 
 ## 남은 함수와 우선순위
 
-원본 직접 참조 네이티브 453개, Blizzard 래퍼 포함 514개. 전체 등록표는 1,289개다.
-확인된 명백한 빈 본문은 22개이고, 등록 누락은 2개다. 이미 본문이 있어도 부분 구현인
+원본 직접 참조 네이티브 453개, Blizzard 래퍼 포함 514개. 감사 당시 등록표는 1,289개였다.
+확인된 명백한 빈 본문은 22개이고, 등록 누락은 2개였다. 이미 본문이 있어도 부분 구현인
 `UnitDamageTarget`, Dz UI 등은 이 숫자 외에 남아 있다.
 
 | 구분 | 함수 |
 | --- | --- |
-| 등록 누락 | `UnitDamagePoint`, `IsItemIdSellable` |
+| 등록 누락 (현재) | `UnitDamagePoint` (`IsItemIdSellable`은 2026-10-23 구현) |
 | 수명/게임 규칙 | `RemoveLocation`, `UnitRemoveBuffs`, `UnitRemoveBuffsEx`, `UnitSuspendDecay`, `Cheat`, `GetEventDetectingPlayer` |
 | 선택/화면/자세 | `EnableSelect`, `EnableDragSelect`, `EnableOcclusion`, `SetWaterBaseColor`, `SetUnitLookAt`, `ResetUnitLookAt` |
 | 오디오 | `StopSound`, `SetSoundPitch`, `SetSoundChannel`, `SetSoundDistances`, `SetSoundDistanceCutoff`, `SetSoundConeAngles`, `SetSoundConeOrientation`, `NewSoundEnvironment`, `CreateMIDISound` |
@@ -103,6 +103,32 @@ python3 tools/ordr/audit_natives.py /tmp/ordr-audit/war3map.j \
 
 검토 순서는 (1) 이벤트/VM/저장, (2) 시간·모델·트리거 수명, (3) 테스트·감사 문서다.
 추가 네트워크/렌더러 변경은 별도 의존 단계로 검토해야 한다.
+
+## 2026-10-23 — 원본 맵 대조 및 아이템 네이티브 5종
+
+- 사용자가 보유한 `ORDR_S2_2.323[C](3).w3x`에서 `war3map.j`를 추출했다. Python 텍스트 정규화 SHA256은
+  `f59f0f059605a24b2360b9f7c493160f1b8776ec5dae621dfe9ccbde0d68f5d5`로 기존 감사 JSON과 **일치**한다.
+  원본 맵 파일 자체와 추출된 JASS는 저장소에 추가하지 않는다.
+- `CUN`은 `EnableDragSelect(false,false)`와 `EnableSelect(true,false)`로 드래그만 금지하고
+  단일 유닛 선택은 유지한다. `BC6`은 `EVENT_PLAYER_UNIT_SELECTED`에서 원본 선택 유닛의
+  `A900` 능력을 검사하여 `J8` 또는 `J9`로 분기한다. `J8`에는 난이도 `CUK`, 모드 `CUL`,
+  게임 시작 `CUM`이 등록되어 있다. 자동으로 `CUM`을 호출하거나 입력 경로를 대체하지 않는다.
+- 원본 JASS에 `UnitDamagePointLoc(` 호출이 **199회** 있다. 0 지연뿐 아니라 `.42`, `.7` 지연과
+  `ATTACK_TYPE_NORMAL`/`ATTACK_TYPE_CHAOS`, `DAMAGE_TYPE_NORMAL`/`DAMAGE_TYPE_UNIVERSAL`이 쓰인다.
+  `UnitDamagePoint` 미등록은 전투 정확도에 직접 영향을 주는 최우선 과제다. 지연·피해 유형을 무시한
+  단순 반경 `T_Damage` 구현을 완료로 세지 않는다.
+- `IsItemIdPowerup`, `IsItemIdSellable`, `IsItemIdPawnable`, `IsItemSellable`, `IsItemPawnable`를
+  원본 `ItemData` 행과 `SetItemPawnable` 개별 인스턴스 오버라이드에 연결했다. 전부 JASS 네이티브
+  5종이며, 데이터 플래그 읽기 이상의 상점 플레이 결과까지 원작과 대조된 것은 아니다.
+- 새 회귀 테스트는 등록 이전 `unknown function: IsItemIdSellable`로 실패했고, 수정 후 통과했다.
+  클래식/TFT 집중 테스트, `test_ordr_native_audit.py` 4개, 전체 `make test -j4` 모두 통과했다.
+- 현재 등록표는 **1,294개**. 기존 `ordr-native-audit.json`은 **변경 이전의 1,289개 등록 상태를 기록한
+  기준 스냅샷**이므로, 진짜 `Blizzard.j`를 사용해 다시 생성하기 전에는 최신 감사 결과로 인용하지 않는다.
+  원본 `war3map.j`만으로 재검사하면 직접 참조 네이티브 453개를 검토할 수 있지만
+  `Blizzard.j` 래퍼의 `UnitDamagePoint` 경로를 놓친다.
+
+여전히 미검증: 실제 iPad 물리 터치, 선택 결과 UI 표시, 강제 종료 해결, 난이도-모드-전투의 전체 플레이.
+GitHub Actions 실행/취소나 IPA 빌드는 이번 작업에서 하지 않았다.
 
 ## 다음 채팅에 붙여 넣을 문장
 

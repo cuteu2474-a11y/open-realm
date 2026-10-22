@@ -7114,6 +7114,32 @@ TEST(wc3_api, item_type_id) {
     T_EQ((int)item->class_id, (int)expected);
 }
 
+/* Original JASS exposes both catalog-level item flags and the instance's
+ * SetItemPawnable override. A query by rawcode must never inherit that override. */
+TEST(wc3_api, item_sellable_and_pawnable_queries_use_authored_data) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " local item it = CreateItem('spro', 0.0, 0.0)\n"
+        " call BJassAssert(IsItemIdSellable('spro'), \"sellable catalog row\")\n"
+        " call BJassAssert(IsItemIdPawnable('spro'), \"pawnable catalog row\")\n"
+        " call BJassAssert(not IsItemIdSellable('ktrm'), \"unsellable row\")\n"
+        " call BJassAssert(not IsItemIdPawnable('ktrm'), \"unpawnable row\")\n"
+        " call BJassAssert(not IsItemIdSellable('zzzz'), \"missing sellable row\")\n"
+        " call BJassAssert(not IsItemIdPawnable('zzzz'), \"missing pawnable row\")\n"
+        " call BJassAssert(not IsItemIdPowerup('zzzz'), \"missing powerup row\")\n"
+        " call BJassAssert(IsItemSellable(it), \"sellable instance\")\n"
+        " call BJassAssert(IsItemPawnable(it), \"pawnable instance\")\n"
+        " call SetItemPawnable(it, false)\n"
+        " call BJassAssert(not IsItemPawnable(it), \"override disables pawn\")\n"
+        " call BJassAssert(IsItemIdPawnable('spro'), \"catalog not modified by override\")\n"
+        " call SetItemPawnable(it, true)\n"
+        " call BJassAssert(IsItemPawnable(it), \"override restores pawn\")\n"
+        " call BJassAssert(not IsItemSellable(null), \"null instance\")\n"
+        " call BJassAssert(not IsItemPawnable(null), \"null pawn\")\n"
+        "endfunction\n"));
+}
+
 /* =========================================================================
  * Inventory — edict-based UnitHasItem / UnitItemInSlot
  * ========================================================================= */
