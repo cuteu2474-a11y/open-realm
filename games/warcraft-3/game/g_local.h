@@ -3255,6 +3255,7 @@ void UI_ResetHud(void);
 void ORDR_DzReset(void);
 void ORDR_DzRenderFrames(void);
 void ORDR_DzClickFrame(edict_t *ent, uint32_t handle);
+void ORDR_DzKeyInput(edict_t *ent, int key, int down);
 void UI_LoadHud(void);
 void UI_LoadHudLoading(void);
 void UI_LoadHudTimerDialogs(void);
@@ -3279,6 +3280,7 @@ uint16_t UI_TestSelectedTimedStatusStat(gameClient_t *client, edict_t *selected)
 #endif
 void UI_WriteLayout(edict_t *, frameDef_t const *, uint32_t);
 void UI_WriteStart(uint32_t);
+void UI_WriteEnd(edict_t *);
 void UI_ClearLayer(edict_t *, uint32_t);
 void UI_ShowGameResult(edict_t *, uint32_t);
 void UI_FlushPendingGameResults(void);

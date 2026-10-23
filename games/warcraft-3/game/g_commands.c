@@ -3147,6 +3147,19 @@ static void CMD_DzFrameClick(edict_t *ent, uint32_t argc, cstring_t argv[]) {
     ORDR_DzClickFrame(ent, (uint32_t)handle);
 }
 
+/* Receive virtual-key edges from a client binding or platform adapter.
+ * Parse exact bounded integers before entering the current player's JASS VM. */
+static void CMD_DzKeyInput(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end_key,*end_down;
+    unsigned long key,down;
+    if(!ent || !ent->client || argc!=3 || !argv[1][0] || !argv[2][0] ||
+       argv[1][0]=='-' || argv[2][0]=='-')return;
+    key=strtoul(argv[1],&end_key,10);
+    down=strtoul(argv[2],&end_down,10);
+    if(*end_key || *end_down || key>255 || down>1)return;
+    ORDR_DzKeyInput(ent,(int)key,(int)down);
+}
+
 /* Touch-friendly WC3 chat: the stock upper Chat button opens a modal edit
  * window. CL_WindowOpen auto-focuses its FT_EDITBOX, which activates SDL text
  * input / the iPad software keyboard. The editor's {wc3_chat} value is
@@ -3277,6 +3290,7 @@ clientCommand_t clientCommands[] = {
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
     { "dzframe", CMD_DzFrameClick },
+    { "dzkey", CMD_DzKeyInput },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },
     { "eclear", CMD_EnemiesClear },

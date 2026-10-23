@@ -106,6 +106,8 @@ TEST(wc3_api, dz_toc_and_frame_creation_find_real_template_children) {
 static uint32_t dz_written_frames, dz_written_backdrops, dz_written_texts, dz_written_unicasts, dz_textured_backdrops;
 static bool dz_layout_layer_pending;
 static int32_t dz_layout_layer;
+static char dz_priority_order[8];
+static uint32_t dz_priority_count;
 static void dz_test_write(pfWriteType_t type, void const *value) {
     if(!value)return;
     if(type==PF_BYTE){
@@ -117,6 +119,10 @@ static void dz_test_write(pfWriteType_t type, void const *value) {
     if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
     uiFrame_t const *frame=value;
     dz_written_frames++;
+    if (frame->text && dz_priority_count < sizeof(dz_priority_order)) {
+        if (!strcmp(frame->text,"dz high")) dz_priority_order[dz_priority_count++]='H';
+        else if (!strcmp(frame->text,"dz low")) dz_priority_order[dz_priority_count++]='L';
+    }
     if(frame->flags.type==FT_BACKDROP && frame->size.width>0.09f){
         dz_written_backdrops++;
         if(frame->buffer.data && ((uiBackdrop_t const *)frame->buffer.data)->Background)dz_textured_backdrops++;
@@ -214,6 +220,97 @@ TEST(wc3_api, dz_click_flows_through_actual_client_command_and_respects_visibili
     jass_callbyname(level.vm,"verifyOnce",false);
     gi.Write=old_write;
     gi.unicast=old_unicast;
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* A higher Dz priority must draw after a lower one even when it was created
+ * first: serialization order is both the draw and hit-test order. */
+TEST(wc3_api, dz_priority_controls_actual_layout_frame_order) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    dz_priority_count=0;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetPriority takes integer frame, integer priority returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer high = DzCreateFrameByTagName(\"TEXT\", \"high\", DzGetGameUI(), \"\", 0)\n"
+        " local integer low = DzCreateFrameByTagName(\"TEXT\", \"low\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetText(high, \"dz high\")\n"
+        " call DzFrameSetText(low, \"dz low\")\n"
+        " call DzFrameSetPriority(high, 10)\n"
+        " call DzFrameSetPriority(low, 0)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    level.started=true;
+    level.scriptsStarted=true;
+    globals.RunFrame();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_EQ(dz_priority_count,2u);
+    T_EQ(dz_priority_order[0],'L');
+    T_EQ(dz_priority_order[1],'H');
+}
+
+/* Dz event IDs above seven are ordinary native registrations, not errors;
+ * editor and list-box event types use this range. */
+TEST(wc3_api, dz_registers_editbox_text_event_and_dispatches_callback) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "globals\n"
+        " integer edit = 0\n"
+        " integer edits = 0\n"
+        "endglobals\n"
+        "function onchange takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == edit, \"wrong edit callback frame\")\n"
+        " set edits = edits + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set edit = DzCreateFrameByTagName(\"EDITBOX\", \"edit\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(edit, 9, function onchange, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(edits == 1, \"edit event callback not delivered\")\n"
+        "endfunction\n"));
+    ORDR_DispatchFrameEvent(level.vm,2,9);
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Keyboard registrations need a real game command receiver for client input,
+ * not just a helper callable internally by a test harness. */
+TEST(wc3_api, dz_key_event_enters_through_client_command) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzTriggerRegisterKeyEventByCode takes trigger trig, integer key, integer status, boolean sync, code action returns nothing\n"
+        "native DzGetTriggerKeyPlayer takes nothing returns player\n"
+        "globals\n"
+        " integer keys = 0\n"
+        "endglobals\n"
+        "function onkey takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerKeyPlayer() == Player(0), \"wrong key player\")\n"
+        " set keys = keys + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " call DzTriggerRegisterKeyEventByCode(null, 65, 1, false, function onkey)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(keys == 1, \"key client command not delivered\")\n"
+        "endfunction\n"));
+    /* The physical client sends lowercase ASCII; Dz receives VK_A=65. */
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzkey","97","1"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 

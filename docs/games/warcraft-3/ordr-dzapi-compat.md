@@ -37,16 +37,45 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
 5. Reset Dz frame handles/callbacks, sync registrations and key registrations at map
    replacement to prevent dangling pointers into an old map's JASS VM.
 
+## Follow-up: frame ordering and keyboard bridge
+
+1. `DzFrameSetPriority` is now used when writing `LAYER_GAME_3`. The game walks its registered
+   FDF handles in ascending **sibling** priority, breaking ties by creation order; higher
+   priority comes last for both client painting and reverse-order pointer hit testing.
+   It uses the same `UI_WriteFrame`/`UI_WriteStart`/`UI_WriteEnd` packet writer as the normal HUD.
+   The Dz walker does **not** call the stock UI scroll-bar preparation helper; imported Dz
+   scrolling controls still need a dedicated integration test.
+2. `DzFrameSetScriptByCode` retains event IDs 0–31 instead of silently dropping ID 9
+   (edit-box text changed). The game can deliver any retained event by
+   `ORDR_DispatchFrameEvent`; actual mouse click 1 remains the only event currently
+   wired from live layout interaction. Registering an edit event does not by itself
+   implement text input/caret focus in a persistent layout.
+3. The generic client now forwards non-repeating physical keyboard down/up edges through
+   its **opt-in** `cl_game_keycmd` (configured to `dzkey` by the Warcraft III share config).
+   This reuses `clc_stringcmd` and does not change the wire schema. The game validates
+   local single-player ownership, maps shared `common/game_keys.h` codes to Dz/Windows VK
+   IDs (ASCII letters, arrows, F1–F12, Page/Home/End, modifiers), then invokes registered
+   Dz key callbacks and triggers. Mouse buttons and keyboard text-edit mode are excluded.
+   This is **physical keyboard coverage**, not an on-screen iPad virtual-keyboard solution.
+4. `DzFrameSetFocus` still accepts a frame without driving client edit focus; implement a
+   generic persistent-layout edit focus pathway before claiming parity. Future work also
+   includes input event IDs 2–10 and on-device verification.
+
+Tests were written first: frame priority order, event 9 callback and `dzkey` JASS action all
+failed on the prior implementation, then passed after changes. The generic client test
+`client_input.opt_in_game_key_edges_use_existing_string_command` likewise failed first and
+now proves both physical key edges and console-mode suppression.
+
 ## Remaining Dz compatibility gaps
 
 | Native group | Map functions | Remaining proof or work |
 | --- | --- | --- |
 | UI lifecycle | `DzGetGameUI`, `DzCreateFrame`, `DzCreateFrameByTagName`, `DzFrameFindByName`, `DzLoadToc` | Exercise the **actual ORDR imported TOC/FDF and asset references** on a loaded map. |
 | Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Compare on-device text alignment, layered textures/alpha, model animation and absolute screen positions against the retail UI. |
-| Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority is only retained; no FDF/client z-order mapping. Focus accepts a valid frame but does not request client edit focus. |
-| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Verified click event 1 over real client command. Other Dz event IDs (edit, enter/leave, wheel, etc.) and physical iPad taps still need client/device coverage. |
+| Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority now sets **sibling order on wire**, subject to live display validation; focus still lacks client edit activation. |
+| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Verified click event 1 over real client command; IDs up to 31 can be retained/explicitly dispatched. Live edit, enter/leave, wheel and iPad taps still need input coverage. |
 | Local single-player sync | `DzTriggerRegisterSyncData`, `DzSyncData`, `DzGetTriggerSyncData`, `DzGetTriggerSyncPlayer` | Existing local dispatch is not a multiplayer transport. Audit async event order and trigger lifecycle on real ORDR. |
-| Keyboard | `DzTriggerRegisterKeyEventByCode`, `DzGetTriggerKeyPlayer` | Registration/explicit dispatch exists; physical-key and touch-keyboard input are **not** wired. |
+| Keyboard | `DzTriggerRegisterKeyEventByCode`, `DzGetTriggerKeyPlayer` | Physical keyboard now travels via opted-in `cl_game_keycmd`/`dzkey` to JASS; verify retail status semantics on imported ORDR. iPad touch keyboard still needs its own control path. |
 
 Headless tests: `wc3_api.dz_toc_and_frame_creation_find_real_template_children`,
 `wc3_api.dz_frames_emit_real_ui_payloads`, and

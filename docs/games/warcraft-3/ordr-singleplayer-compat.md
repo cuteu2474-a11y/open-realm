@@ -7,7 +7,7 @@ Branch: `feature/ordr-singleplayer-compat`. This work is intentionally separate 
 - All 43 native names explicitly declared by the map: 29 Dz, 12 JN, 2 EX have native registrations.
 - The 2 EX natives forward to existing Warcraft III unit APIs.
 - DZ local sync transports prefix/payload into locally invoked JASS trigger actions.
-- DZ FDF frames: TOC/FDF loading, template child-frame cloning, synthetic tag types, visual property updates and dirty-frame `svc_layout` serialization. Click event 1 is routed back via the validated `dzframe` game command. See [DzAPI contract](ordr-dzapi-compat.md).
+- DZ FDF frames: TOC/FDF loading, template child-frame cloning, synthetic tag types, visual property updates, priority-ordered frame serialization and click event 1 via validated `dzframe`. Optional physical keyboard edges travel through `cl_game_keycmd`/`dzkey`; edit focus and live non-click UI events remain incomplete. See [DzAPI contract](ordr-dzapi-compat.md).
 - DZ key event registration and dispatch entry points. The platform input path is not yet wired.
 - JN login uses local profile identity without network calls; character fields can be saved to an engine-private disk path. JN regex/count/split/replace are implemented.
 - Three map-referenced stock natives absent from the original registry: `GetAbilityEffectById`, `SetTextTagPos`, `DecUnitAbilityLevel`.

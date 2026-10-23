@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <strings.h>
+#include <ctype.h>
 
 mouseEvent_t mouse;
 static keyCode_t mouse_button_keys[8];
@@ -779,6 +780,9 @@ static keyCode_t CL_SDLKeyToKeyCode(int sym) {
         { SDLK_PAGEDOWN, K_PAGEDOWN },
         { SDLK_HOME, K_HOME },
         { SDLK_END, K_END },
+        { SDLK_LSHIFT, K_SHIFT }, { SDLK_RSHIFT, K_SHIFT },
+        { SDLK_LCTRL, K_CTRL }, { SDLK_RCTRL, K_CTRL },
+        { SDLK_LALT, K_ALT }, { SDLK_RALT, K_ALT },
     };
     if (sym >= SDLK_F1 && sym <= SDLK_F12)
         return (keyCode_t)(K_F1 + (sym - SDLK_F1));
@@ -787,7 +791,22 @@ static keyCode_t CL_SDLKeyToKeyCode(int sym) {
     return (keyCode_t)sym;
 }
 
+/* An opt-in game-supplied key command forwards physical key edges through the
+ * existing client command channel. The universal client reports its own key
+ * code; the owning game translates that code to any JASS/API virtual key. */
+static void CL_SendGameKeyEdge(keyCode_t key,bool down) {
+    cstring_t command=Cvar_String("cl_game_keycmd","");
+    if(!command || !*command || !key || key>=K_MOUSE1 || !input.focus ||
+       cls.state!=ca_active || cls.key_dest!=key_game ||
+       cl.playerstate.client_ui_state!=CLIENT_UI_GAME || CL_WindowTextInputActive())return;
+    for(cstring_t p=command;*p;p++)
+        if(!isalnum((unsigned char)*p) && *p!='_')return;
+    MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+    SZ_Printf(&cls.netchan.message,"%s %u %u",command,(unsigned)key,down?1u:0u);
+}
+
 static void CL_InputKeyEvent(keyCode_t key, uint32_t mods, bool down, uint32_t time) {
+    CL_SendGameKeyEdge(key,down);
     Key_Event(key, mods, down, time);
     /* SDL may deliver a short press's down and up events in one poll pass;
      * execute each edge before the next event can cancel held camera state. */
@@ -1701,6 +1720,42 @@ TEST(client_input, final_shift_release_notifies_game_order_queue) {
     cl.playerstate.client_ui_state = old_ui;
     input.focus = old_focus;
     SDL_SetModState(old_mod);
+}
+
+/* WC3's DzAPI key binding needs raw key edges, including releases. The client
+ * formats an opt-in command without embedding any game's key-code semantics. */
+TEST(client_input, opt_in_game_key_edges_use_existing_string_command) {
+    uint8_t data[256];
+    char command[128];
+    sizeBuf_t old_msg=cls.netchan.message;
+    int old_state=cls.state,old_dest=cls.key_dest,old_ui=cl.playerstate.client_ui_state;
+    bool old_focus=input.focus;
+    char old_cmd[128];
+    strlcpy(old_cmd,Cvar_String("cl_game_keycmd",""),sizeof(old_cmd));
+    Cvar_Set("cl_game_keycmd","dzkey");
+    cls.state=ca_active;
+    cls.key_dest=key_game;
+    cl.playerstate.client_ui_state=CLIENT_UI_GAME;
+    input.focus=true;
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+    CL_InputKeyEvent('a',0,true,0);
+    CL_InputKeyEvent('a',0,false,0);
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message,command);
+    T_STREQ(command,"dzkey 97 1");
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message,command);
+    T_STREQ(command,"dzkey 97 0");
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+    cls.key_dest=key_console;
+    CL_InputKeyEvent('a',0,true,0);
+    T_EQ(cls.netchan.message.cursize,0);
+    Cvar_Set("cl_game_keycmd",old_cmd);
+    cls.netchan.message=old_msg;
+    cls.state=old_state;
+    cls.key_dest=old_dest;
+    cl.playerstate.client_ui_state=old_ui;
+    input.focus=old_focus;
 }
 
 TEST(client_input, zoom_reset_returns_to_default_after_zooming_in) {

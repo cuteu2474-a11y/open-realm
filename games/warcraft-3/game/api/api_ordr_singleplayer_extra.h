@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
+#include "common/game_keys.h"
 
 /* Extra properties belong to frame handles; ORDR frame IDs are capped by
  * ordr_frame_new().  Point coordinates remain in UI virtual coordinates. */
@@ -26,8 +28,8 @@ typedef struct {
     int model_type, model_flag, font_flag;
     float font_height;
     char font[260],model[512],kind[64];
-    jassFunc_t const *callbacks[8];
-    unsigned char callback_sync[8];
+    jassFunc_t const *callbacks[32];
+    unsigned char callback_sync[32];
 } ordr_frame_extra_t;
 static ordr_frame_extra_t ordr_frame_extra[4096];
 static int ordr_last_ui_frame;
@@ -40,7 +42,7 @@ static char ordr_tocs[32][260];
  * adapter. Merely registering callbacks does not synthesize player input. */
 /* Callable by the game UI adapter when a frame receives input. */
 void ORDR_DispatchFrameEvent(jass_t *j,int id,int event) {
-    if(!j || !ordr_frame(id) || event<0 || event>=8)return;
+    if(!j || !ordr_frame(id) || event<0 || event>=32)return;
     ordr_frame_trace("dispatch-event",id,ordr_frame(id)->name);
     jassFunc_t const *callback=ordr_frame_extra[id].callbacks[event];
     if(!callback)return;
@@ -130,7 +132,10 @@ uint32_t DzFrameSetTextAlignment(jass_t *j) {
 }
 uint32_t DzFrameSetPriority(jass_t *j) {
     int id=jass_checkinteger(j,1),priority=jass_checkinteger(j,2);
-    if(ordr_frame(id))ordr_frame_extra[id].priority=priority;
+    if(ordr_frame(id)){
+        ordr_frame_extra[id].priority=priority;
+        ordr_frames_dirty=true;
+    }
     return 0;
 }
 uint32_t DzFrameSetModel(jass_t *j) {
@@ -190,7 +195,7 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
     int id=jass_checkinteger(j,1),event=jass_checkinteger(j,2);
     jassFunc_t const *callback=jass_checkcode(j,3);
     bool sync=jass_checkboolean(j,4);
-    if(ordr_frame(id) && event>=0 && event<8){
+    if(ordr_frame(id) && event>=0 && event<32){
         ordr_frame_trace("register-callback",id,ordr_frame(id)->name);
         ordr_frame_extra[id].callbacks[event]=callback;
         ordr_frame_extra[id].callback_sync[event]=(unsigned char)sync;
@@ -322,6 +327,34 @@ void ORDR_DzReset(void) {
     ordr_toc_count=0;
 }
 
+/* Dz priorities are sibling-local and the most recently created equal-priority
+ * sibling goes last. Write the real FDF handles in stable priority order so
+ * both client draw order and reverse-order hit testing agree with DzAPI. */
+static void ordr_write_frame_tree(int id) {
+    ordr_frame_t *frame=ordr_frame(id);
+    if(!frame || !frame->ui || frame->ui->hidden)return;
+    UI_WriteFrame(frame->ui);
+    int last_prio=INT_MIN, last_id=0;
+    while(true){
+        int next=0, next_prio=INT_MAX;
+        for(int n=2;n<ordr_next_frame;n++){
+            ordr_frame_t *child=&ordr_frames[n];
+            if(!child->used || child->parent!=id || !child->ui || child->ui->hidden ||
+               UI_IsEmbeddedControlArtPart(frame->ui,child->ui))continue;
+            int prio=ordr_frame_extra[n].priority;
+            if(prio<last_prio || (prio==last_prio && n<=last_id))continue;
+            if(!next || prio<next_prio || (prio==next_prio && n<next)){
+                next=n;
+                next_prio=prio;
+            }
+        }
+        if(!next)break;
+        ordr_write_frame_tree(next);
+        last_prio=next_prio;
+        last_id=next;
+    }
+}
+
 /* The game materializes scripted FDF roots using the existing svc_layout
  * serializer. UI text, texture and anchors are evaluated before transmission;
  * the universal client does not need to know what a DzAPI function is. */
@@ -335,7 +368,9 @@ void ORDR_DzRenderFrames(void) {
         edict_t *ent=G_GetPlayerEntityByNumber(client->ps.number);
         if(!ent || !ent->client)continue;
         UI_SetCurrentClient(ent->client);
-        UI_WriteLayout(ent,root->ui,LAYER_GAME_3);
+        UI_WriteStart(LAYER_GAME_3);
+        ordr_write_frame_tree(1);
+        UI_WriteEnd(ent);
         UI_SetCurrentClient(NULL);
         emitted=true;
     }
@@ -358,6 +393,31 @@ void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
     old=currentplayer;
     currentplayer=&ent->client->ps;
     ORDR_DispatchFrameEvent(level.vm,(int)handle,1);
+    currentplayer=old;
+}
+
+/* Keep Dz key codes in the game. The client command transports one sampled
+ * key edge; it does not grant access to other players' script contexts. */
+void ORDR_DzKeyInput(edict_t *ent,int key,int down) {
+    player_t *old;
+    if(!ent || !ent->client || !ent->client->connected || !level.vm || !G_IsSinglePlayer() ||
+       key<0 || key>255 || (down!=0 && down!=1))return;
+    /* The generic client reports Quake key IDs. DzAPI expects Windows VKs;
+     * map these at the game boundary so the universal client stays agnostic. */
+    static const struct { int client, vk; } special[]={
+        {K_F1,0x70},{K_F2,0x71},{K_F3,0x72},{K_F4,0x73},{K_F5,0x74},{K_F6,0x75},
+        {K_F7,0x76},{K_F8,0x77},{K_F9,0x78},{K_F10,0x79},{K_F11,0x7a},{K_F12,0x7b},
+        {K_UPARROW,0x26},{K_DOWNARROW,0x28},{K_LEFTARROW,0x25},{K_RIGHTARROW,0x27},
+        {K_PAGEUP,0x21},{K_PAGEDOWN,0x22},{K_HOME,0x24},{K_END,0x23},
+        {K_SHIFT,0x10},{K_CTRL,0x11},{K_ALT,0x12},
+        {127,0x2e},
+    };
+    if(key>='a' && key<='z')key+=('A'-'a');
+    else for(size_t i=0;i<sizeof(special)/sizeof(*special);i++)
+        if(key==special[i].client){key=special[i].vk;break;}
+    old=currentplayer;
+    currentplayer=&ent->client->ps;
+    ORDR_DispatchKeyEvent(level.vm,key,down);
     currentplayer=old;
 }
 
