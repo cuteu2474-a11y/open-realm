@@ -1305,22 +1305,25 @@ static void G_StartScripts(void) {
 }
 
 bool G_IsSinglePlayer(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    /* ORDR maps retain several human-capable lobby slots even when this
-     * package starts exactly one local loopback client.  Inspecting the
-     * authored slots would incorrectly suppress the map's native -offline
-     * event (and local-player camera/input fallback) on an offline-only IPA. */
-    return true;
-#else
     uint32_t humans = 0;
 
+    /* ORDR declares several human-capable slots even for a real solo
+     * session. Count connected players for this map only. Warcraft III's
+     * own multiplayer menus, transport, and other maps are unaffected. */
+    if (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_")) {
+        uint32_t connected = 0;
+        if (game.clients) {
+            FOR_LOOP(i, game.max_clients)
+                if (game.clients[i].connected) connected++;
+        }
+        if (connected) return connected == 1;
+    }
     if (!level.mapinfo) return true;
     FOR_LOOP(i, MAX_PLAYERS) {
         mapPlayer_t const *player = level.mapinfo->players + i;
         if (player->used && player->playerType == kPlayerTypeHuman) humans++;
     }
     return humans <= 1;
-#endif
 }
 
 /* On an offline map there is one actual local game client, even when a

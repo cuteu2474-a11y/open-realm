@@ -74,7 +74,7 @@ WC3_INCLUDES := -Icommon -Iclient -Iserver -Irenderer -Isound \
 	-Igames/warcraft-3/game/api -Igames/warcraft-3/game/skills \
 	-Igames/warcraft-3/jass -Igames/warcraft-3/sheet -Igames/warcraft-3/menu
 WC3_FLAGS := $(BASE_FLAGS) $(WC3_INCLUDES) \
-	-DWC3 -DUSE_FOGOFWAR -DBZ_GAME='"warcraft-3"' -DBZ_GL_ES3 -DLUA_USE_IOS -DBZ_IPAD_OFFLINE_ONLY
+	-DWC3 -DUSE_FOGOFWAR -DBZ_GAME='"warcraft-3"' -DBZ_GL_ES3 -DLUA_USE_IOS
 FDF_FLAGS := -DSTB_FDF_IMPLEMENTATION -DSTB_FDF_GLOBALS
 
 # SDL's static archive references iOS system frameworks; whoever links SDL

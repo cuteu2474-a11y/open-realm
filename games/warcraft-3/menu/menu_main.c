@@ -210,10 +210,6 @@ uiScreen_t *UI_GetCurrentScreen(void) {
 }
 
 BZ_HOST_HIDDEN void M_ShowMainMenu(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    M_ShowSinglePlayerMenu();
-    return;
-#endif
     if (mi.Cvar_String && !strcmp(mi.Cvar_String("online_mode", "0"), "1")) {
         if (mi.Online_Leave) mi.Online_Leave();
         if (mi.Cvar_Set) mi.Cvar_Set("online_mode", "0");
@@ -222,9 +218,6 @@ BZ_HOST_HIDDEN void M_ShowMainMenu(void) {
 }
 
 void M_ShowSinglePlayerMenu(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    if (mi.Cvar_Set) mi.Cvar_Set("online_mode", "0");
-#endif
     UI_RequestScreen(&singlePlayerMenuScreen, singlePlayerMenuScreen.glue, SinglePlayerMenu_ShowMain);
 }
 
@@ -240,10 +233,6 @@ static void M_ShowSinglePlayerSkirmishMenu(void) {
 }
 
 static void M_ShowOnlineBrowserMenu(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    M_ShowSinglePlayerMenu();
-    return;
-#endif
     if (mi.Online_Leave) mi.Online_Leave();
     if (mi.Cvar_Set) mi.Cvar_Set("online_mode", "1");
     if (mi.Online_Begin) mi.Online_Begin();
@@ -251,10 +240,6 @@ static void M_ShowOnlineBrowserMenu(void) {
 }
 
 void M_ShowLanBrowserMenu(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    M_ShowSinglePlayerMenu();
-    return;
-#endif
     if (mi.Online_Leave) mi.Online_Leave();
     if (mi.Cvar_Set) mi.Cvar_Set("online_mode", "0");
     UI_RequestScreen(&lanJoinScreen, (glueDest_t){ .panel = UI_GLUE_BATTLENET_CUSTOM }, LAN_ShowBrowser);
@@ -290,10 +275,6 @@ static void UI_MenuPlayerConfig_f(void) {
 }
 
 static void UI_MenuStartServer_f(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    M_ShowSinglePlayerMenu();
-    return;
-#endif
     if (mi.Cvar_String && !strcmp(mi.Cvar_String("online_mode", "0"), "1")) {
         if (mi.Online_Leave) mi.Online_Leave();
         if (mi.Online_Begin) mi.Online_Begin();
@@ -311,10 +292,6 @@ static void UI_MenuDisconnected_f(void) {
 }
 
 static void UI_MenuRealmSelect_f(void) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    M_ShowSinglePlayerMenu();
-    return;
-#endif
     UI_RequestScreen(&mainMenuScreen, (glueDest_t){ .panel = UI_GLUE_REALM_SELECTION }, MainMenu_ShowRealmSelect);
 }
 

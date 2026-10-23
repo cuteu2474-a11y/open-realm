@@ -714,14 +714,21 @@ uint32_t DisplayTimedTextToPlayer(jass_t *j) {
     float y = jass_checknumber(j, 3);
     float duration = jass_checknumber(j, 4);
     cstring_t message = jass_checkstring(j, 5);
-#if defined(BZ_IPAD_OFFLINE_ONLY) && BZ_IPAD_OFFLINE_ONLY
-    /* ORDR's BJJ timer guesses "online" from a resource-zero heuristic
-     * before its registered -offline chat handler runs. In the offline-only
-     * iPad build this label is misleading; correct just this exact authored
-     * notification without altering JASS resources or the DzSyncData path. */
-    if (message && !strcmp(message, "현재 온라인입니다."))
-        message = "오프라인 모드입니다.";
-#endif
+    /* Do not disguise a failed ORDR mode probe by relabeling 'online'.
+     * BJJ must really set Lw=false after the native single-player cheat.
+     * Only rename the genuine single-player branch for the iPad display. */
+    if (message && G_IsSinglePlayer() &&
+        (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_"))) {
+        if (!strcmp(message, "현재 온라인입니다."))
+            jass_ordr_log_event(level.vm, "ORDR_ONLINE_PROBE_FAILURE",
+                                "map BJJ still concluded online; check GreedIsGood and connected player");
+        else if (!strcmp(message, "현재 싱글모드 입니다. 세이브/로드가 불가능합니다."))
+            message = "원랜디 오프라인 모드입니다. 세이브/로드가 불가능합니다.";
+    }
+    if (message && strstr(message, "오프라인 모드 작동") &&
+        (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_")))
+        jass_ordr_log_event(level.vm, "ORDR_OFFLINE_CONFIRMED",
+                            "original CIg chat action executed; JASS map offline flag set");
     if (TutorialTextDebugEnabledPlayer()) {
         int32_t trigger_ordinal;
         cstring_t caller;

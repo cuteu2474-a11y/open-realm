@@ -196,13 +196,12 @@ Additional focused tests: `wc3_api.dz_font_updates_fdf_and_serialized_glyph_face
   parser recovery after a failed allocation; raising the limit alone would
   only postpone the same crash. The 4096 limit remains finite and further
   resource exhaustion must be handled as a recoverable load failure.
-- The dedicated iPad build defines `BZ_IPAD_OFFLINE_ONLY`: it starts at the
-  single-player menu, hides/redirects online and LAN entry points, and rejects
-  remote client connections while retaining in-process loopback. ORDR's
-  actual `-offline` JASS chat command is already queued by the game engine.
-  For this offline-only build the single-player predicate must not infer
-  multiplayer from the map's authored human-capable lobby slots; otherwise
-  the native map command may never be delivered.
+- **Correction:** It is the ORDR **map's** online status that the user wants
+  disabled, **not** Warcraft III's Battle.net/LAN/transport features. The
+  `BZ_IPAD_OFFLINE_ONLY` build flag, menu restrictions and remote-connection
+  rejection have been removed. In ORDR only, the single-player predicate
+  uses the actual connected player count rather than its authored lobby
+  slots. Other Warcraft maps and multiplayer sessions are unaffected.
 - Inspection of the **original** `ORDR_S2_2.323[C]` map found that the broad
   difficulty selection background is **not** an FDF BACKDROP: `CUN` creates
   destructable ID `B100`, whose W3B `bfil` is
@@ -219,20 +218,35 @@ prove iOS rendering or that gameplay after difficulty selection is stable.
 ## Follow-up from the 2026-10-23 post-start iPad test
 
 - The new JASS log continues beyond the previous crash (to roughly 51 s) and
-  shows `ORDR_OFFLINE_STARTUP ... command=-offline` at 12.1 s. The visible
-  "현재 온라인입니다." text is emitted **earlier by ORDR's own `BJJ` JASS
-  function**, which guesses network mode from whether initial gold/lumber is
-  zero. The iPad offline-only build now substitutes "오프라인 모드입니다." for
-  that exact notification, without manipulating economic resources or
-  removing the later map-native `-offline` and local `DzSyncData` event.
+  shows the previous `ORDR_OFFLINE_STARTUP ... command=-offline` at 12.1 s.
+  **The root cause of the early "현재 온라인입니다." report was the stubbed
+  Warcraft `Cheat("greedisgood")` native.** ORDR's original `BJK -> BJJ`
+  initialization calls this cheat at approximately 1 s; at 2 s, `BJJ`
+  checks whether the single-player resource cheat worked. `Lw=true`
+  denotes ORDR's online detection and enables its login UI, independently
+  of the `jK[player]` offline-command flag. Implementing real single-player
+  `greedisgood` resource increments makes `BJJ` set `Lw=false` and clear the
+  probe resources itself. Multiplayer and unrelated cheats remain unchanged.
+- ORDR's own `CIh` chat handler is registered as soon as the map is ready.
+  Its actual `-offline` command is queued **after 2.1 s** (and before the
+  difficulty chooser at approximately 4 s) because the map's `CUX` trigger
+  resets `Sw[player]` at 2 s; invoking `CIg` earlier would erase the
+  offline clear-count bonus of 50. No map state is faked from the engine.
+  The two independent flags now follow the original map's real JASS logic,
+  and the UI label correction is only a fallback. iPad verification still
+  requires `ORDR_SINGLEPLAYER_PROBE`, `ORDR_OFFLINE_STARTUP` and
+  `ORDR_OFFLINE_CONFIRMED` in the new device log.
 - iOS native `SDL_FINGER*` events previously recognized **two** fingers as a
   camera pan, but delivered a **one**-finger contact only as a release-time
-  click. One-finger swipes within the real gameplay viewport now pan after
-  12 px of movement, canceling pending clicks. Stationary taps still select.
+  click. One-finger swipes in the game viewport now perform stock Warcraft
+  **marquee unit selection** after 12 px of movement (instead of panning
+  the camera). Stationary taps still select, two-finger dragging pans, and
+  long-press/two-finger taps issue stock smart commands such as move/attack.
   The existing precise entity ray trace now has a constrained, nearest-player-
   unit screen-space fallback for small MDX meshes; decorative no-op layouts
-  may no longer swallow a world-unit tap. Real windows and UI commands retain
-  priority; two-finger panning is preserved.
+  may no longer swallow a world-unit tap. Full-screen decorative FDF
+  textures no longer block hit-testing, but interactive windows still have
+  priority. Device-level selection and movement remain to be verified.
 - The original `Background.mdx` and `Background.tga` have now rendered together
   in the desktop MDX preview renderer, proving the *asset/texture decoder*
   path. This is **not** proof of in-map placement or visibility. A targeted

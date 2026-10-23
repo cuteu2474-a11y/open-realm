@@ -395,21 +395,27 @@ static void CL_FlushPan(void) {
     if (camera_drag.active) CL_UpdatePan(pan_motion.point.x, pan_motion.point.y);
 }
 
-/* Two fingers on a touchscreen pan the camera like +pan (middle mouse): the
- * ground under the fingers' midpoint follows them. SDL also synthesizes
- * mouse events from the first finger (which == SDL_TOUCH_MOUSEID), so the
- * second finger cancels that finger's pending click/box selection, and its
- * synthetic motion is dropped until every finger has lifted. Only direct
- * touchscreens qualify: SDL reports macOS trackpad contacts as indirect
- * touches alongside its own wheel events. */
+static void CL_MouseMotion(SDL_MouseMotionEvent const *motion);
+static void CL_SendSmartCommand(float x, float y);
+
+/* Direct touchscreen gestures preserve the Warcraft mouse semantics: a tap
+ * is a left click, one-finger drag draws the stock selection marquee, a
+ * long press/two-finger tap is a right-click Smart order, and a two-finger
+ * drag pans the camera. Real mouse/trackpad events stay on their stock path.
+ * SDL's synthetic touch-mouse events are filtered to prevent duplicates. */
 static struct {
     SDL_FingerID id[2];
     vec2_t pos[2];
+    vec2_t original[2];
     vec2_t start;
     uint32_t count;
     bool gesture;
-    bool single_can_pan;
-    bool single_panning;
+    bool single_can_select;
+    bool single_drag_select;
+    bool gesture_moved;
+    bool gesture_smart_sent;
+    uint32_t down_time;
+    uint32_t gesture_start_time;
     bool synthetic_down_seen;
     bool synthetic_up_seen;
     bool fallback_sent;
@@ -425,6 +431,23 @@ static bool (*touch_is_direct)(SDL_TouchID) = CL_TouchIsDirect;
 static vec2_t CL_TouchPanCenter(void) {
     return (vec2_t){ (touch_pan.pos[0].x + touch_pan.pos[1].x) * 0.5f,
                      (touch_pan.pos[0].y + touch_pan.pos[1].y) * 0.5f };
+}
+
+static bool CL_TouchInWorld(vec2_t pos, size2_t win) {
+    rect_t const viewport = cl.viewDef.viewport;
+    float const top = (1.0f - viewport.y - viewport.h) * win.height;
+    return CL_GameplayInputReady() &&
+        pos.x >= viewport.x * win.width &&
+        pos.x < (viewport.x + viewport.w) * win.width &&
+        pos.y >= top && pos.y < top + viewport.h * win.height;
+}
+
+static void CL_TouchMoveSelection(vec2_t pos) {
+    SDL_MouseMotionEvent const motion = { .type = SDL_MOUSEMOTION,
+        .which = SDL_TOUCH_MOUSEID, .x = (int)pos.x, .y = (int)pos.y };
+    mouse.origin = pos;
+    input.touch_pointer = true;
+    CL_MouseMotion(&motion);
 }
 
 /* SDL's iOS backend can omit synthetic mouse events for SDL_FINGER*.
@@ -556,18 +579,12 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 touch_pan.synthetic_down_seen = false;
                 touch_pan.synthetic_up_seen = false;
                 touch_pan.fallback_sent = false;
-                touch_pan.single_panning = false;
+                touch_pan.single_drag_select = false;
                 touch_pan.start = pos;
-                touch_pan.single_can_pan = CL_GameplayInputReady() &&
+                touch_pan.down_time = finger->timestamp;
+                touch_pan.single_can_select = CL_TouchInWorld(pos, win) &&
                     !CL_WindowMouseOver((int)pos.x, (int)pos.y) &&
                     !CL_TraceORDRChoiceCard(pos.x, pos.y, &(uint32_t){0});
-                if (touch_pan.single_can_pan) {
-                    rect_t const viewport = cl.viewDef.viewport;
-                    float const top = (1.0f - viewport.y - viewport.h) * win.height;
-                    touch_pan.single_can_pan = pos.x >= viewport.x * win.width &&
-                        pos.x < (viewport.x + viewport.w) * win.width &&
-                        pos.y >= top && pos.y < top + viewport.h * win.height;
-                }
                 if (cls.state == ca_active && CL_GameplayInputReady() &&
                     CL_iPadChatHit((int)pos.x, (int)pos.y)) {
                     ipad_chat_touch_down = true;
@@ -575,10 +592,14 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 }
             }
             touch_pan.id[touch_pan.count] = finger->fingerId;
-            touch_pan.pos[touch_pan.count++] = pos;
+            touch_pan.pos[touch_pan.count] = pos;
+            touch_pan.original[touch_pan.count++] = pos;
             if (touch_pan.count == 2 && CL_GameplayInputReady()) {
                 touch_pan.gesture = true;
-                touch_pan.single_panning = false;
+                touch_pan.gesture_moved = false;
+                touch_pan.gesture_smart_sent = false;
+                touch_pan.gesture_start_time = finger->timestamp;
+                touch_pan.single_drag_select = false;
                 pan_motion.pending = false;
                 input.select = false;
                 cl.selection.in_progress = false;
@@ -600,35 +621,61 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             if (slot < 0) return;
             touch_pan.pos[slot] = pos;
             if (touch_pan.gesture && touch_pan.count == 2) {
+                FOR_LOOP(i, 2) {
+                    float const dx = touch_pan.pos[i].x - touch_pan.original[i].x;
+                    float const dy = touch_pan.pos[i].y - touch_pan.original[i].y;
+                    if (dx * dx + dy * dy > 144.0f) touch_pan.gesture_moved = true;
+                }
                 vec2_t center = CL_TouchPanCenter();
                 CL_QueuePan(center.x, center.y);
-            } else if (touch_pan.count == 1 && touch_pan.single_can_pan) {
+            } else if (touch_pan.count == 1 && touch_pan.single_can_select) {
                 float const dx = pos.x - touch_pan.start.x;
                 float const dy = pos.y - touch_pan.start.y;
-                if (!touch_pan.single_panning && dx * dx + dy * dy > 144.0f) {
-                    /* On iPad, a single-finger swipe moves the map; a short
-                     * stationary touch continues to select a unit. */
-                    touch_pan.single_panning = true;
-                    CL_BeginPan(touch_pan.start.x, touch_pan.start.y);
+                if (!touch_pan.single_drag_select && dx * dx + dy * dy > 144.0f) {
+                    touch_pan.single_drag_select = true;
+                    mouse.origin = touch_pan.start;
+                    input.touch_pointer = true;
+                    IN_SelectDown();
                 }
-                if (touch_pan.single_panning) CL_QueuePan(pos.x, pos.y);
+                if (touch_pan.single_drag_select) CL_TouchMoveSelection(pos);
             }
             break;
         case SDL_FINGERUP:
             if (slot < 0) return;
-            if (touch_pan.single_panning) {
-                /* Finger-up can share the SDL poll batch with the last motion;
-                 * apply that motion before ending the drag. */
-                CL_FlushPan();
-                CL_EndPan();
+            if (touch_pan.single_drag_select) {
+                CL_TouchMoveSelection(pos);
+                IN_SelectUp();
                 touch_pan.fallback_sent = true;
+            }
+            if (touch_pan.gesture && touch_pan.count == 2 &&
+                !touch_pan.gesture_moved && !touch_pan.gesture_smart_sent &&
+                finger->timestamp - touch_pan.gesture_start_time <= 350) {
+                /* Two-finger tap is iPad's right click. A moved pair is only
+                 * camera pan and never issues a world order. */
+                vec2_t const center = CL_TouchPanCenter();
+                if (CL_TouchInWorld(center, win) &&
+                    !CL_WindowMouseOver((int)center.x, (int)center.y)) {
+                    mouse.origin = center;
+                    input.touch_pointer = true;
+                    CL_SendSmartCommand(center.x, center.y);
+                    touch_pan.gesture_smart_sent = true;
+                }
             }
             /* Do not gate this on CL_GameplayInputReady: the player may be
              * tapping the F10 pause menu, a modal, or the out-of-game menu.
              * If SDL sent a down but omitted its up, synthesize only up. */
-            if (touch_pan.count == 1 && !touch_pan.gesture && !touch_pan.single_panning) {
+            if (touch_pan.count == 1 && !touch_pan.gesture && !touch_pan.single_drag_select) {
                 if (ipad_chat_touch_down) {
                     ipad_chat_touch_down = false;
+                    touch_pan.fallback_sent = true;
+                } else if (touch_pan.single_can_select &&
+                    finger->timestamp - touch_pan.down_time >= 450 &&
+                    finger->timestamp - touch_pan.down_time < 10000) {
+                    /* Long hold on the world is another way to move/attack.
+                     * Keep taps on ORDR choices and HUD out of this path. */
+                    mouse.origin = pos;
+                    input.touch_pointer = true;
+                    CL_SendSmartCommand(pos.x, pos.y);
                     touch_pan.fallback_sent = true;
                 } else if (CL_ORDRFinishChoiceTouch(finger, pos)) {
                     touch_pan.fallback_sent = true;
@@ -643,10 +690,14 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
-            if (--touch_pan.count < 2 && touch_pan.gesture) CL_EndPan();
+            touch_pan.original[slot] = touch_pan.original[touch_pan.count - 1];
+            if (--touch_pan.count < 2 && touch_pan.gesture) {
+                CL_FlushPan();
+                CL_EndPan();
+            }
             if (!touch_pan.count) {
                 touch_pan.gesture = false;
-                touch_pan.single_panning = touch_pan.single_can_pan = false;
+                touch_pan.single_drag_select = touch_pan.single_can_select = false;
             }
             break;
     }
@@ -1574,6 +1625,9 @@ static bool CL_TestSmartEntity(viewDef_t const *view, float x, float y, uint32_t
 }
 static bool CL_TestSelectEntity(viewDef_t const *view, float x, float y, uint32_t *number) {
     (void)view; (void)x; (void)y; *number = 7; return true;
+}
+static bool CL_TestNoEntity(viewDef_t const *view, float x, float y, uint32_t *number) {
+    (void)view; (void)x; (void)y; (void)number; return false;
 }
 static bool CL_TestSmartLocation(viewDef_t const *view, float x, float y, vec3_t *point) {
     (void)view; (void)x; (void)y; *point = (vec3_t){ 123, 456, 0 }; return true;
@@ -2768,6 +2822,7 @@ TEST(client_input, two_finger_touch_pans_camera) {
     re.TraceMinimap = CL_TestNoMinimap; re.GetWindowSize = CL_TestWindowSize;
     re.CameraUsesTerrainHeight = CL_TestCameraUsesTerrainHeight;
     re.TraceLocation = CL_TestScreenGround; re.TraceEntity = CL_TestSelectEntity;
+    re.EntitiesInRect = CL_TestEntitiesInRect;
     FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
     FOR_LOOP(j, 2) { cl.viewDef.camerastate[j].origin.x = 500; cl.viewDef.camerastate[j].origin.y = 400; }
     SZ_Init(&cls.netchan.message, data, sizeof(data));
@@ -2832,8 +2887,7 @@ TEST(client_input, two_finger_touch_pans_camera) {
     MSG_ReadString(&cls.netchan.message, next_tap);
     T_STREQ(next_tap, "select 7");
 
-    /* A single finger moves the map after a small travel threshold, while
-     * never producing the select command reserved for a stationary tap. */
+    /* A single-finger drag is now Warcraft's box-select, never a camera pan. */
     SZ_Init(&cls.netchan.message, data, sizeof(data));
     event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1,
         .fingerId = 4, .x = 0.4f, .y = 0.5f } };
@@ -2844,8 +2898,11 @@ TEST(client_input, two_finger_touch_pans_camera) {
     event.type = SDL_FINGERUP;
     T_EQ(SDL_PushEvent(&event), 1);
     CL_Input(); Cbuf_Execute();
-    T_EQ(CL_TestCountFocus(&cls.netchan.message, &focus), 1);
-    T_ASSERT(!camera_drag.active && !touch_pan.single_panning && !touch_pan.count);
+    char marquee[128] = { 0 };
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, marquee);
+    T_STREQ(marquee, "select 7 8 9");
+    T_ASSERT(!camera_drag.active && !touch_pan.single_drag_select && !touch_pan.count);
 
     /* Edge scroll: a touch cursor parked on the edge stays put, a mouse scrolls. */
     Cvar_Set("cl_camera_edge_scroll", "1"); Cvar_Set("cl_camera_scroll_speed", "1000");
@@ -2864,6 +2921,79 @@ TEST(client_input, two_finger_touch_pans_camera) {
     if (add_select_down) Cmd_RemoveCommand("+select");
     if (add_select_up) Cmd_RemoveCommand("-select");
     Cvar_SetValue("cl_camera_edge_scroll", old_edge); Cvar_SetValue("cl_camera_scroll_speed", old_speed);
+    SDL_QuitSubSystem(SDL_INIT_EVENTS);
+    CL_TestWorldBounds(false);
+}
+
+TEST(client_input, long_press_and_two_finger_tap_send_stock_smart_point_orders) {
+    struct client_state *saved = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    refExport_t old_re = re;
+    __typeof__(input) old_input = input;
+    __typeof__(touch_pan) old_touch = touch_pan;
+    mouseEvent_t old_mouse = mouse;
+    bool (*old_direct)(SDL_TouchID) = touch_is_direct;
+    uint8_t packet[512];
+    char order[128] = { 0 };
+    SDL_Event evt;
+
+    CL_TestWorldBounds(true);
+    T_NOT_NULL(saved);
+    memcpy(saved, &cl, sizeof(cl));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0);
+    memset(&cl, 0, sizeof(cl));
+    input = (__typeof__(input)){ .focus = true };
+    touch_pan = (__typeof__(touch_pan)){ 0 };
+    touch_is_direct = CL_TestTouchDirect;
+    cls.state = ca_active;
+    cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    cl.viewDef.viewport = (rect_t){ 0, 0, 1, 1 };
+    re.GetWindowSize = CL_TestWindowSize;
+    re.TraceMinimap = CL_TestNoMinimap;
+    re.TraceEntity = CL_TestNoEntity;
+    re.TraceLocation = CL_TestSmartLocation;
+    re.CameraUsesTerrainHeight = CL_TestCameraUsesTerrainHeight;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
+
+    /* Long hold -> the same SmartPoint command as a desktop right click. */
+    SZ_Init(&cls.netchan.message, packet, sizeof(packet));
+    evt = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
+        .touchId = 1, .fingerId = 51, .timestamp = 100, .x = 0.45f, .y = 0.4f } };
+    CL_TouchFingerEvent(&evt.tfinger);
+    evt.type = SDL_FINGERUP;
+    evt.tfinger.timestamp = 700;
+    CL_TouchFingerEvent(&evt.tfinger);
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, order);
+    T_STREQ(order, "smartpoint 123 456");
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+
+    /* Two-finger tap -> exactly one stock SmartPoint, not a box selection. */
+    SZ_Init(&cls.netchan.message, packet, sizeof(packet));
+    evt = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN,
+        .touchId = 1, .fingerId = 52, .timestamp = 1000, .x = 0.4f, .y = 0.5f } };
+    CL_TouchFingerEvent(&evt.tfinger);
+    evt.tfinger.fingerId = 53;
+    evt.tfinger.timestamp = 1020;
+    evt.tfinger.x = 0.6f;
+    CL_TouchFingerEvent(&evt.tfinger);
+    evt.type = SDL_FINGERUP;
+    evt.tfinger.timestamp = 1100;
+    CL_TouchFingerEvent(&evt.tfinger);
+    evt.tfinger.fingerId = 52;
+    evt.tfinger.timestamp = 1120;
+    CL_TouchFingerEvent(&evt.tfinger);
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, order);
+    T_STREQ(order, "smartpoint 123 456");
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+    T_ASSERT(!touch_pan.count && !camera_drag.active);
+
+    cl = *saved; MemFree(saved);
+    cls = old_cls; re = old_re; input = old_input;
+    touch_pan = old_touch; mouse = old_mouse; touch_is_direct = old_direct;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
     CL_TestWorldBounds(false);
 }

@@ -44,11 +44,15 @@ TEST(wc3_chat, ordr_offline_mode_uses_authored_command) {
 
 #endif
 
-/* A single-player ORDR session cannot log in to the map's online save
- * service. Run the map-authored offline command automatically instead of
- * altering JASS rewards/state. The trigger must already be registered for
- * the local player, so the event is indistinguishable from that player's
- * manual chat and reaches the original JASS conditions. */
+/* A solo ORDR session must be in *the map's* offline mode before the player
+ * reaches the difficulty screen. The stock map only registers CIh (the
+ * -offline/-오프라인모드 chat triggers) from a later startup trigger. CIh merely
+ * calls Bcx/TriggerRegisterPlayerChatEvent for each player. Register that
+ * original handler early, then activate CIg via a real chat event AFTER the
+ * map's 2-second CUX initialization (which resets Sw/player clear counts).
+ * Independently, Warcraft's Cheat("greedisgood") native makes the map's BJJ
+ * single-player/online probe evaluate the original Lw flag correctly.
+ * Do not mutate JASS's jK/Sw globals or Warcraft networking. */
 void G_ORDRTryAutoOfflineMode(void) {
     edict_t *player;
     gameClient_t *client;
@@ -61,6 +65,7 @@ void G_ORDRTryAutoOfflineMode(void) {
         !jass_hasfunction(level.vm, "CUO") ||
         !jass_hasfunction(level.vm, "CUW") ||
         !jass_hasfunction(level.vm, "CUN") ||
+        !jass_hasfunction(level.vm, "CIh") ||
         level.time > 15000)
         return;
 
@@ -68,6 +73,30 @@ void G_ORDRTryAutoOfflineMode(void) {
     if (!client || !client->connected) return;
     player = G_GetPlayerEntityByNumber(client->ps.number);
     if (!player) return;
+
+    if (!level.ordr_offline_chat_registered_early && level.time <= 1000) {
+        bool already_registered = false;
+        FOR_EACH_EVENT(reg) {
+            if (reg->type != EVENT_PLAYER_CHAT || !G_EventSubjectIsCurrent(reg) ||
+                reg->subject != player || !reg->trigger || reg->trigger->disabled)
+                continue;
+            if (G_ORDROfflineMatch(reg->chat_match, reg->chat_exact)) {
+                already_registered = true;
+                break;
+            }
+        }
+        level.ordr_offline_chat_registered_early = true;
+        if (!already_registered) {
+            jass_callbyname(level.vm, "CIh", false);
+            jass_ordr_log_event(level.vm, "ORDR_OFFLINE_PREPARE",
+                                "map-native CIh chat handlers registered before choice screen");
+        }
+    }
+
+    /* In the original map, CUX resets Sw[player] at t=2.0 s. CIg grants
+     * Sw[player]=50, so running it earlier would silently wipe that reward.
+     * The difficulty choices only spawn at ~t=4.0 s. */
+    if (level.time < 2100) return;
 
     /* Prefer the exact registered command over a wildcard handler.
      * If only a wildcard exists, the English alias is used as the

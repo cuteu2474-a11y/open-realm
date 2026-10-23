@@ -86,12 +86,6 @@ static void MainMenu_InitFrames(void) {
     UI_SetOnClick(main_menu.SinglePlayerButton, "menu_game");
     UI_SetOnClick(main_menu.BattleNetButton, "menu_online");
     UI_SetOnClick(main_menu.LocalAreaNetworkButton, "menu_multiplayer");
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    /* Keep stock FDF geometry but remove its remote-session actions on iPad. */
-    if (main_menu.RealmButton) UI_SetHidden(main_menu.RealmButton, true);
-    if (main_menu.BattleNetButton) UI_SetHidden(main_menu.BattleNetButton, true);
-    if (main_menu.LocalAreaNetworkButton) UI_SetHidden(main_menu.LocalAreaNetworkButton, true);
-#endif
     UI_SetOnClick(main_menu.OptionsButton, "menu_options");
     UI_SetOnClick(main_menu.CreditsButton, "menu_credits");
     UI_SetOnClick(main_menu.ExitButton, "menu_quit");

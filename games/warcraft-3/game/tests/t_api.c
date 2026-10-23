@@ -946,6 +946,82 @@ TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
     currentplayer = saved_currentplayer;
 }
 
+TEST(wc3_api, ordr_single_connected_player_preserves_warcraft_multiplayer) {
+    static mapInfo_t mapinfo;
+    gameClient_t *client = &game.clients[0];
+
+    setup_test_world();
+    memcpy(&mapinfo, level.mapinfo, sizeof(mapinfo));
+    level.mapinfo = &mapinfo;
+    mapinfo.players[0].used = mapinfo.players[1].used = true;
+    mapinfo.players[0].playerType = mapinfo.players[1].playerType = kPlayerTypeHuman;
+    client->connected = true;
+    client->mapplayer = &level.mapinfo->players[0];
+    game.clients[1].connected = false;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+
+    strlcpy(level.map_path, "Maps\\ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    T_ASSERT(G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == client);
+
+    game.clients[1].connected = true;
+    T_ASSERT(!G_IsSinglePlayer());
+    T_NULL(G_SinglePlayerLocalClient());
+
+    game.clients[1].connected = false;
+    strlcpy(level.map_path, "Maps\\OtherMultiplayer.w3x", sizeof(level.map_path));
+    T_ASSERT(!G_IsSinglePlayer());
+}
+
+TEST(wc3_api, ordr_original_greed_is_good_probe_detects_singleplayer_offline) {
+    static mapInfo_t mapinfo;
+    gameClient_t *client = &game.clients[0];
+
+    setup_test_world();
+    memcpy(&mapinfo, level.mapinfo, sizeof(mapinfo));
+    level.mapinfo = &mapinfo;
+    mapinfo.players[0].used = mapinfo.players[1].used = true;
+    mapinfo.players[0].playerType = mapinfo.players[1].playerType = kPlayerTypeHuman;
+    client->connected = true;
+    client->mapplayer = &level.mapinfo->players[0];
+    game.clients[1].connected = false;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+    strlcpy(level.map_path, "Maps\\ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    client->ps.stats[PLAYERSTATE_RESOURCE_GOLD] = 0;
+    client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER] = 0;
+
+    /* Minimal copy of ORDR's BJK -> BJJ probe. In the original map BJJ
+     * tests whether Cheat("greedisgood") changed resources, clears them,
+     * and sets Lw=false when the session is actually single-player. */
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  boolean mapOnline = true\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        "  call Cheat(\"greedisgood\")\n"
+        "  if GetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD) > 0 then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 0)\n"
+        "    set mapOnline = false\n"
+        "  endif\n"
+        "  if GetPlayerState(Player(0), PLAYER_STATE_RESOURCE_LUMBER) > 0 then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_LUMBER, 0)\n"
+        "    set mapOnline = false\n"
+        "  endif\n"
+        "  call BJassAssert(not mapOnline, \"ORDR must recognize offline at startup\")\n"
+        "endfunction\n"));
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_GOLD], 0);
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 0);
+
+    /* Warcraft multiplayer must not receive an injected cheat resource. */
+    game.clients[1].connected = true;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call Cheat(\"greedisgood\")\n"
+        "endfunction\n"));
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_GOLD], 0);
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 0);
+}
+
 TEST(wc3_api, revive_hero_location_native_restores_grom_style_death) {
     edict_t *hero;
 

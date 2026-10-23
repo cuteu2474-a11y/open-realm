@@ -1941,7 +1941,46 @@ uint32_t SetDoodadAnimationRect(jass_t *j) {
     return 0;
 }
 uint32_t Cheat(jass_t *j) {
-    //cstring_t cheatStr = jass_checkstring(j, 1);
+    cstring_t cheatStr = jass_checkstring(j, 1);
+    static cstring_t const resourceCheat = "greedisgood";
+    cstring_t amountText;
+    int32_t amount = 500;
+    gameClient_t *client;
+
+    /* Warcraft III's single-player GreedIsGood cheat is used by ORDR's
+     * original BJK -> BJJ initialization as an *offline detection probe*.
+     * BJJ checks whether gold/lumber changed, clears those resources and
+     * sets the map's Lw online flag accordingly. With Cheat() stubbed, the
+     * probe always said "online" even in a local game. Keep the engine's
+     * multiplayer untouched and let the map make its own determination. */
+    if (!cheatStr || strncasecmp(cheatStr, resourceCheat, strlen(resourceCheat)))
+        return 0;
+    amountText = cheatStr + strlen(resourceCheat);
+    if (*amountText && !isspace((unsigned char)*amountText)) return 0;
+    while (isspace((unsigned char)*amountText)) amountText++;
+    if (*amountText) {
+        char *end;
+        long parsed = strtol(amountText, &end, 10);
+        while (isspace((unsigned char)*end)) end++;
+        if (end == amountText || *end || parsed <= 0) return 0;
+        amount = (int32_t)MIN(parsed, USHRT_MAX);
+    }
+    if (!G_IsSinglePlayer()) return 0;
+    client = G_SinglePlayerLocalClient();
+    if (!client || !client->connected || !client->mapplayer ||
+        client->mapplayer->playerType != kPlayerTypeHuman) return 0;
+
+    for (int resource = PLAYERSTATE_RESOURCE_GOLD;
+         resource <= PLAYERSTATE_RESOURCE_LUMBER; resource++) {
+        uint16_t const before = client->ps.stats[resource];
+        uint16_t const after = (uint16_t)MIN((int32_t)before + amount, USHRT_MAX);
+        client->ps.stats[resource] = after;
+        G_JassPlayerStateChanged(client->ps.number, resource, before, after);
+    }
+    if (level.vm && (strstr(level.map_path, "ORDR_S2_") ||
+                     strstr(level.map_path, "ordr_s2_")))
+        jass_ordr_log_event(level.vm, "ORDR_SINGLEPLAYER_PROBE",
+                            "GreedIsGood resource detection applied to local player");
     return 0;
 }
 uint32_t IsNoVictoryCheat(jass_t *j) {

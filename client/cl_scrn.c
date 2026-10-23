@@ -2316,10 +2316,20 @@ bool SCR_LayoutHitTest(int x, int y) {
                 continue;
             }
             /* Texture tiles mask console input even without a command or
-             * tooltip; making all textures pass through leaks clicks to the world. */
+             * tooltip. A full-screen noninteractive texture is different:
+             * ORDR uses them as world backdrops. Blocking their entire rect
+             * makes every ordinary mouse drag, unit click and Smart order
+             * disappear although the texture has no input handler. */
             if (frame->flags.type != FT_TEXTURE &&
                 !SCR_LayoutFrameHasClickCommand(frame) &&
                 !(frame->tooltip && *frame->tooltip)) continue;
+            if (frame->flags.type == FT_TEXTURE &&
+                !SCR_LayoutFrameHasClickCommand(frame) &&
+                !(frame->tooltip && *frame->tooltip)) {
+                rect_t const *r = SCR_LayoutRect(frame);
+                if (r && r->w >= UI_BASE_WIDTH * 0.8f &&
+                    r->h >= UI_BASE_HEIGHT * 0.75f) continue;
+            }
             if (Rect_contains(SCR_LayoutRect(frame), &point)) return true;
         }
     }

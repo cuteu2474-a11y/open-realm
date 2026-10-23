@@ -641,11 +641,6 @@ static void CL_VideoApply_f(void) {
 }
 
 static cstring_t CL_RebuildMenuTarget(cstring_t target) {
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    /* iPad ORDR ships as a local session; a menu restart must not expose the
-     * multiplayer front end even if a saved client cvar names it. */
-    if (!target || !*target || !strcmp(target, "menu_main")) return "menu_game";
-#endif
     return target && *target ? target : "menu_main";
 }
 
@@ -1211,13 +1206,7 @@ void CL_Init(void) {
     CL_SetMenuBindings();
     cls.state = ca_disconnected;
     scr_initialized = true;
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    Cvar_Set("online_mode", "0");
-    CON_printf("오프라인 모드입니다\n");
-    CL_MenuCommand("menu_game");
-#else
     CL_MenuCommand(Cvar_String("cl_start_menu", "menu_main"));
-#endif
 }
 
 void CL_ConnectionlessPacket(netadr_t const *from, sizeBuf_t *msg) {
@@ -1477,14 +1466,6 @@ void CL_Connect(cstring_t host, unsigned short port) {
         fprintf(stderr, "CL_Connect: bad server address \"%s\"\n", host);
         return;
     }
-#ifdef BZ_IPAD_OFFLINE_ONLY
-    /* Retain Quake-style in-process loopback: blocking it would also break
-     * single-player JASS, including DzSyncData and the local game client. */
-    if (adr.type != NA_LOOPBACK) {
-        fprintf(stderr, "CL_Connect: remote connections disabled in iPad offline build\n");
-        return;
-    }
-#endif
     // Loopback (localhost) needs no UDP socket — packets go through the
     // in-memory ring buffer.  Only open the socket for remote addresses.
     if (adr.type == NA_EOS && (!Online_Ready() || !Online_InLobby())) {

@@ -2441,6 +2441,7 @@ struct level_locals {
     bool scriptsStarted;
     /* One shot per map session; never replay the original ORDR chat command. */
     bool ordr_auto_offline_queued;
+    bool ordr_offline_chat_registered_early;
     bool cinematic_debug_result_window; /* per-map debug latch for result-window tracing */
     bool campaign_select_on_end; /* ForceCampaignSelectScreen defers campaign selection until EndGame */
 };
