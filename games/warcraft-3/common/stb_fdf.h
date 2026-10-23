@@ -24,7 +24,7 @@
 /* -------------------------------------------------------------------------- */
 #define MAX_BUILD_QUEUE 7
 #ifndef MAX_UI_CLASSES
-#define MAX_UI_CLASSES 2048 // frames per module; measured peak is 1167, leaving 75% headroom
+#define MAX_UI_CLASSES 4096 // frames per module; ORDR's map-loaded FDF trees can exceed the 2048-frame stock UI budget
 #endif
 #include "ui_constants.h"
 #define UI_MAX_MAP_LIST_ITEMS 1024
@@ -1575,6 +1575,7 @@ FDF_MAKE_PARSERCALL(Frame) {
     FRAMETYPE type = (FRAMETYPE)FDF_ParseEnumString(stype, FrameType);
     frameDef_t *current = UI_Spawn(type, frame);
     FDF_ParseFrame(parser, current);
+    if (!current) return; // allocation failure already consumed the nested declaration; never inspect NULL popup state
     if (type == FT_POPUPMENU || type == FT_GLUEPOPUPMENU) {
         frameDef_t *title = UI_FindChildFrame(current, current->Popup.TitleFrame);
         frameDef_t *arrow = UI_FindChildFrame(current, current->Popup.ArrowFrame);
@@ -1840,6 +1841,18 @@ void UI_InheritFrom(frameDef_t *frame, cstring_t inheritName) {
 void FDF_ParseFrame(wordExtractor_t *p, frameDef_t *frame) {
     uint32_t state = 0;
     cstring_t tok;
+    if (!frame) {
+        /* The pool can exhaust inside a TOC-loaded tree. Skip the failed
+         * declaration, including nested braces, so the enclosing parser can
+         * still finish; the old path dereferenced NULL in parse_func. */
+        uint32_t depth = 0;
+        while ((tok = parse_token(p)) && *tok) {
+            if (*tok == '{' && !tok[1]) ++depth;
+            else if (*tok == '}' && !tok[1] && depth && !--depth) return;
+        }
+        parser_error(p); // malformed or unterminated failed declaration
+        return;
+    }
     while ((tok = parse_token(p)) && (*tok != '{')) {
         if (!strcmp(tok, "INHERITS")) {
             cstring_t inheritName = parse_token(p);

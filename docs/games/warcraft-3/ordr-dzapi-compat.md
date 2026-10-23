@@ -186,3 +186,32 @@ Additional focused tests: `wc3_api.dz_font_updates_fdf_and_serialized_glyph_face
 `wc3_api.dz_model_path_reaches_the_wire_render_widget`,
 `client_layout.model_widget_uses_base_model_and_stand_animation`, and
 `client_layout.updated_font_configstring_rebinds_renderer_face`.
+
+## 2026-10-23 iPad follow-up: frame pool, local mode, difficulty backdrop
+
+- The FDF frame pool was still capped at 2048 on `89f3d282`. The ORDR
+  `FDF_ParseFrame -> DzLoadToc` crash path has two independent protections:
+  capacity 4096, and a null-safe recursive declaration skip when `UI_Spawn`
+  exhausts the pool. The latter has a regression covering nested braces and
+  parser recovery after a failed allocation; raising the limit alone would
+  only postpone the same crash. The 4096 limit remains finite and further
+  resource exhaustion must be handled as a recoverable load failure.
+- The dedicated iPad build defines `BZ_IPAD_OFFLINE_ONLY`: it starts at the
+  single-player menu, hides/redirects online and LAN entry points, and rejects
+  remote client connections while retaining in-process loopback. ORDR's
+  actual `-offline` JASS chat command is already queued by the game engine.
+  For this offline-only build the single-player predicate must not infer
+  multiplayer from the map's authored human-capable lobby slots; otherwise
+  the native map command may never be delivered.
+- Inspection of the **original** `ORDR_S2_2.323[C]` map found that the broad
+  difficulty selection background is **not** an FDF BACKDROP: `CUN` creates
+  destructable ID `B100`, whose W3B `bfil` is
+  `war3mapImported\\Background.mdl`. The map contains the matching
+  `war3mapImported\\Background.mdx` with a GEOS textured quad and a root-level
+  `Background.tga` (960x540, 32-bit). The source's destructable path rewrite
+  already produces `.mdx`, and the renderer has a TGA loader. The background
+  failure therefore still needs a real-device model registration / visibility /
+  texture-resolution trace; FDF texture changes alone cannot establish parity.
+
+The desktop test suite and `BZ_IPAD_OFFLINE_ONLY` syntax checks do **not**
+prove iOS rendering or that gameplay after difficulty selection is stable.

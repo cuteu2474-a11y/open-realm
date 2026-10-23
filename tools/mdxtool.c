@@ -667,7 +667,10 @@ static bool DumpModelInfoNoWindow(cstring_t modelPath) {
                 fprintf(stderr, "  CAMS: count=%u\n", (unsigned)CountInclusiveSizeEntries(chunk, chunkSize));
                 break;
             case MAKEFOURCC('G', 'E', 'O', 'S'):
-                fprintf(stderr, "  GEOS: count=%u\n", (unsigned)CountVariableSizeEntries(chunk, chunkSize));
+                /* Each GEOS entry length includes its own 4-byte size field.
+                 * Counting it as an additional 4 bytes made a valid single
+                 * textured quad (ORDR Background.mdx) report zero geosets. */
+                fprintf(stderr, "  GEOS: count=%u\n", (unsigned)CountInclusiveSizeEntries(chunk, chunkSize));
                 break;
             case MAKEFOURCC('L', 'I', 'T', 'E'):
                 fprintf(stderr, "  LITE: count=%u\n", (unsigned)CountVariableSizeEntries(chunk, chunkSize));

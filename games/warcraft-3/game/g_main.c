@@ -1305,6 +1305,13 @@ static void G_StartScripts(void) {
 }
 
 bool G_IsSinglePlayer(void) {
+#ifdef BZ_IPAD_OFFLINE_ONLY
+    /* ORDR maps retain several human-capable lobby slots even when this
+     * package starts exactly one local loopback client.  Inspecting the
+     * authored slots would incorrectly suppress the map's native -offline
+     * event (and local-player camera/input fallback) on an offline-only IPA. */
+    return true;
+#else
     uint32_t humans = 0;
 
     if (!level.mapinfo) return true;
@@ -1313,6 +1320,7 @@ bool G_IsSinglePlayer(void) {
         if (player->used && player->playerType == kPlayerTypeHuman) humans++;
     }
     return humans <= 1;
+#endif
 }
 
 /* On an offline map there is one actual local game client, even when a
