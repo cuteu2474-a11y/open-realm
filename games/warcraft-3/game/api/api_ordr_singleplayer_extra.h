@@ -109,8 +109,14 @@ uint32_t DzFrameSetFont(jass_t *j) {
         snprintf(e->font,sizeof(e->font),"%s",file?file:"");
         e->font_height=h;e->font_flag=flag;
         if(ordr_frames[id].ui){
+            /* The font's FDF identity and the live renderer index must agree.
+             * Keeping an inherited template's old Name would make later
+             * template operations silently restore the wrong typeface. */
+            snprintf(ordr_frames[id].ui->Font.Name,sizeof(ordr_frames[id].ui->Font.Name),
+                     "%s",file?file:"");
             ordr_frames[id].ui->Font.Size=h;
-            ordr_frames[id].ui->Font.Index=UI_FdfFontIndex(file,(uint32_t)(h*UI_FONT_COORD_SCALE));
+            uint32_t size=h>0.0f?(uint32_t)(h*UI_FONT_COORD_SCALE+0.5f):0;
+            ordr_frames[id].ui->Font.Index=UI_FdfFontIndex(file,size);
             ordr_frames_dirty=true;
         }
     }
@@ -120,13 +126,15 @@ uint32_t DzFrameSetTextAlignment(jass_t *j) {
     int id=jass_checkinteger(j,1),align=jass_checkinteger(j,2);
     if(ordr_frame(id)){
         ordr_frame_extra[id].text_align=align;
-        if(ordr_frames[id].ui && align>=0 && align<=10 && (align&3)!=3){
-            /* Dz FRAME_ALIGN is a three-by-three point grid (0/1/2,
-             * 4/5/6, 8/9/10); FDF font justification has different enums. */
+        if(ordr_frames[id].ui && align>=0 && align<=8){
+            /* Dz FRAME_ALIGN follows the Warcraft 3 frame point indices:
+             * TOPLEFT/TOP/TOPRIGHT 0..2, LEFT/CENTER/RIGHT 3..5,
+             * BOTTOMLEFT/BOTTOM/BOTTOMRIGHT 6..8.  FDF's font
+             * justification constants are a different enum. */
             static uiFontJustificationH_t const h[]={FONT_JUSTIFYLEFT,FONT_JUSTIFYCENTER,FONT_JUSTIFYRIGHT};
             static uiFontJustificationV_t const v[]={FONT_JUSTIFYTOP,FONT_JUSTIFYMIDDLE,FONT_JUSTIFYBOTTOM};
-            ordr_frames[id].ui->Font.Justification.Horizontal=h[align&3];
-            ordr_frames[id].ui->Font.Justification.Vertical=v[align>>2];
+            ordr_frames[id].ui->Font.Justification.Horizontal=h[align%3];
+            ordr_frames[id].ui->Font.Justification.Vertical=v[align/3];
             ordr_frames_dirty=true;
         }
     }
@@ -213,12 +221,36 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
     }
     return 0;
 }
+/* Focus is only meaningful for a live, editable control. Hiding or disabling
+ * an ancestor must not resurrect a stale virtual-keyboard target later. */
+static void ORDR_DzLoseFocusInsideFrame(int ancestor_id) {
+    if(!ordr_focused_frame)return;
+    for(int p=ordr_focused_frame;p>0;){
+        if(p==ancestor_id){
+            ordr_frame_extra[ordr_focused_frame].focused=0;
+            ordr_focused_frame=0;
+            ordr_frames_dirty=true;
+            return;
+        }
+        ordr_frame_t *f=ordr_frame(p);
+        if(!f)break;
+        p=f->parent;
+    }
+}
 uint32_t DzFrameSetFocus(jass_t *j) {
     int id=jass_checkinteger(j,1);
     bool enable=jass_checkboolean(j,2);
     ordr_frame_t *frame=ordr_frame(id);
     if(!frame || !frame->ui)return jass_pushboolean(j,false);
     if(enable){
+        if(frame->ui->Type!=FT_EDITBOX && frame->ui->Type!=FT_GLUEEDITBOX &&
+           frame->ui->Type!=FT_SLASHCHATBOX)return jass_pushboolean(j,false);
+        for(int p=id;p>0;){
+            ordr_frame_t *f=ordr_frame(p);
+            if(!f || !f->visible || !f->enabled || !f->ui ||
+               f->ui->hidden || f->ui->disabled)return jass_pushboolean(j,false);
+            p=f->parent;
+        }
         if(ordr_focused_frame>0)ordr_frame_extra[ordr_focused_frame].focused=0;
         ordr_focused_frame=id;
         ordr_frame_extra[id].focused=1;
@@ -270,7 +302,11 @@ uint32_t DzSyncData(jass_t *j){
     snprintf(ordr_sync_context[ordr_sync_depth-1],sizeof(ordr_sync_context[0]),
              "%s",data?data:"");
     player_t *prev=ordr_sync_player;
-    ordr_sync_player=currentplayer;
+    /* Map initialization, timers, and locally-dispatched UI callbacks often
+     * have no currentplayer.  A singleplayer sync still has a real sender:
+     * the connected local client, as with GetLocalPlayer/camera natives. */
+    gameClient_t *local=G_SinglePlayerLocalClient();
+    ordr_sync_player=currentplayer?currentplayer:(local?&local->ps:NULL);
     for(int i=0;i<ordr_sync_handler_count;i++){
         ordr_sync_registration_t *e=&ordr_sync_handlers[i];
         if(strcmp(prefix,e->prefix)==0 && e->trigger && !e->trigger->disabled)
@@ -355,6 +391,9 @@ void ORDR_DzReset(void) {
 static void ordr_write_frame_tree(int id) {
     ordr_frame_t *frame=ordr_frame(id);
     if(!frame || !frame->ui || frame->ui->hidden)return;
+    /* Dz frames use the same FDF scrollbar constraints as stock HUD frames;
+     * the direct Dz writer previously skipped their authored track anchors. */
+    UI_PrepareScrollBar(frame->ui);
     if(frame->ui->Type==FT_EDITBOX || frame->ui->Type==FT_GLUEEDITBOX ||
        frame->ui->Type==FT_SLASHCHATBOX)
         UI_WriteFrameValue(frame->ui,ordr_frame_extra[id].focused?1.0f:0.0f);
@@ -414,7 +453,10 @@ static bool ORDR_DzFrameInputAllowed(edict_t *ent,uint32_t handle) {
        !f || !f->ui)return false;
     for(int p=(int)handle;p>0;){
         ordr_frame_t *ancestor=ordr_frame(p);
-        if(!ancestor || !ancestor->visible || !ancestor->enabled)return false;
+        /* A template or FDF control may be hidden/disabled independently of
+         * DzFrameShow. The client cannot actually hit such a frame. */
+        if(!ancestor || !ancestor->visible || !ancestor->enabled ||
+           (ancestor->ui && (ancestor->ui->hidden || ancestor->ui->disabled)))return false;
         p=ancestor->parent;
     }
     return true;
@@ -466,19 +508,23 @@ static int ORDR_DzListRowCount(cstring_t text) {
 
 void ORDR_DzSelectFrameItem(edict_t *ent,uint32_t handle,int index) {
     ordr_frame_t *f=ordr_frame(handle);
-    int count=0;
+    int count=0,selected=-1;
     player_t *old;
     if(!ORDR_DzFrameInputAllowed(ent,handle) || !f->ui || index<0 || index>INT16_MAX ||
        !ordr_frame_extra[handle].callbacks[10])return;
-    if(f->ui->Type==FT_LISTBOX)count=ORDR_DzListRowCount(f->text);
+    if(f->ui->Type==FT_LISTBOX){
+        count=ORDR_DzListRowCount(f->text);
+        selected=f->ui->ListBox.SelectedIndex;
+    }
     else if(f->ui->Type==FT_POPUPMENU || f->ui->Type==FT_GLUEPOPUPMENU){
         frameDef_t *menu=f->ui->Popup.MenuFrame[0]
             ? UI_FindChildFrame(f->ui,f->ui->Popup.MenuFrame):NULL;
         if(!menu && f->ui->Popup.MenuFrame[0])
             menu=UI_FindFrameNear(f->ui,f->ui->Popup.MenuFrame);
         if(menu && menu->Type==FT_MENU)count=(int)menu->Menu.ItemCount;
+        selected=f->ui->Popup.SelectedIndex;
     } else return;
-    if(index>=count || index==ordr_frame_extra[handle].selected_index)return;
+    if(index>=count || index==selected)return;
     ordr_frame_extra[handle].selected_index=index;
     if(f->ui->Type==FT_LISTBOX)f->ui->ListBox.SelectedIndex=(int16_t)index;
     else f->ui->Popup.SelectedIndex=(int16_t)index;

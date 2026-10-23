@@ -3338,6 +3338,7 @@ float Theme_Float(cstring_t, cstring_t);
 // ui_write.c
 void UI_WriteFrame(frameDef_t const *);
 void UI_WriteFrameValue(frameDef_t const *, float);
+void UI_PrepareScrollBar(frameDef_t const *);
 uint32_t UI_GetWrittenFrameNumber(frameDef_t const *);
 void UI_WriteFrameWithChildren(frameDef_t const *, frameDef_t const *);
 void UI_WriteFrameWithChildrenWithTriggers(edict_t *, frameDef_t const *, frameDef_t const *, uiTrigger_t const *);

@@ -121,10 +121,47 @@ now proves both physical key edges and console-mode suppression.
 
 ## Remaining Dz compatibility gaps
 
+### Partial-implementation correctness pass (2026-10-23)
+
+Regression tests first exposed and then verified fixes for these native paths:
+
+- `DzCreateFrame`/`DzCreateFrameByTagName` reject a missing root template,
+  missing named inheritance template, or unsupported frame type with handle
+  `0` instead of returning an invisible or incorrectly styled frame that
+  consumes a registry slot.
+- `DzCreateFrameByTagName` initializes a new `LISTBOX`/popup with **no**
+  selected item (`-1`). The first click on row index `0` now fires event 10,
+  while a repeated click still does not.
+- Frames cloned from FDF inherit the template's initial hidden/disabled state;
+  event validation checks these actual UI flags throughout the parent chain.
+- Dynamically created `SCROLLBAR` frames use the normal HUD scrollbar layout
+  preparation when their Dz parent tree is serialized.
+- `DzFrameSetTextAlignment` maps the frame point IDs `0` through `8` to the
+  correct 3×3 horizontal/vertical FDF font justification grid; previously
+  centered text (ID `4`) and bottom-right text (ID `8`) mapped incorrectly.
+- `DzFrameSetFocus` now accepts only live, visible, enabled editable controls.
+  Hiding or disabling a parent clears its focused descendant, preventing stale
+  text input from reactivating when a hidden menu is reopened.
+- Nested `DzSyncData` callbacks preserve the outer payload. Without a
+  `currentplayer` during map initialization, the sync event now resolves the
+  connected solo client as its sender; a destroyed trigger cannot fire again.
+- `DzFrameSetFont` now updates the live font resource **and** the FDF font
+  name/size, with stable rounding from UI coordinates to glyph size. A
+  subsequent font-configstring change replaces the client-side font handle
+  instead of retaining an old glyph atlas in the same numeric slot.
+- `DzFrameSetModel` is tested from JASS resource path through game-side model
+  index and `FT_MODEL` wire payload. The client now uses the base asset and
+  `Stand` by default for a general `FT_MODEL` widget, reserving `_Portrait`
+  companion models and `Portrait` defaults for `FT_PORTRAIT` widgets.
+
+These are engine-level corrections, **not** proof that every Dz feature is
+fully identical to the Windows plugin. Rendering and input still require an
+end-to-end run of the actual ORDR map on the target iPad.
+
 | Native group | Map functions | Remaining proof or work |
 | --- | --- | --- |
 | UI lifecycle | `DzGetGameUI`, `DzCreateFrame`, `DzCreateFrameByTagName`, `DzFrameFindByName`, `DzLoadToc` | Exercise the **actual ORDR imported TOC/FDF and asset references** on a loaded map. |
-| Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Compare on-device text alignment, layered textures/alpha, model animation and absolute screen positions against the retail UI. |
+| Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Font/model asset paths now have game→wire and client-renderer regression coverage. The map's numeric model-type/font-flag semantics and exact camera/font styling are not yet established by the public native declarations; compare imported assets, layers, and absolute positions on device. |
 | Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority sets **sibling order on wire**; edit focus drives client text entry, but full focus navigation/IME parity is unverified. |
 | UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Events 1–10 have headless callback/input-path coverage, including item selection 10. Additional unenumerated events, retail frame behavior and actual iPad interaction remain unverified. |
 | Local single-player sync | `DzTriggerRegisterSyncData`, `DzSyncData`, `DzGetTriggerSyncData`, `DzGetTriggerSyncPlayer` | Existing local dispatch is not a multiplayer transport. Audit async event order and trigger lifecycle on real ORDR. |
@@ -144,3 +181,8 @@ Headless tests: `wc3_api.dz_edit_focus_and_text_input_round_trip`,
 `wc3_api.dz_popup_selection_uses_authored_menu_items`.
 These cover parse/clone, generic wire output, a real `G_ClientCommand` click callback and
 hidden-frame rejection. **They do not establish complete iPad ORDR playability.**
+
+Additional focused tests: `wc3_api.dz_font_updates_fdf_and_serialized_glyph_face`,
+`wc3_api.dz_model_path_reaches_the_wire_render_widget`,
+`client_layout.model_widget_uses_base_model_and_stand_animation`, and
+`client_layout.updated_font_configstring_rebinds_renderer_face`.

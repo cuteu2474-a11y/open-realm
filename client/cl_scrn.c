@@ -1095,8 +1095,13 @@ void SCR_LayoutDrawPortrait(uiFrame_t const *frame, rect_t const *screen) {
     uint32_t const model_index = frame->tex.index;
     model_t const *port = model_index < MAX_MODELS ? cl.portraits[model_index] : NULL;
     model_t const *model = model_index < MAX_MODELS ? cl.models[model_index] : NULL;
-    model_t const *draw  = port ? port : model;
-    cstring_t anim = (frame->text && *frame->text) ? frame->text : "Portrait";
+    /* A MODEL widget must keep its requested 3D model, even when that model
+     * has an alternate _Portrait asset. Only portrait widgets opt in to the
+     * companion model and its Portrait default animation. */
+    bool const is_portrait = frame->flags.type == FT_PORTRAIT;
+    model_t const *draw = is_portrait && port ? port : model;
+    cstring_t anim = (frame->text && *frame->text)
+        ? frame->text : (is_portrait ? "Portrait" : "Stand");
     if (!draw) return;
 
     renderEntity_t entity = {0};

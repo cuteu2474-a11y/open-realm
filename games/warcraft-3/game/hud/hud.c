@@ -353,7 +353,7 @@ static uiScrollBar_t MakeScrollBar(frameDef_t const *frame) {
     return result;
 }
 
-static void UI_PrepareScrollBar(frameDef_t const *owner) {
+void UI_PrepareScrollBar(frameDef_t const *owner) {
     frameDef_t *scrollbar = NULL;
     float inset;
 
