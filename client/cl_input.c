@@ -798,7 +798,8 @@ static void CL_SendGameKeyEdge(keyCode_t key,bool down) {
     cstring_t command=Cvar_String("cl_game_keycmd","");
     if(!command || !*command || !key || key>=K_MOUSE1 || !input.focus ||
        cls.state!=ca_active || cls.key_dest!=key_game ||
-       cl.playerstate.client_ui_state!=CLIENT_UI_GAME || CL_WindowTextInputActive())return;
+       cl.playerstate.client_ui_state!=CLIENT_UI_GAME ||
+       CL_WindowTextInputActive() || SCR_LayoutTextInputActive())return;
     for(cstring_t p=command;*p;p++)
         if(!isalnum((unsigned char)*p) && *p!='_')return;
     MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
@@ -1009,7 +1010,8 @@ void CL_Input(void) {
             case SDL_TEXTINPUT:
                 if (cls.key_dest == key_console) CON_TextInput(event.text.text);
                 else if (CL_MenuActive() && cls.key_dest == key_menu) menu.TextInput(event.text.text);
-                else if (cls.state == ca_active && cls.key_dest == key_game) CL_WindowTextInput(event.text.text);
+                else if (cls.state == ca_active && cls.key_dest == key_game &&
+                         !CL_WindowTextInput(event.text.text)) SCR_LayoutTextInput(event.text.text);
                 break;
             case SDL_KEYDOWN:
                 if (event.key.keysym.sym == SDLK_BACKQUOTE) {
@@ -1029,6 +1031,9 @@ void CL_Input(void) {
                     if (CL_WindowTextInputActive())
                         CL_WindowEditRepeat(CL_SDLKeyToKeyCode(event.key.keysym.sym),
                                             CL_BindMods(event.key.keysym.mod));
+                    else if (SCR_LayoutTextInputActive())
+                        SCR_LayoutEditKeyEvent(CL_SDLKeyToKeyCode(event.key.keysym.sym),
+                                               CL_BindMods(event.key.keysym.mod));
                     break;
                 }
                 if (cls.key_dest == key_game && CL_MinimapKeyEvent(event.key.keysym.sym, event.key.repeat != 0)) {
@@ -1161,7 +1166,7 @@ void CL_SetGameplayInput(void) {
     /* CL_ParsePlayerInfo reaffirms gameplay input on ordinary snapshots. Do
      * not let that stop SDL_TEXTINPUT while a transient gameplay edit box
      * still owns text focus. */
-    CL_SetSDLTextInput(CL_WindowTextInputActive());
+    CL_SetSDLTextInput(CL_WindowTextInputActive() || SCR_LayoutTextInputActive());
 }
 
 void CL_SetGameplayBindings(void) {
@@ -1756,6 +1761,69 @@ TEST(client_input, opt_in_game_key_edges_use_existing_string_command) {
     cls.key_dest=old_dest;
     cl.playerstate.client_ui_state=old_ui;
     input.focus=old_focus;
+}
+
+/* Authored persistent edit boxes (including map-created Dz frames) must use
+ * the same SDL text stream as transient windows and the same command channel
+ * as click controls, without routing typed letters into world hotkeys. */
+TEST(client_input, persistent_editbox_taps_accept_text_and_send_authored_command) {
+    struct client_state *old_cl = MemAlloc(sizeof(cl));
+    struct client_static old_cls = cls;
+    refExport_t old_re = re;
+    sizeBuf_t old_msg = cls.netchan.message;
+    uint8_t packet[1024], data[1024];
+    sizeBuf_t layout_packet;
+    uiFrame_t empty = {0};
+    uiEditBox_t wire = { .maxChars = 30 };
+    uiFrame_t frame = {
+        .number = 1, .flags.type = FT_EDITBOX,
+        .size = { UI_BASE_WIDTH, UI_BASE_HEIGHT },
+        .onclick = "editcmd 2", .text = "", .value = 1.0f,
+        .buffer = { .data = (handle_t)&wire, .size = sizeof(wire) },
+    };
+    char command[128];
+
+    T_ASSERT(old_cl != NULL);
+    if (!old_cl) return;
+    memcpy(old_cl, &cl, sizeof(cl));
+    T_EQ(SDL_InitSubSystem(SDL_INIT_EVENTS), 0);
+    memset(&cl, 0, sizeof(cl));
+    cls.state = ca_active;
+    cls.key_dest = key_game;
+    re.GetWindowSize = CL_TestWindowSize;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet, packet, sizeof(packet));
+    MSG_WriteByte(&layout_packet, LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet, &empty, &frame, true);
+    MSG_WriteByte(&layout_packet, 0);
+    MSG_WriteLong(&layout_packet, 0);
+    MSG_WriteShort(&layout_packet, 0);
+    CL_ParseLayout(&layout_packet);
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN, 256, 192, SDL_BUTTON_LEFT, false }));
+    T_ASSERT(SCR_LayoutTextInputActive());
+    T_ASSERT(SCR_LayoutTextInput("hello there"));
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "editcmd 2 \"hello there\"");
+    {
+        SDL_Event event = { .text = { .type = SDL_TEXTINPUT, .text = "!" } };
+        T_EQ(SDL_PushEvent(&event), 1);
+        CL_Input();
+        T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+        MSG_ReadString(&cls.netchan.message, command);
+        T_STREQ(command, "editcmd 2 \"hello there!\"");
+    }
+    SCR_LayoutEditKeyEvent(K_ESCAPE, 0);
+    T_ASSERT(!SCR_LayoutTextInputActive());
+
+    MemFree(cl.layout[LAYER_CONSOLE]);
+    cl = *old_cl; MemFree(old_cl);
+    cls = old_cls; re = old_re;
+    cls.netchan.message = old_msg;
+    FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
+    SDL_QuitSubSystem(SDL_INIT_EVENTS);
 }
 
 TEST(client_input, zoom_reset_returns_to_default_after_zooming_in) {

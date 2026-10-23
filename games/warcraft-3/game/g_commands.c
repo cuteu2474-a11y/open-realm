@@ -3147,6 +3147,15 @@ static void CMD_DzFrameClick(edict_t *ent, uint32_t argc, cstring_t argv[]) {
     ORDR_DzClickFrame(ent, (uint32_t)handle);
 }
 
+static void CMD_DzFrameEdit(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end;
+    unsigned long handle;
+    if(!ent || !ent->client || argc!=3 || !argv[1][0] || argv[1][0]=='-')return;
+    handle=strtoul(argv[1],&end,10);
+    if(*end || handle>UINT32_MAX)return;
+    ORDR_DzEditFrame(ent,(uint32_t)handle,argv[2]);
+}
+
 /* Receive virtual-key edges from a client binding or platform adapter.
  * Parse exact bounded integers before entering the current player's JASS VM. */
 static void CMD_DzKeyInput(edict_t *ent, uint32_t argc, cstring_t argv[]) {
@@ -3290,6 +3299,7 @@ clientCommand_t clientCommands[] = {
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
     { "dzframe", CMD_DzFrameClick },
+    { "dzedit", CMD_DzFrameEdit },
     { "dzkey", CMD_DzKeyInput },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },

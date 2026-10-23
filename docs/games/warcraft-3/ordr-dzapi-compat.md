@@ -47,9 +47,9 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    scrolling controls still need a dedicated integration test.
 2. `DzFrameSetScriptByCode` retains event IDs 0–31 instead of silently dropping ID 9
    (edit-box text changed). The game can deliver any retained event by
-   `ORDR_DispatchFrameEvent`; actual mouse click 1 remains the only event currently
-   wired from live layout interaction. Registering an edit event does not by itself
-   implement text input/caret focus in a persistent layout.
+   `ORDR_DispatchFrameEvent`; live click 1 and edit text change 9 are wired from
+   actual client interactions. Mouse enter/leave, up/down, wheel, checkbox and
+   popup selections still lack independent event dispatch.
 3. The generic client now forwards non-repeating physical keyboard down/up edges through
    its **opt-in** `cl_game_keycmd` (configured to `dzkey` by the Warcraft III share config).
    This reuses `clc_stringcmd` and does not change the wire schema. The game validates
@@ -57,9 +57,21 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    IDs (ASCII letters, arrows, F1–F12, Page/Home/End, modifiers), then invokes registered
    Dz key callbacks and triggers. Mouse buttons and keyboard text-edit mode are excluded.
    This is **physical keyboard coverage**, not an on-screen iPad virtual-keyboard solution.
-4. `DzFrameSetFocus` still accepts a frame without driving client edit focus; implement a
-   generic persistent-layout edit focus pathway before claiming parity. Future work also
-   includes input event IDs 2–10 and on-device verification.
+4. `DzFrameSetFocus(frame, true)` now keeps one game-owned focused frame and sends
+   a focus hint through the existing `uiFrame_t.value` field for EDITBOX types;
+   `false` clears it. The universal client retains typed text/caret state across
+   ordinary layout redraws, activates SDL text input on tap or a focus hint,
+   and sends an escaped quoted value through the editor's server-authored
+   `OnClick` command (`dzedit <frame> "<value>"`). The game validates the live
+   visible/enabled editor, updates `DzFrameGetText`, and invokes registered
+   callback event **9** with the actual client-player context. This path is
+   single-player only. A keyboard and pointer event fixture proves client
+   delivery; no iPad hardware rendering/IME parity claim is made.
+5. The client editor has one active field at a time and does not yet implement
+   multi-field Tab traversal, pointer caret placement or a complete IME
+   composition lifecycle. Server-authored changes to a *currently edited*
+   value are not reconciled with a local in-progress edit. Event IDs 2–8 and
+   10, scroll bar controls and actual ORDR in-game testing remain pending.
 
 Tests were written first: frame priority order, event 9 callback and `dzkey` JASS action all
 failed on the prior implementation, then passed after changes. The generic client test
@@ -72,12 +84,14 @@ now proves both physical key edges and console-mode suppression.
 | --- | --- | --- |
 | UI lifecycle | `DzGetGameUI`, `DzCreateFrame`, `DzCreateFrameByTagName`, `DzFrameFindByName`, `DzLoadToc` | Exercise the **actual ORDR imported TOC/FDF and asset references** on a loaded map. |
 | Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Compare on-device text alignment, layered textures/alpha, model animation and absolute screen positions against the retail UI. |
-| Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority now sets **sibling order on wire**, subject to live display validation; focus still lacks client edit activation. |
-| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Verified click event 1 over real client command; IDs up to 31 can be retained/explicitly dispatched. Live edit, enter/leave, wheel and iPad taps still need input coverage. |
+| Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority sets **sibling order on wire**; edit focus drives client text entry, but full focus navigation/IME parity is unverified. |
+| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Click event 1 and edit event 9 reach JASS through real client commands. Remaining mouse/scroll/check events and actual iPad interaction are unverified. |
 | Local single-player sync | `DzTriggerRegisterSyncData`, `DzSyncData`, `DzGetTriggerSyncData`, `DzGetTriggerSyncPlayer` | Existing local dispatch is not a multiplayer transport. Audit async event order and trigger lifecycle on real ORDR. |
 | Keyboard | `DzTriggerRegisterKeyEventByCode`, `DzGetTriggerKeyPlayer` | Physical keyboard now travels via opted-in `cl_game_keycmd`/`dzkey` to JASS; verify retail status semantics on imported ORDR. iPad touch keyboard still needs its own control path. |
 
-Headless tests: `wc3_api.dz_toc_and_frame_creation_find_real_template_children`,
+Headless tests: `wc3_api.dz_edit_focus_and_text_input_round_trip`,
+`client_input.persistent_editbox_taps_accept_text_and_send_authored_command`,
+`wc3_api.dz_toc_and_frame_creation_find_real_template_children`,
 `wc3_api.dz_frames_emit_real_ui_payloads`, and
 `wc3_api.dz_click_flows_through_actual_client_command_and_respects_visibility`.
 These cover parse/clone, generic wire output, a real `G_ClientCommand` click callback and

@@ -32,6 +32,7 @@ typedef struct {
     unsigned char callback_sync[32];
 } ordr_frame_extra_t;
 static ordr_frame_extra_t ordr_frame_extra[4096];
+static int ordr_focused_frame;
 static int ordr_last_ui_frame;
 static player_t *ordr_last_ui_player;
 static player_t *ordr_last_key_player;
@@ -205,8 +206,30 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
             UI_SetOnClick(ordr_frames[id].ui,"dzframe %d",id);
             ordr_frames_dirty=true;
         }
+        if(event==9 && ordr_frames[id].ui &&
+           (ordr_frames[id].ui->Type==FT_EDITBOX || ordr_frames[id].ui->Type==FT_GLUEEDITBOX ||
+            ordr_frames[id].ui->Type==FT_SLASHCHATBOX)){
+            UI_SetOnClick(ordr_frames[id].ui,"dzedit %d",id);
+            ordr_frames_dirty=true;
+        }
     }
     return 0;
+}
+uint32_t DzFrameSetFocus(jass_t *j) {
+    int id=jass_checkinteger(j,1);
+    bool enable=jass_checkboolean(j,2);
+    ordr_frame_t *frame=ordr_frame(id);
+    if(!frame || !frame->ui)return jass_pushboolean(j,false);
+    if(enable){
+        if(ordr_focused_frame>0)ordr_frame_extra[ordr_focused_frame].focused=0;
+        ordr_focused_frame=id;
+        ordr_frame_extra[id].focused=1;
+    } else if(ordr_focused_frame==id){
+        ordr_focused_frame=0;
+        ordr_frame_extra[id].focused=0;
+    }
+    ordr_frames_dirty=true;
+    return jass_pushboolean(j,true);
 }
 uint32_t DzGetTriggerUIEventFrame(jass_t *j){
     return jass_pushinteger(j,ordr_last_ui_frame);
@@ -322,6 +345,7 @@ void ORDR_DzReset(void) {
     ordr_frame_trace_count=0;
     ordr_frames_dirty=false;
     ordr_last_ui_frame=0;
+    ordr_focused_frame=0;
     ordr_last_ui_player=ordr_last_key_player=ordr_sync_player=NULL;
     ordr_sync_handler_count=ordr_sync_depth=ordr_key_binding_count=0;
     ordr_toc_count=0;
@@ -333,7 +357,10 @@ void ORDR_DzReset(void) {
 static void ordr_write_frame_tree(int id) {
     ordr_frame_t *frame=ordr_frame(id);
     if(!frame || !frame->ui || frame->ui->hidden)return;
-    UI_WriteFrame(frame->ui);
+    if(frame->ui->Type==FT_EDITBOX || frame->ui->Type==FT_GLUEEDITBOX ||
+       frame->ui->Type==FT_SLASHCHATBOX)
+        UI_WriteFrameValue(frame->ui,ordr_frame_extra[id].focused?1.0f:0.0f);
+    else UI_WriteFrame(frame->ui);
     int last_prio=INT_MIN, last_id=0;
     while(true){
         int next=0, next_prio=INT_MAX;
@@ -393,6 +420,27 @@ void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
     old=currentplayer;
     currentplayer=&ent->client->ps;
     ORDR_DispatchFrameEvent(level.vm,(int)handle,1);
+    currentplayer=old;
+}
+
+/* Only an enabled, visible script-owned editor may accept client text. */
+void ORDR_DzEditFrame(edict_t *ent,uint32_t handle,cstring_t text) {
+    ordr_frame_t *f=ordr_frame(handle);
+    player_t *old;
+    if(!ent || !ent->client || !ent->client->connected || !level.vm || !G_IsSinglePlayer() ||
+       !f || !f->ui || !text ||
+       (f->ui->Type!=FT_EDITBOX && f->ui->Type!=FT_GLUEEDITBOX && f->ui->Type!=FT_SLASHCHATBOX))return;
+    for(int p=(int)handle;p>0;){
+        ordr_frame_t *ancestor=ordr_frame(p);
+        if(!ancestor || !ancestor->visible || !ancestor->enabled)return;
+        p=ancestor->parent;
+    }
+    snprintf(f->text,sizeof(f->text),"%.255s",text);
+    UI_SetText(f->ui,"%s",f->text);
+    ordr_frames_dirty=true;
+    old=currentplayer;
+    currentplayer=&ent->client->ps;
+    ORDR_DispatchFrameEvent(level.vm,(int)handle,9);
     currentplayer=old;
 }
 

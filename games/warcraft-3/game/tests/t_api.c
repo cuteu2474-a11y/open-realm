@@ -108,6 +108,8 @@ static bool dz_layout_layer_pending;
 static int32_t dz_layout_layer;
 static char dz_priority_order[8];
 static uint32_t dz_priority_count;
+static float dz_edit_wire_focus;
+static bool dz_edit_wire_command;
 static void dz_test_write(pfWriteType_t type, void const *value) {
     if(!value)return;
     if(type==PF_BYTE){
@@ -119,6 +121,10 @@ static void dz_test_write(pfWriteType_t type, void const *value) {
     if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
     uiFrame_t const *frame=value;
     dz_written_frames++;
+    if(frame->flags.type==FT_EDITBOX && frame->onclick && !strcmp(frame->onclick,"dzedit 2")){
+        dz_edit_wire_focus=frame->value;
+        dz_edit_wire_command=true;
+    }
     if (frame->text && dz_priority_count < sizeof(dz_priority_order)) {
         if (!strcmp(frame->text,"dz high")) dz_priority_order[dz_priority_count++]='H';
         else if (!strcmp(frame->text,"dz low")) dz_priority_order[dz_priority_count++]='L';
@@ -281,6 +287,72 @@ TEST(wc3_api, dz_registers_editbox_text_event_and_dispatches_callback) {
         " call BJassAssert(edits == 1, \"edit event callback not delivered\")\n"
         "endfunction\n"));
     ORDR_DispatchFrameEvent(level.vm,2,9);
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* A live editor needs focus state plus an authenticated client text change,
+ * rather than a registered callback that can only be invoked by C tests. */
+TEST(wc3_api, dz_edit_focus_and_text_input_round_trip) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    dz_edit_wire_focus=-1;
+    dz_edit_wire_command=false;
+    dz_layout_layer_pending=false;
+    dz_layout_layer=-1;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzFrameSetFocus takes integer frame, boolean enable returns boolean\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "globals\n"
+        " integer editor = 0\n"
+        " integer changes = 0\n"
+        "endglobals\n"
+        "function edited takes nothing returns nothing\n"
+        " call BJassAssert(DzFrameGetText(editor) == \"hello there\", \"text not updated\")\n"
+        " set changes = changes + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set editor = DzCreateFrameByTagName(\"EDITBOX\", \"editor\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(editor, 9, function edited, false)\n"
+        " call BJassAssert(DzFrameSetFocus(editor, true), \"focus rejected\")\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changes == 1, \"one edit event expected\")\n"
+        "endfunction\n"
+        "function blur takes nothing returns nothing\n"
+        " call BJassAssert(DzFrameSetFocus(editor, false), \"blur rejected\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(editor, false)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    ORDR_DzRenderFrames();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(dz_edit_wire_command);
+    T_FEQ(dz_edit_wire_focus,1.0f,0.001f);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzedit","2","hello there"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"blur",false);
+    dz_edit_wire_focus=-1;
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    ORDR_DzRenderFrames();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_FEQ(dz_edit_wire_focus,0.0f,0.001f);
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzedit","2","should be ignored"});
     jass_runevents(level.vm);
     jass_callbyname(level.vm,"verify",false);
     T_ASSERT(!jass_rterror_pending(level.vm));

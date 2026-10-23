@@ -4,6 +4,109 @@
 #include <ctype.h>
 #include <SDL2/SDL.h>
 
+/* An edit control in a persistent game-authored layout is not a transient
+ * client window. Keep one locally focused editor across redraws and transport
+ * changes through its server-authored OnClick command, without game-specific
+ * input rules in the universal client or alterations to the UI wire schema. */
+static struct {
+    bool active;
+    uint32_t layer, frame, cursor, anchor, max_chars;
+    char text[256], command[CMDARG_LEN];
+} layout_editor;
+static uint32_t layout_edit_suppress_layer, layout_edit_suppress_frame;
+
+bool SCR_LayoutTextInputActive(void) { return layout_editor.active; }
+
+static void SCR_LayoutBlurEdit(void) {
+    if (layout_editor.active) {
+        layout_edit_suppress_layer = layout_editor.layer;
+        layout_edit_suppress_frame = layout_editor.frame;
+    }
+    layout_editor.active = false;
+    CL_SetTransientTextInput(CL_WindowTextInputActive());
+}
+
+static bool SCR_LayoutIsEdit(uiFrame_t const *frame) {
+    return frame && !(frame->flagsvalue & UIFRAME_DISABLED) && frame->onclick && *frame->onclick &&
+        (frame->flags.type == FT_EDITBOX || frame->flags.type == FT_GLUEEDITBOX ||
+         frame->flags.type == FT_SLASHCHATBOX);
+}
+
+static void SCR_LayoutFocusEdit(uiFrame_t const *frame, uint32_t layer) {
+    if (!SCR_LayoutIsEdit(frame)) return;
+    if (layout_editor.active && layout_editor.frame == frame->number && layout_editor.layer == layer) return;
+    memset(&layout_editor, 0, sizeof(layout_editor));
+    layout_editor.active = true;
+    layout_editor.layer = layer;
+    layout_editor.frame = frame->number;
+    strlcpy(layout_editor.command, frame->onclick, sizeof(layout_editor.command));
+    uiEditBox_t const *wire = frame->buffer.size >= sizeof(uiEditBox_t) ? frame->buffer.data : NULL;
+    layout_editor.max_chars = wire && wire->maxChars ? MIN(wire->maxChars, 255u) : 255u;
+    cstring_t value = frame->text;
+    FOR_LOOP(i, SCR_NumFrames()) {
+        uiFrame_t const *child = SCR_Frame(i);
+        if (child && child->parent == frame->number &&
+            (child->flags.type == FT_STRING || child->flags.type == FT_TEXT)) {
+            if (child->text && *child->text) value = child->text;
+            break;
+        }
+    }
+    snprintf(layout_editor.text, sizeof(layout_editor.text), "%.*s",
+             (int)layout_editor.max_chars, value ? value : "");
+    layout_editor.cursor = layout_editor.anchor = (uint32_t)strlen(layout_editor.text);
+    CL_SetTransientTextInput(true);
+}
+
+static void SCR_LayoutSendEditText(void) {
+    if (!layout_editor.active || !layout_editor.command[0]) return;
+    char escaped[sizeof(layout_editor.text) * 2 + 1];
+    size_t out = 0;
+    for (cstring_t p = layout_editor.text; *p && out + 2 < sizeof(escaped); p++) {
+        if (*p == '"' || *p == '\\') escaped[out++] = '\\';
+        escaped[out++] = *p;
+    }
+    escaped[out] = '\0';
+    MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
+    SZ_Printf(&cls.netchan.message, "%s \"%s\"", layout_editor.command, escaped);
+}
+
+bool SCR_LayoutTextInput(cstring_t text) {
+    if (!layout_editor.active || !text || !*text) return false;
+    char filtered[256], old[256];
+    strlcpy(old, layout_editor.text, sizeof(old));
+    M_TextInput_Filter(text, filtered, sizeof(filtered));
+    menuTextInput_t ti = {
+        .text = layout_editor.text, .size = sizeof(layout_editor.text),
+        .max_chars = layout_editor.max_chars,
+        .cursor = layout_editor.cursor, .anchor = layout_editor.anchor,
+    };
+    M_TextInput_Insert(&ti, filtered);
+    layout_editor.cursor = ti.cursor;
+    layout_editor.anchor = ti.anchor;
+    if (strcmp(old, layout_editor.text)) SCR_LayoutSendEditText();
+    return true;
+}
+
+bool SCR_LayoutEditKeyEvent(int key, uint32_t mods) {
+    if (!layout_editor.active) return false;
+    if (key == K_ESCAPE || key == K_TAB || key == K_ENTER) {
+        SCR_LayoutBlurEdit();
+        return true;
+    }
+    char old[256];
+    strlcpy(old, layout_editor.text, sizeof(old));
+    menuTextInput_t ti = {
+        .text = layout_editor.text, .size = sizeof(layout_editor.text),
+        .max_chars = layout_editor.max_chars,
+        .cursor = layout_editor.cursor, .anchor = layout_editor.anchor,
+    };
+    M_TextInput_KeyModified(&ti, key, (mods & KEY_MOD_SHIFT) != 0, (mods & KEY_MOD_CTRL) != 0);
+    layout_editor.cursor = ti.cursor;
+    layout_editor.anchor = ti.anchor;
+    if (strcmp(old, layout_editor.text)) SCR_LayoutSendEditText();
+    return true; /* focused text entry must not activate world/game hotkeys */
+}
+
 bool scr_initialized;
 
 #define SCR_FPS_HEIGHT 8
@@ -1246,13 +1349,16 @@ void SCR_LayoutDrawEditBox(uiFrame_t const *frame, rect_t const *screen) {
             break;
         }
     }
-    if (!text_frame) return;
+    if (!text_frame) text_frame = frame;
 
-    value = CL_WindowEditTextValue(text_frame->number);
+    value = layout_editor.active && !layout_current_window &&
+            layout_current_layer == layout_editor.layer && frame->number == layout_editor.frame
+        ? layout_editor.text : NULL;
+    if (!value) value = CL_WindowEditTextValue(text_frame->number);
     if (!value) value = SCR_GetStringValue(text_frame);
     if (!value) value = "";
 
-    if (text_frame->buffer.data && text_frame->buffer.size >= sizeof(uiLabel_t))
+    if (text_frame != frame && text_frame->buffer.data && text_frame->buffer.size >= sizeof(uiLabel_t))
         label = *(uiLabel_t const *)text_frame->buffer.data;
     if (edit->font) label.font = edit->font;
 
@@ -1316,7 +1422,10 @@ void SCR_LayoutDrawEditBox(uiFrame_t const *frame, rect_t const *screen) {
         }
     }
     re.DrawText(&dt);
-    if (CL_WindowEditCursor(text_frame->number, &cursor))
+    if (layout_editor.active && !layout_current_window &&
+        layout_current_layer == layout_editor.layer && frame->number == layout_editor.frame)
+        M_DrawTextInputCursor(&re, &dt, value, layout_editor.cursor, COLOR32_WHITE);
+    else if (CL_WindowEditCursor(text_frame->number, &cursor))
         M_DrawTextInputCursor(&re, &dt, value, cursor, COLOR32_WHITE);
 }
 
@@ -1562,6 +1671,29 @@ void SCR_DrawLayout(void) {
             layout_current_window = false;
             layout_current_layer = layer;
             SCR_ClearLayer(layout, layer);
+            /* The server may set edit focus without an initial pointer tap.
+             * Focus is encoded in the edit frame's existing value field. */
+            bool suppressed_hint_seen = false;
+            bool focused_frame_seen = false;
+            FOR_LOOP(i, SCR_NumFrames()) {
+                uiFrame_t const *frame = SCR_Frame(i);
+                if (!frame) continue;
+                if (layout_editor.active && layout_editor.layer == layer &&
+                    layout_editor.frame == frame->number && SCR_LayoutIsEdit(frame))
+                    focused_frame_seen = true;
+                if (frame->value > 0.5f && SCR_LayoutIsEdit(frame)) {
+                    if (layout_edit_suppress_layer == layer &&
+                        layout_edit_suppress_frame == frame->number) suppressed_hint_seen = true;
+                    else {
+                        SCR_LayoutFocusEdit(frame, layer);
+                        focused_frame_seen = true;
+                    }
+                }
+            }
+            if (layout_edit_suppress_layer == layer && !suppressed_hint_seen)
+                layout_edit_suppress_frame = 0;
+            if (layout_editor.active && layout_editor.layer == layer && !focused_frame_seen)
+                SCR_LayoutBlurEdit();
             if (layer == LAYER_WORLD_HOVER) {
                 if (!SCR_LayoutWorldHoverRoot(&root)) continue;
                 SCR_SetLayoutRoot(&root);
@@ -1595,6 +1727,7 @@ void SCR_SetLayoutLayer(uint32_t layer, handle_t data) {
 
 void SCR_ClearLayoutLayer(uint32_t layer) {
     if (layer < MAX_LAYOUT_LAYERS) layout_layers[layer] = NULL;
+    if (layout_editor.active && layout_editor.layer == layer) SCR_LayoutBlurEdit();
 }
 
 void SCR_ReleaseLayoutCameraEvents(uint32_t layer) {
@@ -1613,6 +1746,8 @@ void SCR_ReleaseWindowCameraEvents(uintptr_t window_namespace) {
 }
 
 void SCR_ClearLayoutResources(void) {
+    SCR_LayoutBlurEdit();
+    layout_edit_suppress_frame = 0;
     FOR_LOOP(i, MAX_DYNAMIC_IMAGES) {
         SAFE_DELETE(layout_dynamic_pics[i], re.ReleaseTexture);
         layout_dynamic_pic_names[i][0] = '\0';
@@ -1665,6 +1800,7 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
                 hit = SCR_LayoutMultiselectEntityAt(frame, &point) != 0;
             else
                 hit = (SCR_LayoutFrameHasClickCommand(frame) ||
+                       SCR_LayoutIsEdit(frame) ||
                        (frame->tooltip && *frame->tooltip)) &&
                       Rect_contains(SCR_LayoutRect(frame), &point);
             if (hit) {
@@ -1700,7 +1836,20 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     }
 
     if (param != SDL_BUTTON_LEFT) return false;
+    if (event == MENU_MOUSE_UP && SCR_LayoutIsEdit(hovered_frame) && layout_editor.active &&
+        layout_editor.frame == hovered_frame->number && layout_editor.layer == layout_hovered_layer) {
+        layout_left_down = false;
+        layout_press_frame = 0;
+        return true;
+    }
     if (event == MENU_MOUSE_DOWN) {
+        if (SCR_LayoutIsEdit(hovered_frame)) {
+            SCR_LayoutFocusEdit(hovered_frame, layout_hovered_layer);
+            layout_left_down = true;
+            layout_press_frame = 0;
+            return true;
+        }
+        if (layout_editor.active) SCR_LayoutBlurEdit();
         char command[CMDARG_LEN * 2];
         layout_left_down = true;
         layout_press_frame = hovered_frame ? hovered_frame->number : 0;

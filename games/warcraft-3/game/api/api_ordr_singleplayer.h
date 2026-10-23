@@ -48,6 +48,8 @@ static int ordr_frame_new(const char *name,int parent,int id,frameDef_t *ui) {
         snprintf(f->text,sizeof(f->text),"%s",ui->Text?ui->Text:"");
     }
     snprintf(f->name,sizeof(f->name),"%s",name?name:"");ordr_frame_trace("create",n,f->name);
+    if(ui && (ui->Type==FT_EDITBOX || ui->Type==FT_GLUEEDITBOX || ui->Type==FT_SLASHCHATBOX))
+        UI_SetOnClick(ui,"dzedit %d",n);
     ordr_frames_dirty=true;
     return n;
 }
@@ -143,7 +145,7 @@ uint32_t DzFrameSetSize(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j
 uint32_t DzFrameSetAlpha(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int a=jass_checkinteger(j,2);if(f){f->alpha=a<0?0:a>255?255:a;if(f->ui)f->ui->Color.a=f->alpha;ordr_frames_dirty=true;}return 0;}
 /* DzAPI resolves the most recently created frame in a repeated-name context. */
 uint32_t DzFrameFindByName(jass_t *j){const char*s=jass_checkstring(j,1);int id=jass_checkinteger(j,2);for(int i=ordr_next_frame-1;i>=1;i--)if(ordr_frames[i].used&&ordr_frames[i].id==id&&s&&!strcmp(ordr_frames[i].name,s))return jass_pushinteger(j,i);return jass_pushinteger(j,0);}
-uint32_t DzFrameSetFocus(jass_t *j){int id=jass_checkinteger(j,1);(void)jass_checkboolean(j,2);return jass_pushboolean(j,ordr_frame(id)!=NULL);}
+uint32_t DzFrameSetFocus(jass_t *j);
 uint32_t JNStringCount(jass_t *j){const char*s=jass_checkstring(j,1),*sub=jass_checkstring(j,2);int n=0;if(s&&sub&&*sub){size_t z=strlen(sub);while((s=strstr(s,sub))){n++;s+=z;}}return jass_pushinteger(j,n);}
 uint32_t JNStringSplit(jass_t *j){const char*s=jass_checkstring(j,1),*sep=jass_checkstring(j,2);int index=jass_checkinteger(j,3);if(!s||!sep||!*sep||index<0)return jass_pushstring(j,"");size_t z=strlen(sep);for(int i=0;i<index;i++){const char*p=strstr(s,sep);if(!p)return jass_pushstring(j,"");s=p+z;}const char*e=strstr(s,sep);size_t n=e?(size_t)(e-s):strlen(s);char*out=malloc(n+1);if(!out)return jass_pushstring(j,"");memcpy(out,s,n);out[n]=0;uint32_t r=jass_pushstring(j,out);free(out);return r;}
 uint32_t JNStringReplace(jass_t *j){const char*s=jass_checkstring(j,1),*old=jass_checkstring(j,2),*rep=jass_checkstring(j,3);if(!s||!old||!*old)return jass_pushstring(j,s?s:"");if(!rep)rep="";size_t a=strlen(old),b=strlen(rep),count=0;const char*p=s;while((p=strstr(p,old))){count++;p+=a;}size_t sl=strlen(s);if(b>a&&count>(SIZE_MAX-sl-1)/(b-a))return jass_pushstring(j,"");size_t len=b>=a?sl+count*(b-a):sl-count*(a-b);char*out=malloc(len+1);if(!out)return jass_pushstring(j,"");char*d=out;while((p=strstr(s,old))){size_t n=(size_t)(p-s);memcpy(d,s,n);d+=n;memcpy(d,rep,b);d+=b;s=p+a;}strcpy(d,s);uint32_t r=jass_pushstring(j,out);free(out);return r;}
