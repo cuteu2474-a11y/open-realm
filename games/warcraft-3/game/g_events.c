@@ -549,6 +549,32 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
 }
 
 static void G_TouchTriggers(edict_t *ent) {
+    /* Original ORDR S2 2.323[C] uses BDQ(CH, CRy) for its random-wisp
+     * beacon. CH = Rect(-3584,-9504,-3328,-9216), e0IX is the wisp.
+     * Log just the actual boundary crossing, not each simulation tick. */
+    if (ent && level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
+        jass_functionbyname(level.vm, "CRy")) {
+        static unsigned beacon_crossings_logged;
+        bool const before = ent->old_origin.x >= -3584.0f &&
+            ent->old_origin.x <= -3328.0f &&
+            ent->old_origin.y >= -9504.0f &&
+            ent->old_origin.y <= -9216.0f;
+        bool const after = ent->s.origin2.x >= -3584.0f &&
+            ent->s.origin2.x <= -3328.0f &&
+            ent->s.origin2.y >= -9504.0f &&
+            ent->s.origin2.y <= -9216.0f;
+        if (before != after && beacon_crossings_logged++ < 24) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u entered=%u from=(%.1f,%.1f) to=(%.1f,%.1f) hp=%.0f/%.0f active=%u",
+                     (unsigned)ent->s.number, (unsigned)after,
+                     (double)ent->old_origin.x, (double)ent->old_origin.y,
+                     (double)ent->s.origin2.x, (double)ent->s.origin2.y,
+                     (double)ent->health.value, (double)ent->health.max_value,
+                     (unsigned)G_UnitIsWorldActive(ent));
+            jass_ordr_log_event(level.vm,"ORDR_WISP_BEACON",detail);
+        }
+    }
     /* A region filter can register new events during this very crossing.
      * Newly created handlers must not observe a movement that predates their
      * registration, regardless of whether they reuse a retired slot or use
@@ -572,6 +598,19 @@ static void G_TouchTriggers(edict_t *ent) {
                     G_EventFromHandle(event_handle) == evt && evt->region == region_handle)
                 {
                     G_PublishEventResponse(ent, EVENT_GAME_ENTER_REGION, evt);
+                    if (level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
+                        jass_functionbyname(level.vm, "CRy")) {
+                        static unsigned published;
+                        if (published++ < 24) {
+                            char detail[128];
+                            snprintf(detail,sizeof(detail),
+                                     "unit=%u handler_seq=%u region_rects=%u",
+                                     (unsigned)ent->s.number,
+                                     (unsigned)evt->registration_sequence,
+                                     (unsigned)region->num_rects);
+                            jass_ordr_log_event(level.vm,"ORDR_WISP_REGION_EVENT",detail);
+                        }
+                    }
                 }
                 break;
             }

@@ -22,7 +22,11 @@ hud_t hud;
 
 /* frames[] is defined in fdf_parser.c (common/) */
 
-#define MAX_FRAMES_WRITE 1024
+/* ORDR creates >900 Dz handles plus nested FDF descendants. The old
+ * 1024-entry frame-reference table silently overflowed, resolving later
+ * relative anchors to UI_PARENT and stretching decorative emoji/backdrop
+ * art across its parent instead of retaining its intended button bounds. */
+#define MAX_FRAMES_WRITE 4096
 static frameDef_t const *framesWritten[MAX_FRAMES_WRITE];
 static frameDef_t const * *frameptr;
 
