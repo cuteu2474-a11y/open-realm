@@ -23,10 +23,11 @@ type trigger          extends handle
 type event            extends handle
 type race             extends handle
 type triggeraction    extends handle
-type playerevent      extends handle
-type gameevent        extends handle
-type playerunitevent  extends handle
-type unitevent        extends handle
+type eventid          extends handle
+type playerevent      extends eventid
+type gameevent        extends eventid
+type playerunitevent  extends eventid
+type unitevent        extends eventid
 type alliancetype     extends handle
 type racepreference  extends handle
 type mapcontrol      extends handle
@@ -510,3 +511,17 @@ globals
     constant unittype UNIT_TYPE_GROUND = ConvertUnitType(4)
     constant effecttype EFFECT_TYPE_TARGET = ConvertEffectType(1)
 endglobals
+
+native GetTriggerEventId takes nothing returns eventid
+
+native GetLearnedSkill takes nothing returns integer
+
+native GetLearnedSkillLevel takes nothing returns integer
+
+native GetLearningUnit takes nothing returns unit
+
+native SetTimeOfDayScale takes real r returns nothing
+
+native GetTimeOfDayScale takes nothing returns real
+
+native SetUnitAnimationByIndex takes unit u, integer index returns nothing

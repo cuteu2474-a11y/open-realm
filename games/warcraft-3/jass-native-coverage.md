@@ -39,39 +39,23 @@ behavior, and town discovery remain owned by the construction and town systems. 
 a failed request for retries. Candidate ranking, blocker radius/priority, worker preference, and hall placement offset
 are `BZ_COMPAT_GUESS` policies documented in [Player AI](../../docs/games/warcraft-3/player-ai.md).
 
-## Baseline
+## Reproducible inventory and limits
 
-The registry currently contains 919 callbacks. The last conservative source
-audit snapshot now classifies 502 as implemented and 334 as clear placeholders
-across 836 callbacks (60.0% overall at that snapshot). Newer registrations,
-including `GetUnitAbilityLevel`, are not folded into the implementation split
-below yet. This count treats a callback as a placeholder only when it ignores its
-arguments and unconditionally returns no value, zero, false, or a null handle.
-A working `returns nothing` callback also returns zero at the C ABI boundary, so
-raw `return 0` counts are not meaningful.
+`api_module.c` has 1,289 registered names on the single-player compatibility
+branch. Registration, a nonempty C body, and tested behavior are separate facts.
+The previous “implemented” percentages measured source shape, not semantic
+completeness, and have been removed.
 
-| Module | Registered | Implemented | Placeholder |
-| --- | ---: | ---: | ---: |
-| `api_misc.h` | 317 | 190 | 127 |
-| `api_unit.h` | 144 | 83 | 61 |
-| `api_player.h` | 86 | 43 | 43 |
-| `api_trigger.h` | 48 | 26 | 22 |
-| `api_camera.h` | 42 | 39 | 3 |
-| `api_sound.h` | 35 | 10 | 25 |
-| `api_leaderboard.h` | 27 | 27 | 0 |
-| `api_math.h` | 26 | 18 | 8 |
-| `api_group.h` | 25 | 18 | 7 |
-| `api_quest.h` | 24 | 22 | 2 |
-| `api_destructable.h` | 22 | 17 | 5 |
-| `api_item.h` | 16 | 10 | 6 |
-| `api_effect.h` | 13 | 13 | 0 |
-| `api_cinefilter.h` | 10 | 10 | 0 |
-| `api_test.h` | 1 | 1 | 0 |
+Run `tools/ordr/audit_natives.py` on the original `war3map.j`, with `Blizzard.j`
+as `--support`. The report also checks `common.txt` declarations, follows static
+wrapper calls/code callbacks, records hashes, and separates placeholders from
+`needs_review`. Dynamic names, runtime data, rendering and input require further
+verification. A real `returns nothing` implementation also returns C zero.
 
-The codebase already exceeds 50% of all registered callbacks. "Populate 50% of
-the original placeholder baseline" is a different target: 180 of the original
-360 placeholders, yielding 656 implemented callbacks (78.5% overall). Recount whenever callbacks are added
-to the registry or a placeholder begins consuming authoritative state.
+See [ORDR native handoff](../../docs/games/warcraft-3/ordr-native-handoff.md)
+for tested behavior, remaining functions and exact continuation commands.
+
+## Native behavior notes
 
 Issue #418 campaign-audit JASS native families now implemented: `SetCaptainHome`, `SetStagePoint`, `ShiftTownSpot`, `SuicideUnit`, `SuicideUnitEx`, `SuicidePlayer`, `MergeUnits`, `GetUpgradeGoldCost`, `GetUpgradeWoodCost` (plus the historical OpenRealm `GetUpgradeLumberCost` alias; all in `api_ai.h`), `EnumItemsInRect` / `GetEnumItem` (items in rect, mirrors `EnumDestructablesInRect`; boolexpr filter TODO), `GetChangingUnit` / `GetChangingUnitPrevOwner` (ownership-change event context, eventValue = prev_owner+1), `SetUnitUserData` / `GetUnitUserData` / `UnitSetUsesAltIcon` (unit state fields). Stubs added: `SetCampaignMenuRaceEx`, `SetAltMinimapIcon`, `DoNotSaveReplay`. Bot AI signatures for `SetCaptainHome` and `SuicideUnit*` take the player as explicit arg 1 (not from context); scripts call `GetAiPlayer()` to supply it. `EnumItemsInRect` arg 3 is the actionFunc; arg 2 (boolexpr) is skipped (TODO). `currentenumitem` is defined alongside `G_IsItem` in `g_items.c`.
 
@@ -100,8 +84,8 @@ covers Blizzard.j's `UnitAddIndicatorBJ`, whose wrapper calls the generic `AddIn
 
 Coverage is not conformance. `SetUnitAnimation` now resolves the unit type's Required Animation Names and
 `AddUnitAnimationProperties` mutates the same per-unit tag set before reselecting the logical animation; see
-[Required Animation Names](../../docs/games/warcraft-3/unit-animation-properties.md). `SetUnitAnimationByIndex`, rarity selection, and queued
-animation semantics remain separate gaps. `SetDoodadAnimation` and `SetDoodadAnimationRect` now select matching
+[Required Animation Names](../../docs/games/warcraft-3/unit-animation-properties.md). `SetUnitAnimationByIndex` now resolves exact model sequence order and survives
+save/load; full retail presentation parity remains unverified. `SetDoodadAnimation` and `SetDoodadAnimationRect` now select matching
 map-scenery edicts by rawcode and area, play authored MDX sequences, honor `nearestOnly`, support numbered random
 variants, and implement the retail `show`/`hide` special names. Doodad `soundon`/`soundoff` remains a separate audio
 presentation gap, so those natives are still partial rather than full conformance; see

@@ -29,6 +29,7 @@ void setup_test_world(void);
 void CM_SetupTestPathmap(uint32_t width, uint32_t height, uint8_t const *cells);
 void CM_SetupTestWorldBounds(box2_t const *bounds);
 bool run_test_jass(cstring_t src);
+char *G_TestORDRAutoNightmareScript(cstring_t script);
 extern player_t *currentplayer;
 void unit_die(edict_t *self, edict_t *attacker);
 void unit_build(edict_t *self, uint32_t class_id);
@@ -54,6 +55,792 @@ static edict_t *find_test_unit(uint32_t class_id);
 static player_t *test_player(int idx) {
     game.clients[idx].ps.number = (uint32_t)idx;
     return &game.clients[idx].ps;
+}
+
+/* DzAPI names and TOC imports must resolve the original FDF template tree;
+ * returning a synthetic handle with no child frames left real ORDR UI code inert. */
+static __typeof__(gi.ReadFile) dz_saved_read_file;
+static void *dz_test_read_file(cstring_t name, uint32_t *size) {
+    static char const toc[] = "// map UI\r\n  UI\\FrameDef\\UI\\ScriptDialog.fdf  \r\n";
+    if (!strcmp(name, "war3mapImported\\ordr_test.toc")) {
+        void *copy = gi.MemAlloc(sizeof(toc));
+        memcpy(copy, toc, sizeof(toc));
+        *size = sizeof(toc) - 1;
+        return copy;
+    }
+    return dz_saved_read_file(name, size);
+}
+
+TEST(wc3_api, dz_toc_and_frame_creation_find_real_template_children) {
+    setup_test_world();
+    UI_ClearTemplates();
+    dz_saved_read_file = gi.ReadFile;
+    gi.ReadFile = dz_test_read_file;
+    T_ASSERT(run_test_jass(
+        "native DzLoadToc takes string path returns nothing\n"
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrame takes string name, integer parent, integer id returns integer\n"
+        "native DzCreateFrameByTagName takes string frameType, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameFindByName takes string name, integer id returns integer\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer root = DzGetGameUI()\n"
+        "  local integer choice\n"
+        "  local integer tagged\n"
+        "  local integer duplicate\n"
+        "  call DzLoadToc(\"war3mapImported\\\\ordr_test.toc\")\n"
+        "  set choice = DzCreateFrame(\"ScriptDialog\", root, 73)\n"
+        "  call BJassAssert(choice != 0, \"DzCreateFrame has no handle\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ScriptDialog\", 73) == choice, \"template root missing\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ScriptDialogText\", 73) != 0, \"template child missing\")\n"
+        "  set tagged = DzCreateFrameByTagName(\"BACKDROP\", \"ordrTaggedFrame\", root, \"\", 91)\n"
+        "  call BJassAssert(tagged != 0, \"tag frame has no handle\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"ordrTaggedFrame\", 91) == tagged, \"tag name was ignored\")\n"
+        "  call BJassAssert(DzFrameFindByName(\"BACKDROP\", 91) == 0, \"type used as name\")\n"
+        "  set duplicate = DzCreateFrameByTagName(\"BACKDROP\", \"ordrTaggedFrame\", root, \"\", 91)\n"
+        "  call BJassAssert(DzFrameFindByName(\"ordrTaggedFrame\", 91) == duplicate, \"newest name ignored\")\n"
+        "endfunction\n"));
+    gi.ReadFile = dz_saved_read_file;
+    UI_ClearTemplates();
+}
+
+static uint32_t dz_written_frames, dz_written_backdrops, dz_written_texts, dz_written_unicasts, dz_textured_backdrops;
+static bool dz_layout_layer_pending;
+static int32_t dz_layout_layer;
+static char dz_priority_order[8];
+static uint32_t dz_priority_count;
+static float dz_edit_wire_focus;
+static bool dz_edit_wire_command;
+static void dz_test_write(pfWriteType_t type, void const *value) {
+    if(!value)return;
+    if(type==PF_BYTE){
+        int32_t value_byte=*(int32_t const *)value;
+        if(dz_layout_layer_pending){dz_layout_layer=value_byte;dz_layout_layer_pending=false;}
+        else if(value_byte==svc_layout)dz_layout_layer_pending=true;
+        return;
+    }
+    if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
+    uiFrame_t const *frame=value;
+    dz_written_frames++;
+    if(frame->flags.type==FT_EDITBOX && frame->onclick && !strcmp(frame->onclick,"#uievent 2 512")){
+        dz_edit_wire_focus=frame->value;
+        dz_edit_wire_command=true;
+    }
+    if (frame->text && dz_priority_count < sizeof(dz_priority_order)) {
+        if (!strcmp(frame->text,"dz high")) dz_priority_order[dz_priority_count++]='H';
+        else if (!strcmp(frame->text,"dz low")) dz_priority_order[dz_priority_count++]='L';
+    }
+    if(frame->flags.type==FT_BACKDROP && frame->size.width>0.09f){
+        dz_written_backdrops++;
+        if(frame->buffer.data && ((uiBackdrop_t const *)frame->buffer.data)->Background)dz_textured_backdrops++;
+    }
+    if(frame->flags.type==FT_TEXT && frame->text && !strcmp(frame->text,"ORDR sample"))dz_written_texts++;
+}
+static void dz_test_unicast(edict_t *ent) { (void)ent; dz_written_unicasts++; }
+
+TEST(wc3_api, dz_frames_emit_real_ui_payloads) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    dz_written_frames=dz_written_backdrops=dz_written_texts=dz_written_unicasts=dz_textured_backdrops=0;
+    dz_layout_layer_pending=false;
+    dz_layout_layer=-1;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetSize takes integer frame, real width, real height returns nothing\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetTexture takes integer frame, string path, integer tiled returns nothing\n"
+        "native DzFrameSetAbsolutePoint takes integer frame, integer point, real x, real y returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer root = DzGetGameUI()\n"
+        " local integer background = DzCreateFrameByTagName(\"BACKDROP\", \"background\", root, \"\", 0)\n"
+        " local integer title = DzCreateFrameByTagName(\"TEXT\", \"title\", root, \"\", 0)\n"
+        " call DzFrameSetSize(background, 0.12, 0.06)\n"
+        " call DzFrameSetTexture(background, \"Textures\\\\TestBackdrop.blp\", 0)\n"
+        " call DzFrameSetAbsolutePoint(background, 8, 0.04, 0.05)\n"
+        " call DzFrameSetSize(title, 0.12, 0.03)\n"
+        " call DzFrameSetText(title, \"ORDR sample\")\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    /* Drive the actual 100ms game scheduler, which owns dirty Dz UI flushes. */
+    level.started=true;
+    level.scriptsStarted=true;
+    globals.RunFrame();
+    uint32_t first_backdrops=dz_written_backdrops;
+    level.time+=FRAMETIME;
+    globals.RunFrame();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(dz_written_frames>=3);
+    T_EQ(dz_written_backdrops,1u);
+    T_EQ(dz_written_backdrops,first_backdrops);
+    T_EQ(dz_textured_backdrops,1u);
+    T_EQ(dz_written_texts,1u);
+    T_ASSERT(dz_written_unicasts>=1);
+}
+
+TEST(wc3_api, dz_click_flows_through_actual_client_command_and_respects_visibility) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzGetTriggerUIEventPlayer takes nothing returns player\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "globals\n"
+        " integer clicked = 0\n"
+        " integer buttonId = 0\n"
+        "endglobals\n"
+        "function hit takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == buttonId, \"wrong clicked frame\")\n"
+        " call BJassAssert(DzGetTriggerUIEventPlayer() == Player(0), \"wrong clicked player\")\n"
+        " set clicked = clicked + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set buttonId = DzCreateFrameByTagName(\"TEXTBUTTON\", \"ordrButton\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(buttonId, 1, function hit, false)\n"
+        "endfunction\n"
+        "function verifyOnce takes nothing returns nothing\n"
+        " call BJassAssert(clicked == 1, \"first click not delivered\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(buttonId, false)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    G_ClientCommand(g_edicts,2,(cstring_t[]){"dzframe","2"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verifyOnce",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,2,(cstring_t[]){"dzframe","2"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verifyOnce",false);
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* FDF-authored hidden/disabled frames may differ from later DzFrameShow state;
+ * neither can receive events just because its Dz handle is still alive. */
+TEST(wc3_api, dz_rejects_initial_fdf_hidden_and_disabled_buttons) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "globals\n"
+        " integer events = 0\n"
+        "endglobals\n"
+        "function clicked takes nothing returns nothing\n"
+        " set events = events + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local integer button = DzCreateFrameByTagName(\"TEXTBUTTON\", \"hiddenByFdf\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(button, 1, function clicked, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(events == 0, \"hidden or disabled FDF accepted an input\")\n"
+        "endfunction\n"));
+    UI_SetHidden(ordr_frames[2].ui,true);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","1"});
+    UI_SetHidden(ordr_frames[2].ui,false);
+    UI_SetEnabled(ordr_frames[2].ui,false);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","1"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+TEST(wc3_api, dz_script_frame_mouse_events_and_checkbox_toggle_are_authoritative) {
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzFrameShow takes integer frame, boolean shown returns nothing\n"
+        "globals\n"
+        " integer frameId = 0\n"
+        " integer hover = 0\n"
+        " integer down = 0\n"
+        " integer up = 0\n"
+        " integer wheel = 0\n"
+        " integer checked = 0\n"
+        " integer unchecked = 0\n"
+        "endglobals\n"
+        "function enter takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == frameId, \"wrong hover source\")\n"
+        " set hover = hover + 1\n"
+        "endfunction\n"
+        "function press takes nothing returns nothing\n"
+        " set down = down + 1\n"
+        "endfunction\n"
+        "function release takes nothing returns nothing\n"
+        " set up = up + 1\n"
+        "endfunction\n"
+        "function scroll takes nothing returns nothing\n"
+        " set wheel = wheel + 1\n"
+        "endfunction\n"
+        "function check takes nothing returns nothing\n"
+        " set checked = checked + 1\n"
+        "endfunction\n"
+        "function uncheck takes nothing returns nothing\n"
+        " set unchecked = unchecked + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set frameId = DzCreateFrameByTagName(\"CHECKBOX\", \"checkedTest\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(frameId, 2, function enter, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 4, function release, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 5, function press, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 6, function scroll, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 7, function check, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 8, function uncheck, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(hover == 1 and down == 1 and up == 1 and wheel == 1, \"mouse events lost\")\n"
+        " call BJassAssert(checked == 1 and unchecked == 1, \"toggle edges wrong\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(frameId, false)\n"
+        "endfunction\n"));
+    T_STREQ(ordr_frames[2].ui->OnClick,"#uievent 2 500");
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","2"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","5"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","4"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","6"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(ordr_frame_extra[2].checked);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(!ordr_frame_extra[2].checked);
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(!ordr_frame_extra[2].checked);
+    /* Disallow out-of-range events and nonexistent frames. */
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","31"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","9999","7"});
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* A higher Dz priority must draw after a lower one even when it was created
+ * first: serialization order is both the draw and hit-test order. */
+TEST(wc3_api, dz_priority_controls_actual_layout_frame_order) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    dz_priority_count=0;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetPriority takes integer frame, integer priority returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer high = DzCreateFrameByTagName(\"TEXT\", \"high\", DzGetGameUI(), \"\", 0)\n"
+        " local integer low = DzCreateFrameByTagName(\"TEXT\", \"low\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetText(high, \"dz high\")\n"
+        " call DzFrameSetText(low, \"dz low\")\n"
+        " call DzFrameSetPriority(high, 10)\n"
+        " call DzFrameSetPriority(low, 0)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    level.started=true;
+    level.scriptsStarted=true;
+    globals.RunFrame();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_EQ(dz_priority_count,2u);
+    T_EQ(dz_priority_order[0],'L');
+    T_EQ(dz_priority_order[1],'H');
+}
+
+/* Dz event IDs above seven are ordinary native registrations, not errors;
+ * editor and list-box event types use this range. */
+TEST(wc3_api, dz_registers_editbox_text_event_and_dispatches_callback) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "globals\n"
+        " integer edit = 0\n"
+        " integer edits = 0\n"
+        "endglobals\n"
+        "function onchange takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == edit, \"wrong edit callback frame\")\n"
+        " set edits = edits + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set edit = DzCreateFrameByTagName(\"EDITBOX\", \"edit\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(edit, 9, function onchange, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(edits == 1, \"edit event callback not delivered\")\n"
+        "endfunction\n"));
+    ORDR_DispatchFrameEvent(level.vm,2,9);
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_api, dz_listbox_selection_changes_only_for_valid_items) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "globals\n"
+        " integer listId = 0\n"
+        " integer changed = 0\n"
+        "endglobals\n"
+        "function item_changed takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == listId, \"wrong list frame\")\n"
+        " set changed = changed + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set listId = DzCreateFrameByTagName(\"LISTBOX\", \"choice\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(listId, 10, function item_changed, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changed == 1, \"expected exactly one item selection change\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(listId, false)\n"
+        "endfunction\n"));
+    /* Headless JASS literals do not turn backslash-n into separate rows. */
+    snprintf(ordr_frames[2].text,sizeof(ordr_frames[2].text),"first\nsecond\nthird");
+    UI_SetText(ordr_frames[2].ui,"%s",ordr_frames[2].text);
+    T_STREQ(ordr_frames[2].ui->OnClick,"#uievent 2 1024");
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","2"});
+    T_EQ(ordr_frame_extra[2].selected_index,2);
+    T_EQ(ordr_frames[2].ui->ListBox.SelectedIndex,2);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","2"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","7"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","-1"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","10"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    T_EQ(ordr_frame_extra[2].selected_index,2);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* The first row is a real selection change when the user has not selected
+ * anything yet. A zero-filled selected-index sentinel dropped event 10. */
+TEST(wc3_api, dz_first_listbox_row_dispatches_selection) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "globals\n"
+        " integer selected = 0\n"
+        "endglobals\n"
+        "function changed takes nothing returns nothing\n"
+        " set selected = selected + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local integer frame = DzCreateFrameByTagName(\"LISTBOX\", \"firstItem\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(frame, 10, function changed, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(selected == 1, \"first list item click was ignored\")\n"
+        "endfunction\n"));
+    snprintf(ordr_frames[2].text,sizeof(ordr_frames[2].text),"first\nsecond");
+    UI_SetText(ordr_frames[2].ui,"%s",ordr_frames[2].text);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","0"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","0"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(ordr_frame_extra[2].selected_index,0);
+}
+
+/* A nonexistent template/type must not produce a valid-looking Dz handle
+ * which cannot display or accept clicks. */
+TEST(wc3_api, dz_missing_frame_template_returns_zero_handle) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrame takes string name, integer parent, integer id returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "function main takes nothing returns nothing\n"
+        " call BJassAssert(DzCreateFrame(\"ImpossibleMissingFrameORDR\", DzGetGameUI(), 0) == 0, \"missing template got handle\")\n"
+        " call BJassAssert(DzCreateFrameByTagName(\"UNSUPPORTED_FRAME_KIND\", \"fake\", DzGetGameUI(), \"\", 0) == 0, \"unknown kind got handle\")\n"
+        " call BJassAssert(DzCreateFrameByTagName(\"TEXT\", \"fake\", DzGetGameUI(), \"ImpossibleMissingFrameORDR\", 0) == 0, \"missing inherited template got handle\")\n"
+        "endfunction\n"));
+    T_EQ(ordr_next_frame,2);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Offline Dz sync must deliver matching prefixes once, preserve outer data
+ * across nested triggers, and ignore a subsequently destroyed registration. */
+TEST(wc3_api, dz_sync_nested_context_and_destroyed_trigger) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzTriggerRegisterSyncData takes trigger trig, string prefix, boolean server returns nothing\n"
+        "native DzSyncData takes string prefix, string data returns nothing\n"
+        "native DzGetTriggerSyncData takes nothing returns string\n"
+        "native DzGetTriggerSyncPlayer takes nothing returns player\n"
+        "globals\n"
+        " integer outerCount = 0\n"
+        " integer innerCount = 0\n"
+        "endglobals\n"
+        "function inner takes nothing returns nothing\n"
+        " local player source = DzGetTriggerSyncPlayer()\n"
+        " call BJassAssert(DzGetTriggerSyncData() == \"inner-data\", \"inner sync payload lost\")\n"
+        " call BJassAssert(source != null, \"inner sync player null\")\n"
+        " call BJassAssert(GetPlayerId(source) == 0, \"inner sync player lost\")\n"
+        " set innerCount = innerCount + 1\n"
+        "endfunction\n"
+        "function outer takes nothing returns nothing\n"
+        " local player source = DzGetTriggerSyncPlayer()\n"
+        " call BJassAssert(DzGetTriggerSyncData() == \"outer-data\", \"outer sync payload lost\")\n"
+        " call BJassAssert(source != null, \"outer sync player null\")\n"
+        " call BJassAssert(GetPlayerId(source) == 0, \"outer sync player lost\")\n"
+        " call DzSyncData(\"inner\", \"inner-data\")\n"
+        " call BJassAssert(DzGetTriggerSyncData() == \"outer-data\", \"outer sync context overwritten\")\n"
+        " set outerCount = outerCount + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local trigger outerTrigger = CreateTrigger()\n"
+        " local trigger innerTrigger = CreateTrigger()\n"
+        " call TriggerAddAction(outerTrigger, function outer)\n"
+        " call TriggerAddAction(innerTrigger, function inner)\n"
+        " call DzTriggerRegisterSyncData(outerTrigger, \"outer\", false)\n"
+        " call DzTriggerRegisterSyncData(innerTrigger, \"inner\", false)\n"
+        " call DzSyncData(\"other\", \"ignored\")\n"
+        " call DzSyncData(\"outer\", \"outer-data\")\n"
+        " call BJassAssert(outerCount == 1 and innerCount == 1, \"nested sync did not fire\")\n"
+        " call DestroyTrigger(innerTrigger)\n"
+        " call DzSyncData(\"inner\", \"ignored\")\n"
+        " call BJassAssert(innerCount == 1, \"destroyed sync trigger fired\")\n"
+        "endfunction\n"));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Dynamic Dz list frames must retain their authored scrollbar child and
+ * resolve its anchors before the regular gameplay layout is serialized. */
+TEST(wc3_api, dz_text_alignment_uses_framepoint_grid) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetTextAlignment takes integer frame, integer align returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer title = DzCreateFrameByTagName(\"TEXT\", \"title\", DzGetGameUI(), \"\", 0)\n"
+        " local integer footer = DzCreateFrameByTagName(\"TEXT\", \"footer\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetTextAlignment(title, 4)\n"
+        " call DzFrameSetTextAlignment(footer, 8)\n"
+        "endfunction\n"));
+    T_EQ(ordr_frames[2].ui->Font.Justification.Horizontal,FONT_JUSTIFYCENTER);
+    T_EQ(ordr_frames[2].ui->Font.Justification.Vertical,FONT_JUSTIFYMIDDLE);
+    T_EQ(ordr_frames[3].ui->Font.Justification.Horizontal,FONT_JUSTIFYRIGHT);
+    T_EQ(ordr_frames[3].ui->Font.Justification.Vertical,FONT_JUSTIFYBOTTOM);
+}
+
+/* Dz font changes must remain coherent in the authored FDF tree as well as
+ * the live text payload. Map UI templates can inherit that font later. */
+static PATHSTR dz_requested_font;
+static uint32_t dz_requested_font_size;
+static int dz_capture_font(cstring_t name, uint32_t size) {
+    snprintf(dz_requested_font,sizeof(dz_requested_font),"%s",name?name:"");
+    dz_requested_font_size=size;
+    return 27;
+}
+
+TEST(wc3_api, dz_font_updates_fdf_and_serialized_glyph_face) {
+    __typeof__(gi.FontIndex) old_font=gi.FontIndex;
+    setup_test_world();
+    gi.FontIndex=dz_capture_font;
+    dz_requested_font[0]='\0';dz_requested_font_size=0;
+    bool ok=run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetFont takes integer frame, string filename, real size, integer flags returns nothing\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer frame = DzCreateFrameByTagName(\"TEXT\", \"fontSample\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetFont(frame, \"Fonts\\\\Morpheus.ttf\", 0.016, 0)\n"
+        " call DzFrameSetText(frame, \"ORDR title\")\n"
+        "endfunction\n");
+    T_ASSERT(ok);
+    T_ASSERT(ordr_frames[2].ui!=NULL);
+    if(ordr_frames[2].ui){
+        T_STREQ(ordr_frames[2].ui->Font.Name,"Fonts\\Morpheus.ttf");
+        T_STREQ(dz_requested_font,"Fonts\\Morpheus.ttf");
+        T_EQ(dz_requested_font_size,16u);
+        uint8_t data[256];char textbuf[128];uiFrame_t wire={0};
+        UI_ResetFrameWriteList();
+        T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,data,sizeof(data),textbuf,sizeof(textbuf)));
+        T_EQ(wire.flags.type,FT_TEXT);
+        T_EQ(((uiLabel_t const *)wire.buffer.data)->font,27u);
+    }
+    gi.FontIndex=old_font;
+}
+
+static PATHSTR dz_requested_model;
+static int dz_capture_model(cstring_t name) {
+    snprintf(dz_requested_model,sizeof(dz_requested_model),"%s",name?name:"");
+    return 58;
+}
+
+TEST(wc3_api, dz_model_path_reaches_the_wire_render_widget) {
+    __typeof__(gi.ModelIndex) old_model=gi.ModelIndex;
+    setup_test_world();
+    gi.ModelIndex=dz_capture_model;
+    dz_requested_model[0]='\0';
+    bool ok=run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetModel takes integer frame, string filename, integer kind, integer flags returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer frame = DzCreateFrameByTagName(\"MODEL\", \"renderWidget\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetModel(frame, \"war3mapImported\\\\CustomPanel.mdx\", 1, 0)\n"
+        "endfunction\n");
+    T_ASSERT(ok);
+    T_STREQ(dz_requested_model,"war3mapImported\\CustomPanel.mdx");
+    T_ASSERT(ordr_frames[2].ui!=NULL);
+    if(ordr_frames[2].ui){
+        T_EQ(ordr_frames[2].ui->Portrait.model,58u);
+        uint8_t data[256];char textbuf[128];uiFrame_t wire={0};
+        UI_ResetFrameWriteList();
+        T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,data,sizeof(data),textbuf,sizeof(textbuf)));
+        T_EQ(wire.flags.type,FT_MODEL);
+        T_EQ(wire.tex.index,58u);
+    }
+    gi.ModelIndex=old_model;
+}
+
+TEST(wc3_api, dz_listbox_scrollbar_is_positioned_in_game_layout) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "globals\n"
+        " integer listId = 0\n"
+        " integer barId = 0\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        " set listId = DzCreateFrameByTagName(\"LISTBOX\", \"choices\", DzGetGameUI(), \"\", 0)\n"
+        " set barId = DzCreateFrameByTagName(\"SCROLLBAR\", \"bar\", listId, \"\", 0)\n"
+        " call BJassAssert(barId != 0, \"scrollbar was not created\")\n"
+        "endfunction\n"));
+    T_ASSERT(ordr_frames[3].ui != NULL);
+    if(!ordr_frames[3].ui)return;
+    ordr_frames[2].ui->ListBox.Border=0.006f;
+    T_ASSERT(!ordr_frames[3].ui->AnyPointsSet);
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    ORDR_DzRenderFrames();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(ordr_frames[3].ui->AnyPointsSet);
+    T_ASSERT(ordr_frames[3].ui->Width>0.0f);
+}
+TEST(wc3_api, dz_popup_selection_uses_authored_menu_items) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "globals\n"
+        " integer changes = 0\n"
+        "endglobals\n"
+        "function changed takes nothing returns nothing\n"
+        " set changes = changes + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local integer popup = DzCreateFrameByTagName(\"POPUPMENU\", \"picker\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(popup, 10, function changed, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changes == 1, \"selection must change once\")\n"
+        "endfunction\n"));
+    frameDef_t *menu=UI_Spawn(FT_MENU,ordr_frames[2].ui);
+    T_ASSERT(menu!=NULL);
+    if(!menu)return;
+    snprintf(menu->Name,sizeof(menu->Name),"PopupItems");
+    snprintf(ordr_frames[2].ui->Popup.MenuFrame,sizeof(ordr_frames[2].ui->Popup.MenuFrame),"PopupItems");
+    UI_MenuAddItem(menu,"one",0);
+    UI_MenuAddItem(menu,"two",1);
+    UI_MenuAddItem(menu,"three",2);
+    uint8_t typedata[256]={0};
+    char textbuf[128]={0};
+    uiFrame_t wire={0};
+    UI_ResetFrameWriteList();
+    T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,typedata,sizeof(typedata),
+                                   textbuf,sizeof(textbuf)));
+    T_STREQ(wire.text,"one\ntwo\nthree");
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    T_EQ(ordr_frame_extra[2].selected_index,1);
+    T_EQ(ordr_frames[2].ui->Popup.SelectedIndex,1);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","7"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    UI_ResetFrameWriteList();
+    T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,typedata,sizeof(typedata),
+                                   textbuf,sizeof(textbuf)));
+    T_FEQ(wire.value,1.0f,0.01f);
+}
+
+/* A live editor needs focus state plus an authenticated client text change,
+ * rather than a registered callback that can only be invoked by C tests. */
+TEST(wc3_api, dz_focus_is_limited_to_live_editboxes_and_cleared_on_hide) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetFocus takes integer frame, boolean enable returns boolean\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "native DzFrameSetEnable takes integer frame, boolean enabled returns nothing\n"
+        "function main takes nothing returns nothing\n"
+        " local integer parent = DzCreateFrameByTagName(\"FRAME\", \"container\", DzGetGameUI(), \"\", 0)\n"
+        " local integer editor = DzCreateFrameByTagName(\"EDITBOX\", \"field\", parent, \"\", 0)\n"
+        " local integer title = DzCreateFrameByTagName(\"TEXT\", \"title\", parent, \"\", 0)\n"
+        " call BJassAssert(not DzFrameSetFocus(title, true), \"text got edit focus\")\n"
+        " call DzFrameShow(parent, false)\n"
+        " call BJassAssert(not DzFrameSetFocus(editor, true), \"hidden editbox got focus\")\n"
+        " call DzFrameShow(parent, true)\n"
+        " call BJassAssert(DzFrameSetFocus(editor, true), \"visible editbox focus rejected\")\n"
+        "endfunction\n"
+        "function hide_parent takes nothing returns nothing\n"
+        " call DzFrameShow(2, false)\n"
+        "endfunction\n"
+        "function focus_and_disable takes nothing returns nothing\n"
+        " call DzFrameShow(2, true)\n"
+        " call BJassAssert(DzFrameSetFocus(3, true), \"focus could not restore\")\n"
+        " call DzFrameSetEnable(2, false)\n"
+        "endfunction\n"));
+    T_EQ(ordr_focused_frame,3);
+    T_EQ(ordr_frame_extra[3].focused,1);
+    jass_callbyname(level.vm,"hide_parent",false);
+    T_EQ(ordr_focused_frame,0);
+    T_EQ(ordr_frame_extra[3].focused,0);
+    jass_callbyname(level.vm,"focus_and_disable",false);
+    T_EQ(ordr_focused_frame,0);
+    T_EQ(ordr_frame_extra[3].focused,0);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+TEST(wc3_api, dz_edit_focus_and_text_input_round_trip) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    dz_edit_wire_focus=-1;
+    dz_edit_wire_command=false;
+    dz_layout_layer_pending=false;
+    dz_layout_layer=-1;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzFrameSetFocus takes integer frame, boolean enable returns boolean\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "globals\n"
+        " integer editor = 0\n"
+        " integer changes = 0\n"
+        "endglobals\n"
+        "function edited takes nothing returns nothing\n"
+        " call BJassAssert(DzFrameGetText(editor) == \"hello there\", \"text not updated\")\n"
+        " set changes = changes + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set editor = DzCreateFrameByTagName(\"EDITBOX\", \"editor\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(editor, 9, function edited, false)\n"
+        " call BJassAssert(DzFrameSetFocus(editor, true), \"focus rejected\")\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changes == 1, \"one edit event expected\")\n"
+        "endfunction\n"
+        "function blur takes nothing returns nothing\n"
+        " call BJassAssert(DzFrameSetFocus(editor, false), \"blur rejected\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(editor, false)\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    ORDR_DzRenderFrames();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(dz_edit_wire_command);
+    T_FEQ(dz_edit_wire_focus,1.0f,0.001f);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","9","hello there"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"blur",false);
+    dz_edit_wire_focus=-1;
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    ORDR_DzRenderFrames();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_FEQ(dz_edit_wire_focus,0.0f,0.001f);
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","9","should be ignored"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Keyboard registrations need a real game command receiver for client input,
+ * not just a helper callable internally by a test harness. */
+TEST(wc3_api, dz_key_event_enters_through_client_command) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzTriggerRegisterKeyEventByCode takes trigger trig, integer key, integer status, boolean sync, code action returns nothing\n"
+        "native DzGetTriggerKeyPlayer takes nothing returns player\n"
+        "globals\n"
+        " integer keys = 0\n"
+        "endglobals\n"
+        "function onkey takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerKeyPlayer() == Player(0), \"wrong key player\")\n"
+        " set keys = keys + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " call DzTriggerRegisterKeyEventByCode(null, 65, 1, false, function onkey)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(keys == 1, \"key client command not delivered\")\n"
+        "endfunction\n"));
+    /* The physical client sends lowercase ASCII; Dz receives VK_A=65. */
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzkey","97","1"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
 static uint32_t selection_native_packet_count;
@@ -96,6 +883,144 @@ static void selection_native_test_write(pfWriteType_t type, void const *data) {
 }
 
 static void selection_native_test_unicast(edict_t *ent) { (void)ent; }
+
+/* ORDR's 100ms BDk timer runs without currentplayer. In a single-player
+ * map GetLocalPlayer and camera natives must target the connected human,
+ * not silently ignore the camera pan. */
+TEST(wc3_api, singleplayer_timer_camera_without_player_context) {
+    static mapInfo_t camera_test_mapinfo;
+    gameClient_t *client = &game.clients[0];
+    vec2_t target = { 256.0f, 192.0f };
+    vec2_t expected;
+    player_t *saved_currentplayer = currentplayer;
+
+    setup_test_world();
+    memcpy(&camera_test_mapinfo, level.mapinfo, sizeof(camera_test_mapinfo));
+    level.mapinfo = &camera_test_mapinfo;
+    camera_test_mapinfo.players[0].used = true;
+    camera_test_mapinfo.players[0].playerType = kPlayerTypeHuman;
+    client->mapplayer = &level.mapinfo->players[0];
+    client->connected = true;
+    currentplayer = NULL;
+    T_ASSERT(G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == client);
+    expected = G_ClampCameraPosition(client, &target);
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(fabsf(client->camera.state.position.x - expected.x) < 0.01f);
+    T_ASSERT(fabsf(client->camera.state.position.y - expected.y) < 0.01f);
+    currentplayer = saved_currentplayer;
+}
+
+TEST(wc3_api, multiplayer_timer_camera_does_not_guess_local_player) {
+    static mapInfo_t camera_test_mapinfo;
+    gameClient_t *client = &game.clients[0];
+    player_t *saved_currentplayer = currentplayer;
+    vec2_t old_position = { -120.0f, -80.0f };
+
+    setup_test_world();
+    memcpy(&camera_test_mapinfo, level.mapinfo, sizeof(camera_test_mapinfo));
+    level.mapinfo = &camera_test_mapinfo;
+    camera_test_mapinfo.players[0].used = true;
+    camera_test_mapinfo.players[0].playerType = kPlayerTypeHuman;
+    camera_test_mapinfo.players[1].used = true;
+    camera_test_mapinfo.players[1].playerType = kPlayerTypeHuman;
+    client->mapplayer = &level.mapinfo->players[0];
+    client->connected = true;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+    game.clients[1].connected = true;
+    client->camera.state.position = old_position;
+    currentplayer = NULL;
+    T_ASSERT(!G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == NULL);
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call PanCameraToTimed(256.0, 192.0, 0.0)\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(client->camera.state.position.x == old_position.x);
+    T_ASSERT(client->camera.state.position.y == old_position.y);
+    currentplayer = saved_currentplayer;
+}
+
+TEST(wc3_api, ordr_single_connected_player_preserves_warcraft_multiplayer) {
+    static mapInfo_t mapinfo;
+    gameClient_t *client = &game.clients[0];
+
+    setup_test_world();
+    memcpy(&mapinfo, level.mapinfo, sizeof(mapinfo));
+    level.mapinfo = &mapinfo;
+    mapinfo.players[0].used = mapinfo.players[1].used = true;
+    mapinfo.players[0].playerType = mapinfo.players[1].playerType = kPlayerTypeHuman;
+    client->connected = true;
+    client->mapplayer = &level.mapinfo->players[0];
+    game.clients[1].connected = false;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+
+    strlcpy(level.map_path, "Maps\\ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    T_ASSERT(G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == client);
+
+    game.clients[1].connected = true;
+    T_ASSERT(!G_IsSinglePlayer());
+    T_NULL(G_SinglePlayerLocalClient());
+
+    game.clients[1].connected = false;
+    strlcpy(level.map_path, "Maps\\OtherMultiplayer.w3x", sizeof(level.map_path));
+    T_ASSERT(!G_IsSinglePlayer());
+}
+
+TEST(wc3_api, ordr_original_greed_is_good_probe_detects_singleplayer_offline) {
+    static mapInfo_t mapinfo;
+    gameClient_t *client = &game.clients[0];
+
+    setup_test_world();
+    memcpy(&mapinfo, level.mapinfo, sizeof(mapinfo));
+    level.mapinfo = &mapinfo;
+    mapinfo.players[0].used = mapinfo.players[1].used = true;
+    mapinfo.players[0].playerType = mapinfo.players[1].playerType = kPlayerTypeHuman;
+    client->connected = true;
+    client->mapplayer = &level.mapinfo->players[0];
+    game.clients[1].connected = false;
+    game.clients[1].mapplayer = &level.mapinfo->players[1];
+    strlcpy(level.map_path, "Maps\\ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    client->ps.stats[PLAYERSTATE_RESOURCE_GOLD] = 0;
+    client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER] = 0;
+
+    /* Minimal copy of ORDR's BJK -> BJJ probe. In the original map BJJ
+     * tests whether Cheat("greedisgood") changed resources, clears them,
+     * and sets Lw=false when the session is actually single-player. */
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  boolean mapOnline = true\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        "  call Cheat(\"greedisgood\")\n"
+        "  if GetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD) > 0 then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 0)\n"
+        "    set mapOnline = false\n"
+        "  endif\n"
+        "  if GetPlayerState(Player(0), PLAYER_STATE_RESOURCE_LUMBER) > 0 then\n"
+        "    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_LUMBER, 0)\n"
+        "    set mapOnline = false\n"
+        "  endif\n"
+        "  call BJassAssert(not mapOnline, \"ORDR must recognize offline at startup\")\n"
+        "endfunction\n"));
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_GOLD], 0);
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 0);
+
+    /* Warcraft multiplayer must not receive an injected cheat resource. */
+    game.clients[1].connected = true;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call Cheat(\"greedisgood\")\n"
+        "endfunction\n"));
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_GOLD], 0);
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 0);
+}
 
 TEST(wc3_api, revive_hero_location_native_restores_grom_style_death) {
     edict_t *hero;
@@ -1786,6 +2711,174 @@ TEST(wc3_api, enemy_event_keeps_trigger_player_separate_from_local_player_contex
     T_EQ(human->ps.client_ui_state, CLIENT_UI_CINEMATIC);
     T_EQ(enemy->ps.client_ui_state, CLIENT_UI_GAME);
     T_NULL(currentplayer);
+}
+
+/* Regression for ORDR 2.323[C]: the JASS main() reconstructs its camera
+ * rect from GetCameraMargin, but an incorrect runtime W3E world bound can
+ * otherwise clamp the difficulty scene (-6000,-8864) to (-3584,-8192).
+ * Match the map's extracted W3I default camera and complement metadata. */
+/* ORDR iPad fallback: verify the script patch preserves the original click
+ * handler and adds a fully executable Nightmare + Isekai timer callback. */
+TEST(wc3_api, ordr_autostart_uses_original_commit_without_clicked_unit) {
+    static cstring_t const original =
+        "globals\n"
+        "boolean tU=false\n"
+        "integer NE=0\n"
+        "constant integer NL=6\n"
+        "constant integer tl=1\n"
+        "constant integer tn=2\n"
+        "constant integer tp=3\n"
+        "boolean array th\n"
+        "unit tP=null\n"
+        "endglobals\n"
+        "function CUO takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUW takes nothing returns nothing\n"
+        "endfunction\n"
+        "function Bcw takes player p returns boolean\n"
+        "return false\n"
+        "endfunction\n"
+        "function CT9 takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUM takes nothing returns nothing\n"
+        "local integer EK=0\n"
+        "if tU or not Bcw(GetTriggerPlayer()) then\n"
+        "return\n"
+        "endif\n"
+        "if GetTriggerUnit()!=tP then\n"
+        "return\n"
+        "endif\n"
+        "if NE==0 then\n"
+        "return\n"
+        "endif\n"
+        "call CT9()\n"
+        "set tU=true\n"
+        "endfunction\n"
+        "function CUF takes integer raw,integer x,integer y,integer scale returns unit\n"
+        "return null\n"
+        "endfunction\n"
+        "function BHs takes integer tag returns timer\n"
+        "return CreateTimer()\n"
+        "endfunction\n"
+        "function BHu takes timer source returns nothing\n"
+        "if source!=null then\n"
+        "call DestroyTimer(source)\n"
+        "endif\n"
+        "endfunction\n"
+        "function CUN takes nothing returns nothing\n"
+        "set tP=CUF($75303036,880,-375,250)\n"
+        "call SetUnitAnimation(tP,\"Stand\")\n"
+        "endfunction\n"
+        "function AssertIdle takes nothing returns nothing\n"
+        "call BJassAssert(not tU, \"idle before selecting\")\n"
+        "endfunction\n"
+        "function AssertAutostart takes nothing returns nothing\n"
+        "call BJassAssert(tU, \"difficulty committed\")\n"
+        "call BJassAssert(NE==NL, \"nightmare difficulty\")\n"
+        "call BJassAssert(th[tn], \"isekai enabled\")\n"
+        "call BJassAssert(not th[tl], \"mutation disabled\")\n"
+        "call BJassAssert(not th[tp], \"other mode disabled\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "call CUN()\n"
+        "endfunction\n";
+    char *patched = G_TestORDRAutoNightmareScript(original);
+    T_NOT_NULL(patched);
+    if (!patched) return;
+    T_ASSERT(strstr(patched, "function ORDR_AutoNightmareIsekai takes nothing returns nothing") != NULL);
+    T_ASSERT(strstr(patched, "call TimerStart(BHs(0),.25,false,function ORDR_AutoNightmareIsekai)") != NULL);
+    T_ASSERT(run_test_jass(patched));
+    T_ASSERT(jass_hasfunction(level.vm, "ORDR_AutoNightmareIsekai"));
+    jass_callbyname(level.vm, "CUM", false);
+    jass_callbyname(level.vm, "AssertIdle", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "ORDR_AutoNightmareIsekai", false);
+    if (jass_rterror_pending(level.vm))
+        fprintf(stderr, "ORDR_AUTOSTART_TEST_CALLBACK_ERROR: %s\n",
+                jass_rterror_message(level.vm));
+    else
+        jass_callbyname(level.vm, "AssertAutostart", false);
+    if (jass_rterror_pending(level.vm))
+        fprintf(stderr, "ORDR_AUTOSTART_TEST_ASSERT_ERROR: %s\n",
+                jass_rterror_message(level.vm));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    gi.MemFree(patched);
+}
+
+TEST(wc3_api, ordr_autostart_rejects_nonmatching_map_source) {
+    char *patched = G_TestORDRAutoNightmareScript(
+        "function CUM takes nothing returns nothing\nendfunction\n");
+    T_NULL(patched);
+}
+
+TEST(wc3_api, ordr_difficulty_camera_bounds_from_authored_w3i) {
+    mapInfo_t *mapinfo = (mapInfo_t *)level.mapinfo;
+    int const complements[4] = { 26, 16, 20, 32 };
+    CM_SetupTestWorldBounds(&MAKE(box2_t,
+        .min = { -18176.0f, -15616.0f },
+        .max = { 6400.0f, 8960.0f }));
+    memcpy(&mapinfo->cameraBounds.complement, complements, sizeof(complements));
+    memcpy(mapinfo->cameraBounds.bounds, (float[8]){
+        -8960.0f, -10496.0f, 9216.0f, 6912.0f,
+        -8960.0f, 6912.0f, 9216.0f, -10496.0f
+    }, sizeof(mapinfo->cameraBounds.bounds));
+
+    T_ASSERT(run_test_jass(
+        "function CUO takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUW takes nothing returns nothing\n"
+        "endfunction\n"
+        "function CUN takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  call SetCameraBounds(-9472.+GetCameraMargin(CAMERA_MARGIN_LEFT),"
+        "-10752.+GetCameraMargin(CAMERA_MARGIN_BOTTOM),"
+        "9728.-GetCameraMargin(CAMERA_MARGIN_RIGHT),"
+        "7168.-GetCameraMargin(CAMERA_MARGIN_TOP),"
+        "-9472.+GetCameraMargin(CAMERA_MARGIN_LEFT),"
+        "7168.-GetCameraMargin(CAMERA_MARGIN_TOP),"
+        "9728.-GetCameraMargin(CAMERA_MARGIN_RIGHT),"
+        "-10752.+GetCameraMargin(CAMERA_MARGIN_BOTTOM))\n"
+        "endfunction\n"));
+    T_FEQ(level.camera_bounds.min.x, -8960.0f, 0.001f);
+    T_FEQ(level.camera_bounds.min.y, -10496.0f, 0.001f);
+    T_FEQ(level.camera_bounds.max.x, 9216.0f, 0.001f);
+    T_FEQ(level.camera_bounds.max.y, 6912.0f, 0.001f);
+    T_ASSERT(-6000.0f >= level.camera_bounds.min.x);
+    T_ASSERT(-8864.0f >= level.camera_bounds.min.y);
+    /* Regression for the exact live-iPad failure: the runtime camera rect
+     * was (-3584,-8192) even though the authored map allows (-6000,-8864). */
+    box2_t authored = level.camera_bounds;
+    level.camera_bounds = MAKE(box2_t,
+        .min = { -3584.0f, -8192.0f },
+        .max = { 9216.0f, 6912.0f });
+    vec2_t pan_target = { -6000.0f, -8864.0f };
+    vec2_t unclipped = G_ClampCameraPosition(&game.clients[0], &pan_target);
+    T_FEQ(unclipped.x, -6000.0f, 0.001f);
+    T_FEQ(unclipped.y, -8864.0f, 0.001f);
+    level.camera_bounds = authored;
+    CM_SetupTestWorldBounds(NULL);
+}
+
+/* A Warcraft .mdl file value is an editable model alias. Imported maps
+ * commonly package only the compiled .mdx, as ORDR u000-u00C does. The
+ * renderer model index must advertise .mdx from the start. */
+TEST(wc3_api, normalize_imported_mdl_unit_button_paths) {
+    PATHSTR actual;
+    G_NormalizeModelFilename("war3mapImported\\Button Easy.mdl", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Easy.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Normal.MDL", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Normal.mdx"));
+    G_NormalizeModelFilename("units\\human\\footman\\footman.mdx", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "units\\human\\footman\\footman.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Nightmare", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Nightmare.mdx"));
+    G_NormalizeModelFilename("war3mapImported\\Button Easy.blp", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "war3mapImported\\Button Easy.blp"));
+    /* Stock data sometimes references editable .mdl stems that must not
+     * be rewritten without an asset-level mapping decision. */
+    G_NormalizeModelFilename("Units\\Campaign\\Hero\\Hero.mdl", actual, sizeof(actual));
+    T_ASSERT(!strcmp(actual, "Units\\Campaign\\Hero\\Hero.mdl"));
 }
 
 TEST(wc3_api, camera_margin_is_default_camera_inset_from_playable_area) {
@@ -6883,6 +7976,32 @@ TEST(wc3_api, item_type_id) {
     T_EQ((int)item->class_id, (int)expected);
 }
 
+/* Original JASS exposes both catalog-level item flags and the instance's
+ * SetItemPawnable override. A query by rawcode must never inherit that override. */
+TEST(wc3_api, item_sellable_and_pawnable_queries_use_authored_data) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " local item it = CreateItem('spro', 0.0, 0.0)\n"
+        " call BJassAssert(IsItemIdSellable('spro'), \"sellable catalog row\")\n"
+        " call BJassAssert(IsItemIdPawnable('spro'), \"pawnable catalog row\")\n"
+        " call BJassAssert(not IsItemIdSellable('ktrm'), \"unsellable row\")\n"
+        " call BJassAssert(not IsItemIdPawnable('ktrm'), \"unpawnable row\")\n"
+        " call BJassAssert(not IsItemIdSellable('zzzz'), \"missing sellable row\")\n"
+        " call BJassAssert(not IsItemIdPawnable('zzzz'), \"missing pawnable row\")\n"
+        " call BJassAssert(not IsItemIdPowerup('zzzz'), \"missing powerup row\")\n"
+        " call BJassAssert(IsItemSellable(it), \"sellable instance\")\n"
+        " call BJassAssert(IsItemPawnable(it), \"pawnable instance\")\n"
+        " call SetItemPawnable(it, false)\n"
+        " call BJassAssert(not IsItemPawnable(it), \"override disables pawn\")\n"
+        " call BJassAssert(IsItemIdPawnable('spro'), \"catalog not modified by override\")\n"
+        " call SetItemPawnable(it, true)\n"
+        " call BJassAssert(IsItemPawnable(it), \"override restores pawn\")\n"
+        " call BJassAssert(not IsItemSellable(null), \"null instance\")\n"
+        " call BJassAssert(not IsItemPawnable(null), \"null pawn\")\n"
+        "endfunction\n"));
+}
+
 /* =========================================================================
  * Inventory — edict-based UnitHasItem / UnitItemInSlot
  * ========================================================================= */
@@ -8542,6 +9661,77 @@ TEST(wc3_api, dota_unit_damage_target_and_invulnerable) {
     T_Damage(target, attacker, 40);
     T_ASSERT(target->health.value < life_before);
     T_ASSERT(target->health.value <= life_before - 39.0f);
+}
+
+TEST(wc3_api, jass_unit_damage_point_immediate_hits_radius_only) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit near = CreateUnit(Player(1), 'hfoo', 32.0, 0.0, 0.0)\n"
+        "  local unit far = CreateUnit(Player(1), 'hfoo', 256.0, 0.0, 0.0)\n"
+        "  local unit protected = CreateUnit(Player(1), 'hfoo', -32.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(near, 500.0)\n"
+        "  call SetWidgetLife(far, 500.0)\n"
+        "  call SetWidgetLife(protected, 500.0)\n"
+        "  call SetUnitInvulnerable(protected, true)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.0, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"registered\")\n"
+        "  call BJassAssert(GetWidgetLife(near) < 500.0, \"near hit\")\n"
+        "  call BJassAssert(GetWidgetLife(far) == 500.0, \"far safe\")\n"
+        "  call BJassAssert(GetWidgetLife(protected) == 500.0, \"invulnerable safe\")\n"
+        "endfunction\n"));
+}
+
+TEST(wc3_api, jass_unit_damage_point_delayed_uses_impact_positions) {
+    edict_t *entering, *leaving;
+    extern void G_RunEntities(void);
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit inside = CreateUnit(Player(1), 'Hpal', 32.0, 0.0, 0.0)\n"
+        "  local unit outside = CreateUnit(Player(1), 'hfoo', 256.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(inside, 500.0)\n"
+        "  call SetWidgetLife(outside, 500.0)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.7, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"queued\")\n"
+        "  call BJassAssert(GetWidgetLife(inside) == 500.0, \"no premature hit\")\n"
+        "endfunction\n"));
+    entering = find_test_unit(MAKEFOURCC('h','f','o','o'));
+    leaving = find_test_unit(MAKEFOURCC('H','p','a','l'));
+    T_NOT_NULL(entering); T_NOT_NULL(leaving);
+    if (!entering || !leaving) return;
+    entering->s.origin2 = MAKE(vec2_t, 16.0f, 0.0f);
+    leaving->s.origin2 = MAKE(vec2_t, 256.0f, 0.0f);
+    level.time += 699; G_RunEntities();
+    T_EQ((int)entering->health.value, 500);
+    T_EQ((int)leaving->health.value, 500);
+    level.time += 1; G_RunEntities();
+    T_ASSERT(entering->health.value < 500.0f);
+    T_EQ((int)leaving->health.value, 500);
+}
+
+TEST(wc3_api, jass_unit_damage_point_delayed_survives_save_restore) {
+    cstring_t path = Test_TempPath("wc3-jass-point-damage.sav");
+    edict_t *target;
+    uint32_t target_index;
+    extern void G_RunEntities(void);
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local unit a = CreateUnit(Player(0), 'ogru', 512.0, 0.0, 0.0)\n"
+        "  local unit t = CreateUnit(Player(1), 'Hpal', 32.0, 0.0, 0.0)\n"
+        "  call SetWidgetLife(t, 500.0)\n"
+        "  call BJassAssert(UnitDamagePoint(a, 0.5, 96.0, 0.0, 0.0, 40.0, false, false, null, null, null), \"queued\")\n"
+        "endfunction\n"));
+    target = find_test_unit(MAKEFOURCC('H','p','a','l'));
+    T_NOT_NULL(target);
+    if (!target) return;
+    target_index = target->s.number;
+    T_ASSERT(WriteGame(path));
+    T_ASSERT(ReadGame(path));
+    target = g_edicts + target_index;
+    T_EQ((int)target->health.value, 500);
+    level.time += 500; G_RunEntities();
+    T_ASSERT(target->health.value < 500.0f);
 }
 
 TEST(wc3_api, dota_item_user_data_visibility_and_stock) {

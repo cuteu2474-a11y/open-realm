@@ -64,6 +64,25 @@ and override `BUILD_DIR` or `ARCH`.
   command line. The read-only `share/` tree resolves beside the executable
   inside the bundle via the existing `SDL_GetBasePath()` probe.
 
+## ORDR JASS diagnostics (iPad)
+
+When the ORDR single-player map starts executing JASS, OpenRealm writes an
+**`ordr-jass.log`** file directly to the app's Files-visible Documents folder:
+
+**Files → On My iPad → OpenWarcraft3 → ordr-jass.log**
+
+The log records JASS function entry and execution mode, ORDR difficulty setup
+milestones, CUW timer start/expiry, five-second map-state snapshots, and
+unimplemented native / JASS runtime errors. Events are flushed immediately;
+ordinary function entries are flushed periodically. The log is overwritten
+when a new ORDR JASS VM starts. **Share or copy it before launching the map
+again** if you want to preserve the earlier run.
+
+This is a diagnostic trace, not a complete recording of every native call.
+Function entry tracing is capped at 20,000 entries to limit file size and
+runtime overhead, though critical events and state snapshots continue to be
+logged. JASS call arguments are intentionally not recorded.
+
 ## Game data
 
 Retail Warcraft III data is not bundled (it is gigabytes and license-owned).

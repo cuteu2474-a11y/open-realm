@@ -138,6 +138,7 @@ void Key_Event(keyCode_t key, uint32_t mods, bool down, uint32_t time) {
 
     /* Key-up still reaches +command releases so focusing a window cannot leave an earlier gameplay command stuck. */
     if (cls.key_dest == key_game && down && CL_WindowKeyEvent(key, mods)) return;
+    if (cls.key_dest == key_game && down && SCR_LayoutEditKeyEvent(key, mods)) return;
 
     if (down) {
         key_down_mods[key] = (uint8_t)(mods & KEY_MOD_MASK);

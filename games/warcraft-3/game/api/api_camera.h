@@ -8,10 +8,11 @@ extern player_t *currentplayer;
 
 static gameClient_t *G_CurrentCameraClient(cstring_t func) {
     (void)func;
-    if (!currentplayer) {
-        return NULL;
-    }
-    return G_GetPlayerClientByNumber(PLAYER_NUM(currentplayer));
+    if (currentplayer)
+        return G_GetPlayerClientByNumber(PLAYER_NUM(currentplayer));
+    /* Offline map timers (e.g. ORDR's BDk difficulty camera) have no
+     * localPlayerState. They nevertheless run on the sole local client. */
+    return G_SinglePlayerLocalClient();
 }
 
 static float G_CameraHorizontalToVerticalFov(float horizontal) {
@@ -483,7 +484,32 @@ uint32_t PanCameraToTimed(jass_t *j) {
     float x = jass_checknumber(j, 1);
     float y = jass_checknumber(j, 2);
     float duration = jass_checknumber(j, 3);
-    G_StartCameraPanTimed(G_CurrentCameraClient("PanCameraToTimed"), (vec2_t){ x, y }, duration);
+    gameClient_t *camera_client = G_CurrentCameraClient("PanCameraToTimed");
+    /* ORDR's difficulty scene camera (BDe -> BDk) uses a periodic timer
+     * after CUN. A null local-player context silently discards the pan. */
+    if (level.time >= 3900 && level.time <= 4600) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "target=(%.0f,%.0f) duration=%.2f local_player=%d camera_client=%d resolved_player=%d",
+                 (double)x, (double)y, (double)duration,
+                 currentplayer ? (int)PLAYER_NUM(currentplayer) : -1,
+                 camera_client ? 1 : 0,
+                 camera_client ? (int)camera_client->ps.number : -1);
+        jass_ordr_log_event(j, "CHOICE_CAMERA", detail);
+    }
+    G_StartCameraPanTimed(camera_client, (vec2_t){ x, y }, duration);
+    if (camera_client && level.time >= 3900 && level.time <= 4600) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "camera_player=%u applied_target=(%.0f,%.0f) pan_active=%d bounds=(%.0f,%.0f)..(%.0f,%.0f)",
+                 (unsigned)camera_client->ps.number,
+                 (double)camera_client->camera.state.position.x,
+                 (double)camera_client->camera.state.position.y,
+                 (int)camera_client->camera.pan_active,
+                 (double)level.camera_bounds.min.x, (double)level.camera_bounds.min.y,
+                 (double)level.camera_bounds.max.x, (double)level.camera_bounds.max.y);
+        jass_ordr_log_event(j, "CHOICE_CAMERA_APPLIED", detail);
+    }
     return 0;
 }
 uint32_t PanCameraToWithZ(jass_t *j) {
@@ -755,19 +781,59 @@ static box2_t G_PlayableMapBounds(void) {
     return playable;
 }
 
+/* ORDR 2.323[C] declares a 193x193 W3E terrain but on some offline
+ * startup paths the world bounds used by GetCameraMargin do not agree with
+ * the authored W3I/playable rect. Its main() builds SetCameraBounds from
+ * GetCameraMargin; a 5376-unit error clips the difficulty menu at x=-6000.
+ *
+ * This is strictly keyed to the map's camera rect AND complement data AND
+ * its unique JASS startup entrypoints. Other Warcraft maps continue using
+ * their authored W3I / terrain-derived margins without any override. */
+static bool G_ORDRKnownCameraRect(jass_t *j, box2_t camera) {
+    if (!level.mapinfo || !j ||
+        !jass_functionbyname(j, "CUO") ||
+        !jass_functionbyname(j, "CUW") ||
+        !jass_functionbyname(j, "CUN")) return false;
+    mapCameraBounds_t const *mc = &level.mapinfo->cameraBounds;
+    return fabsf(camera.min.x - (-8960.0f)) < 0.01f &&
+           fabsf(camera.min.y - (-10496.0f)) < 0.01f &&
+           fabsf(camera.max.x - 9216.0f) < 0.01f &&
+           fabsf(camera.max.y - 6912.0f) < 0.01f &&
+           mc->complement.left == 26 &&
+           mc->complement.right == 16 &&
+           mc->complement.bottom == 20 &&
+           mc->complement.top == 32;
+}
+
 uint32_t GetCameraMargin(jass_t *j) {
     int32_t whichMargin = jass_checkinteger(j, 1);
     box2_t const camera = G_DefaultCameraBounds();
     box2_t const playable = G_PlayableMapBounds();
+    float const measured[4] = {
+        camera.min.x - playable.min.x, playable.max.x - camera.max.x,
+        playable.max.y - camera.max.y, camera.min.y - playable.min.y
+    };
+    /* Computed directly from ORDR's extracted W3I default camera rect and
+     * the script's editable bounds (-9472,-10752)..(9728,7168). */
+    float const ordr_margin[4] = { 512.0f, 512.0f, 256.0f, 256.0f };
+    bool const ordr = G_ORDRKnownCameraRect(j, camera);
+    static unsigned trace_count;
+    if (whichMargin < 0 || whichMargin > 3)
+        return jass_pushnull(j);
 
-    switch (whichMargin) {
-        case 0: jass_pushnumber(j, camera.min.x - playable.min.x); break;
-        case 1: jass_pushnumber(j, playable.max.x - camera.max.x); break;
-        case 2: jass_pushnumber(j, playable.max.y - camera.max.y); break;
-        case 3: jass_pushnumber(j, camera.min.y - playable.min.y); break;
-        default: jass_pushnull(j);
+    if (ordr && trace_count++ < 8) {
+        char detail[256];
+        box2_t const world = CM_GetWorldBounds();
+        snprintf(detail, sizeof(detail),
+                 "side=%d measured=%.0f expected=%.0f world_min=(%.0f,%.0f) playable_min=(%.0f,%.0f) default_min=(%.0f,%.0f)",
+                 (int)whichMargin, (double)measured[whichMargin],
+                 (double)ordr_margin[whichMargin], (double)world.min.x,
+                 (double)world.min.y, (double)playable.min.x,
+                 (double)playable.min.y, (double)camera.min.x,
+                 (double)camera.min.y);
+        jass_ordr_log_event(j, "CAMERA_MARGIN", detail);
     }
-    return 1;
+    return jass_pushnumber(j, ordr ? ordr_margin[whichMargin] : measured[whichMargin]);
 }
 uint32_t GetCameraBoundMinX(jass_t *j) {
     return jass_pushnumber(j, level.camera_bounds.min.x);

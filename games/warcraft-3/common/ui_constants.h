@@ -14,6 +14,7 @@
 #define UI_PIXEL_ASPECT (UI_MIN_ASPECT * UI_BASE_HEIGHT / UI_BASE_WIDTH) // y/x; square authored pixels in UI coordinates
 #define BZ_WC3_WINDOW_QUEST MAKEFOURCC('Q','U','S','T') // opaque class/instance ID; identifies the singleton Quest window
 #define BZ_WC3_WINDOW_LOG   MAKEFOURCC('L','O','G',' ') // opaque class/instance ID; identifies the singleton Message Log window
+#define BZ_WC3_WINDOW_CHAT  MAKEFOURCC('C','H','A','T') // touch/keyboard chat composer; gameplay stays unpaused
 #define BZ_WC3_WINDOW_MENU  MAKEFOURCC('M','E','N','U') // opaque class/instance ID; identifies the singleton pause menu window
 #define BZ_WC3_WINDOW_ALLIES MAKEFOURCC('A','L','L','Y') // opaque class/instance ID; identifies the singleton Allies window
 #define BZ_WC3_WINDOW_RESULT MAKEFOURCC('R','S','L','T') // opaque class/instance ID; identifies the singleton victory/defeat result window

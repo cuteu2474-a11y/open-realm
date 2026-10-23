@@ -63,6 +63,12 @@ typedef struct {
     int32_t attached_entity;
     uint32_t attached_spawn_time;
     bool has_position;
+    int32_t channel;
+    float pitch, min_distance, max_distance, distance_cutoff;
+    vec3_t cone_orientation;
+    float cone_inner, cone_outer;
+    int32_t cone_outside_volume;
+    bool kill_when_done;
 } gsound_t;
 
 struct vm_program {
@@ -76,7 +82,10 @@ struct jass_context {
     edict_t *enumunit;
     edict_t *source;
     int32_t eventValue;
+    uint32_t event_id; /* event type + 1; zero means no event */
+    uint32_t learned_level;
     uint32_t dialog_id, dialog_button_id;
+    char chat_text[256], chat_matched[256];
     vec2_t point;
     uint8_t hasPoint;
     player_t *playerState;
@@ -94,6 +103,7 @@ bool jass_checkboolean(jass_t *j, int index);
 cstring_t jass_checkstring(jass_t *j, int index);
 jassFunc_t const *jass_checkcode(jass_t *j, int index);
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type);
+bool jass_enumvalue(jass_t *j, int index, uint32_t *value);
 bool jass_toboolean(jass_t *j, int index);
 uint32_t jass_call(jass_t *j, uint32_t args);
 void jass_sethost(jassHost_t const *host);
@@ -108,6 +118,10 @@ cstring_t jass_functionname(jassFunc_t const *func);
 cstring_t jass_currentfunctionname(jass_t *j);
 uint32_t jass_formatcallchain(jass_t *j, string_t buffer, uint32_t size);
 jassFunc_t const *jass_functionbyname(jass_t *j, cstring_t name);
+/* Read-only bitmask of ORDR world-difficulty initialization milestones. */
+uint32_t jass_ordr_flow_mask(jass_t *j);
+/* iPad JASS execution file log: no-op for maps other than ORDR. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail);
 void jass_settimercontext(handle_t timer);
 bool jass_triggerdisabled(trigger_t *trigger);
 JASSTYPEID jass_gettype(jass_t *j, int index);

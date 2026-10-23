@@ -54,8 +54,13 @@ static void CL_RegisterImageConfigString(uint32_t index, bool replace, cstring_t
 static void CL_RegisterFontConfigString(uint32_t index, bool replace, cstring_t olds) {
     uint32_t font = index - CS_FONTS;
     cstring_t spec = cl.configstrings[index];
-    if (cl.fonts[font]) return;
-    if (replace && CL_SameResource(cl.fonts[font], olds, spec)) return;
+    if (replace) {
+        if (CL_SameResource(cl.fonts[font], olds, spec)) return;
+        /* A reused slot may now name a different face or size. Font objects
+         * are renderer-cached (there is no ReleaseFont API), but the live
+         * client slot must point at the newly requested glyph atlas. */
+        cl.fonts[font] = NULL;
+    } else if (cl.fonts[font]) return;
     if (*spec) {
         cstring_t split = strstr(spec, ",");
         if (split) {

@@ -1,6 +1,7 @@
 #include "g_local.h"
 #include "common/stb_slk.h"
 #include "g_unitrow.h"
+#include "jass/jass.h"
 
 cstring_t config_files[] = {
     "UI\\WorldEditGameStrings.txt",
@@ -2011,13 +2012,33 @@ void G_SetMapAbilityOverrides(mapInfo_t const *mapinfo) {
  * do not yet have a per-map merge. UnitBalance, UnitProfile, and UnitUI check
  * stable map rows first.
  * =========================================================================*/
+/* ORDR 2.323[C] contains numeric JASS unit IDs written in readable
+ * big-endian FourCC form (e.g. $75303030 for "u000"). UnitUI/Balance/Weapons
+ * SLK keys use the normal engine little-endian MAKEFOURCC representation.
+ * Preserve the JASS-visible numeric ID on the entity and only translate when
+ * looking up typed object data. Never reinterpret a key that already exists.
+ * Keep this fallback map-specific: classic maps legitimately use normal IDs. */
+static uint32_t ResolveORDRNumericUnitID(uint32_t id) {
+    uint32_t reversed;
+    if (!level.vm || !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN") ||
+        FS_SLKLookup(&ui_idx, id)) return id;
+    reversed = ((id & 0x000000ffu) << 24) |
+               ((id & 0x0000ff00u) << 8) |
+               ((id & 0x00ff0000u) >> 8) |
+               ((id & 0xff000000u) >> 24);
+    return FS_SLKLookup(&ui_idx, reversed) ? reversed : id;
+}
+
 static uint32_t ResolveUnitID(uint32_t id) {
-    if (!level.mapinfo) return id;
-    FOR_LOOP(n, level.mapinfo->num_userCreatedUnits) {
-        if (level.mapinfo->userCreatedUnits[n].newUnitID == id)
-            return level.mapinfo->userCreatedUnits[n].originalUnitID;
+    if (level.mapinfo) {
+        FOR_LOOP(n, level.mapinfo->num_userCreatedUnits) {
+            if (level.mapinfo->userCreatedUnits[n].newUnitID == id)
+                return ResolveORDRNumericUnitID(level.mapinfo->userCreatedUnits[n].originalUnitID);
+        }
     }
-    return id;
+    return ResolveORDRNumericUnitID(id);
 }
 
 static uint32_t ResolveDestructableID(uint32_t id) {
@@ -2112,8 +2133,17 @@ UnitUI_t const *G_UnitUI(uint32_t id) {
     static UnitUI_t zero;
     UnitUI_t const *override = FindMapUnitUIOverride(id);
     UnitUI_t *row;
+    /* A map-specific UnitUI row is authoritative only when it contains
+     * model art. Some custom maps provide a sparse override, and a zero
+     * modelFile must not hide the base unit's renderable model. */
+    if (override && override->modelFile && override->modelFile[0])
+        return override;
+    row = FS_SLKLookup(&ui_idx, id);
+    if (!row && ResolveUnitID(id) != id)
+        row = FS_SLKLookup(&ui_idx, ResolveUnitID(id));
+    if (row && row->modelFile && row->modelFile[0])
+        return row;
     if (override) return override;
-    row = FS_SLKLookup(&ui_idx, ResolveUnitID(id));
     return row ? row : &zero;
 }
 UnitWeapons_t const *G_UnitWeapons(uint32_t id) { static UnitWeapons_t zero; UnitWeapons_t *row = FS_SLKLookup(&weapons_idx, ResolveUnitID(id)); return row ? row : &zero; }
@@ -2488,7 +2518,24 @@ void InitUnitData(void) {
 
     FOR_LOOP(i, sizeof(slk_stores) / sizeof(*slk_stores)) {
         slkStore_t *store = slk_stores + i;
-        *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
+        uint32_t map_bytes = 0;
+        /* The active map archive is authoritative for its own object-data
+         * tables. Read the mounted member directly: a generic file search
+         * may pick the stock Custom_V1 table and silently omit every ORDR
+         * custom rawcode even though Units\\UnitUI.slk is present in W3X. */
+        string_t map_slk = gi.ReadPriorityFile ? gi.ReadPriorityFile(store->path, &map_bytes) : NULL;
+        if (map_slk && map_bytes) {
+            *store->count = Stb_SlkLoadBuffer(map_slk, store->schema,
+                                               store->rows, store->row_size);
+            if (!*store->count)
+                fprintf(stderr, "SLK: map override '%s' (%u bytes) could not be decoded; using stock data\n",
+                        store->path, (unsigned)map_bytes);
+        } else {
+            *store->count = 0;
+        }
+        if (map_slk) gi.MemFree(map_slk);
+        if (!*store->count)
+            *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
         if (!*store->count && !store->optional) fprintf(stderr, "SLK: failed to load '%s'\n", store->path);
         if (!strcmp(store->name, "UnitWeapons"))
             NormalizeWeaponTargetMasks(g_UnitWeapons, g_UnitWeaponsCount);

@@ -86,6 +86,36 @@ TEST(wc3_shortcuts, peasant_plain_stand_is_idle_but_busy_move_is_not) {
     T_ASSERT(G_UnitIsIdleWorker(worker));
 }
 
+TEST(wc3_shortcuts, custom_ordr_wisp_without_harvest_still_uses_idle_worker_hud) {
+    gameClient_t *client = &game.clients[0];
+    edict_t *worker;
+    UnitProfile_t profile;
+    umove_t busy = { "walk", NULL, NULL, NULL };
+
+    reset_entities();
+    setup_test_world();
+    client->ps.number = 0;
+    worker = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 64.0f, 64.0f);
+    worker->svflags |= SVF_MONSTER;
+    worker->s.player = 0;
+    T_NOT_NULL(worker->data.UnitProfile);
+    profile = *worker->data.UnitProfile;
+    profile.name = "랜덤 위습";
+    profile.builds = "";
+    worker->data.UnitProfile = &profile;
+    worker->stand = unit_stand;
+    unit_stand(worker);
+
+    T_ASSERT(!G_ActorHasSkill(worker, "Ahar"));
+    T_ASSERT(G_UnitIsIdleWorker(worker));
+    T_ASSERT(G_UnitShowsIdleWorkerShortcut(client, worker));
+    client->shortcuts.dirty = false;
+    G_InvalidateUnitShortcutsForUnit(worker);
+    T_ASSERT(client->shortcuts.dirty);
+    unit_setmove(worker, &busy);
+    T_ASSERT(!G_UnitIsIdleWorker(worker));
+}
+
 TEST(wc3_shortcuts, hold_position_worker_is_not_idle) {
     edict_t *worker;
 

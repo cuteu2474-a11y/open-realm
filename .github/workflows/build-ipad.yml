@@ -1,5 +1,6 @@
 name: Build OpenRealm iPad
 
+# Manual-only fallback: the ORDR workflow handles PR builds and SideStore IPA.
 on:
   workflow_dispatch:
 

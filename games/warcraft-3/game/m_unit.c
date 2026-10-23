@@ -115,7 +115,7 @@ void G_RestartCorpseBoneDecayAfterCargo(edict_t *corpse) {
 static void unit_decay_flesh_think(edict_t *self) {
     /* An active corpse consumer owns the remains.  Freeze ordinary decay until
      * that reservation is released or, for Cannibalize, the corpse is consumed. */
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     unit_runwait(self, unit_begin_bone_decay);
 }
 
@@ -153,7 +153,7 @@ void unit_begin_decay(edict_t *self) {
 /* Ordinary corpses are removed. Heroes instead finish their dissipation timer,
  * become hidden/awaiting-revive, and keep the same authoritative edict. */
 void unit_decay_think(edict_t *self) {
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     if (G_UnitIsHero(self) && !(self->aiflags & AI_ILLUSION)) {
         if (!(self->revival && self->revival->awaiting)) unit_runwait(self, hero_become_revivable);
         return;
@@ -1409,9 +1409,21 @@ edict_t *unit_create(uint32_t player, uint32_t unitid, vec2_t const *location, f
         unit->mana.value = unit->mana.max_value;
     }
     /* Warsmash CreateUnit delegates to createUnitSimple, which checks the
-     * spawned unit against static pathing and nudges it to a legal point. */
+     * spawned unit against static pathing and nudges it to a legal point.
+     * ORDR's neutral-passive difficulty selection markers are a fixed
+     * in-world UI laid out against scenery at authored coordinates. Nudging
+     * them shifts multiple buttons by 256-384 units and breaks the layout.
+     * Restrict this exception to the exact menu codes, owner, time and area;
+     * ordinary Warcraft units retain normal unstuck placement. */
+    bool ordr_choice_marker = player == 15 &&
+        level.time >= 3900 && level.time <= 7000 &&
+        ((unitid >= 0x75303030u && unitid <= 0x75303039u) ||
+         (unitid >= 0x75303041u && unitid <= 0x75303043u)) &&
+        location->x >= -7200.0f && location->x <= -4800.0f &&
+        location->y >= -9600.0f && location->y <= -8200.0f;
     vec2_t position;
-    if (G_FindUnitUnstuckPosition(unit, location, &position)) {
+    if (ordr_choice_marker || G_FindUnitUnstuckPosition(unit, location, &position)) {
+        if (ordr_choice_marker) position = *location;
         unit->s.origin2 = position;
         unit->s.origin.x = position.x;
         unit->s.origin.y = position.y;
@@ -2240,6 +2252,10 @@ bool G_HeroLearnSkill(edict_t *ent, uint32_t abilcode) {
     if (!G_HeroModifySkillPoints(ent, -1)) {
         return false;
     }
+    gameEvent_t *event = G_PublishEventWithValue(ent, EVENT_PLAYER_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
+    event = G_PublishEventWithValue(ent, EVENT_UNIT_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
     return true;
 }
 

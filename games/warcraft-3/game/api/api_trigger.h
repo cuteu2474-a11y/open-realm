@@ -62,15 +62,20 @@ uint32_t CreateTrigger(jass_t *j) {
     return jass_pushlighthandle(j, trigger, "trigger");
 }
 uint32_t DestroyTrigger(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    G_DestroyJassTrigger(jass_checkhandle(j, 1, "trigger"));
     return 0;
 }
 uint32_t ResetTrigger(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    if(trigger){
+        trigger->evaluation_count=0;
+        trigger->execution_count=0;
+    }
     return 0;
 }
 uint32_t EnableTrigger(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return 0;
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         jassContext_t const *ctx = jass_getcontext(j);
         cstring_t caller = ctx ? jass_functionname(ctx->func) : NULL;
@@ -99,6 +104,7 @@ uint32_t EnableTrigger(jass_t *j) {
 }
 uint32_t DisableTrigger(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return 0;
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         jassContext_t const *ctx = jass_getcontext(j);
         cstring_t caller = ctx ? jass_functionname(ctx->func) : NULL;
@@ -127,7 +133,7 @@ uint32_t DisableTrigger(jass_t *j) {
 }
 uint32_t IsTriggerEnabled(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    bool enabled = !whichTrigger->disabled;
+    bool enabled = whichTrigger && !whichTrigger->destroyed && !whichTrigger->disabled;
     if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
         char chain[256];
         jass_formatcallchain(j, chain, sizeof(chain));
@@ -140,27 +146,14 @@ uint32_t IsTriggerEnabled(jass_t *j) {
     return jass_pushboolean(j, enabled);
 }
 uint32_t TriggerWaitOnSleeps(jass_t *j) {
-    /* TODO: Store the per-trigger wait-on-sleeps flag once coroutine suspension exposes that state. */
-    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    bool flag = jass_checkboolean(j, 2);
-    if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
-        fprintf(stderr,
-                "WC3_TUTORIAL_FLOW wait-on-sleeps trigger=%ld flag=%d caller=\"%s\" implementation=stub\n",
-                (long)QuestPeonStageTriggerOrdinal(whichTrigger), (int)flag,
-                jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "(native/root)");
-    }
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    bool enabled=jass_checkboolean(j,2);
+    if(trigger)trigger->wait_on_sleeps=enabled;
     return 0;
 }
 uint32_t IsTriggerWaitOnSleeps(jass_t *j) {
-    /* TODO: Return the stored per-trigger wait-on-sleeps flag once coroutine suspension exposes that state. */
-    trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    if (QuestPeonStageDebugEnabled() && TutorialFlowDebugTrigger(whichTrigger)) {
-        fprintf(stderr,
-                "WC3_TUTORIAL_FLOW is-wait-on-sleeps trigger=%ld caller=\"%s\" result=0 implementation=stub\n",
-                (long)QuestPeonStageTriggerOrdinal(whichTrigger),
-                jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "(native/root)");
-    }
-    return jass_pushboolean(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushboolean(j,trigger && trigger->wait_on_sleeps);
 }
 uint32_t GetTriggeringTrigger(jass_t *j) {
     jassContext_t const *ctx = jass_getcontext(j);
@@ -175,21 +168,23 @@ uint32_t GetTriggeringTrigger(jass_t *j) {
     return jass_pushlighthandle(j, ctx ? ctx->trigger : NULL, "trigger");
 }
 uint32_t GetTriggerEventId(jass_t *j) {
-    return jass_pushnullhandle(j, "eventid");
+    uint32_t id = jass_getcontext(j)->event_id;
+    return id ? JassPushEnumHandle(j, "eventid", id - 1) : jass_pushnullhandle(j, "eventid");
 }
 uint32_t GetTriggerEvalCount(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    return jass_pushinteger(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushinteger(j,trigger ? (int32_t)MIN(trigger->evaluation_count,(uint32_t)INT32_MAX):0);
 }
 uint32_t GetTriggerExecCount(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    return jass_pushinteger(j, 0);
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    return jass_pushinteger(j,trigger ? (int32_t)MIN(trigger->execution_count,(uint32_t)INT32_MAX):0);
 }
 /* Registrations own their subject/filter/limit data. Dispatch installs event
  * response context before conditions and actions, then restores it for nested
  * triggers; state-limit events fire on the qualifying transition. */
 uint32_t TriggerRegisterVariableEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     cstring_t varName = jass_checkstring(j, 2);
     string_t variable;
     uint32_t *opcode = jass_checkhandle(j, 3, "limitop");
@@ -205,31 +200,56 @@ uint32_t TriggerRegisterVariableEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterTimerEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     float timeout = jass_checknumber(j, 2);
     bool periodic = jass_checkboolean(j, 3);
     gtimer_t *timer;
     event_t *evt;
-    if (!whichTrigger || !(timer = G_AllocJassTimer())) return jass_pushnullhandle(j, "event");
+    if (!whichTrigger) return jass_pushnullhandle(j, "event");
+    /* Allocate registration first: no orphan timer when event slots are full. */
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) {
+        jass_ordr_log_event(j, "TIMER_EVENT_FULL",
+                            "TriggerRegisterTimerEvent: event registry exhausted");
+        return jass_pushnullhandle(j, "event");
+    }
+    timer = G_AllocJassTimer();
+    if (!timer) {
+        /* Undo this registration without disturbing the slot generation. */
+        evt->inuse = false;
+        jass_ordr_log_event(j, "TIMER_POOL_FULL",
+                            "TriggerRegisterTimerEvent: timer registry exhausted");
+        return jass_pushnullhandle(j, "event");
+    }
     G_TimerStart(timer, (uint32_t)(MAX(0.0f, timeout) * 1000.0f), periodic, NULL);
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt->trigger = whichTrigger;
+    evt->timer = timer;
+    evt->owns_timer = true;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer");
     return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterTimerExpireEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     gtimer_t *timer = jass_checkhandle(j, 2, "timer");
     event_t *evt;
     if (!whichTrigger || !timer) return jass_pushnullhandle(j, "event");
-    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED); evt->trigger = whichTrigger; evt->timer = timer;
+    evt = G_MakeEvent(EVENT_GAME_TIMER_EXPIRED);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    evt->trigger = whichTrigger; evt->timer = timer;
     QuestPeonStageLogRegistration(whichTrigger, EVENT_GAME_TIMER_EXPIRED, NULL, "timer-expire");
     return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterGameStateEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     uint32_t *whichState = jass_checkhandle(j, 2, "gamestate");
     uint32_t *opcode = jass_checkhandle(j, 3, "limitop");
     float limitval = jass_checknumber(j, 4);
-    event_t *evt = G_MakeEvent(EVENT_GAME_STATE_LIMIT);
+    event_t *evt;
+    if (!whichTrigger) return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_GAME_STATE_LIMIT);
+    if (!evt) return jass_pushnullhandle(j, "event");
     evt->trigger = whichTrigger;
     evt->state = whichState ? *whichState : 0;
     evt->limitop = opcode ? *opcode : 0;
@@ -239,6 +259,7 @@ uint32_t TriggerRegisterGameStateEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterDialogEvent(jass_t *j) {
     trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
     jassDialog_t *dialog = G_JassDialog(jass_checkhandle(j, 2, "dialog"));
     event_t *event;
     if (!trigger || !dialog || !(event = G_MakeEvent(EVENT_DIALOG_CLICK)))
@@ -249,6 +270,7 @@ uint32_t TriggerRegisterDialogEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterDialogButtonEvent(jass_t *j) {
     trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
     jassDialogButton_t *button = G_JassDialogButton(jass_checkhandle(j, 2, "button"));
     event_t *event;
     if (!trigger || !button || !(event = G_MakeEvent(EVENT_DIALOG_BUTTON_CLICK)))
@@ -260,6 +282,7 @@ uint32_t TriggerRegisterDialogButtonEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterGameEvent(jass_t *j) {
     trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
     uint32_t *game_event = jass_checkhandle(j, 2, "gameevent");
     event_t *registration;
     if (!trigger || !game_event ||
@@ -272,6 +295,7 @@ uint32_t TriggerRegisterGameEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterEnterRegion(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     handle_t region = jass_checkhandle(j, 2, "region");
     region_t *whichRegion = G_RegionFromHandle(region);
     jassFunc_t const *filter = jass_checkhandle(j, 3, "boolexpr");
@@ -291,6 +315,7 @@ uint32_t GetTriggeringRegion(jass_t *j) {
 }
 uint32_t TriggerRegisterLeaveRegion(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     handle_t region = jass_checkhandle(j, 2, "region");
     region_t *whichRegion = G_RegionFromHandle(region);
     jassFunc_t const *filter = jass_checkhandle(j, 3, "boolexpr");
@@ -315,9 +340,23 @@ uint32_t TriggerRegisterTrackableTrackEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterPlayerEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerEvent = jass_checkhandle(j, 3, "playerevent");
-    event_t *evt = G_MakeEvent(*whichPlayerEvent);
+    event_t *evt;
+    /* Bad/null handles and an exhausted event pool must never crash a
+     * running map. ORDR registers many events immediately after main(). */
+    if (!whichTrigger || !whichPlayer || !whichPlayerEvent) {
+        jass_ordr_log_event(j, "PLAYER_EVENT_INVALID",
+                            "TriggerRegisterPlayerEvent received null handle");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(*whichPlayerEvent);
+    if (!evt) {
+        jass_ordr_log_event(j, "PLAYER_EVENT_FULL",
+                            "TriggerRegisterPlayerEvent allocation failed");
+        return jass_pushnullhandle(j, "event");
+    }
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerEvent, evt->subject, "player");
@@ -334,10 +373,24 @@ uint32_t GetTriggerPlayer(jass_t *j) {
 }
 uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerUnitEvent = jass_checkhandle(j, 3, "playerunitevent");
     //handle_t filter = jass_checkhandle(j, 4, "boolexpr");
-    event_t *evt = G_MakeEvent(*whichPlayerUnitEvent);
+    event_t *evt;
+    /* BDN registers EVENT_PLAYER_UNIT_SELECTED for every player. A missing
+     * event constant/player or exhausted registry used to be dereferenced. */
+    if (!whichTrigger || !whichPlayer || !whichPlayerUnitEvent) {
+        jass_ordr_log_event(j, "PLAYER_UNIT_EVENT_INVALID",
+                            "TriggerRegisterPlayerUnitEvent received null handle");
+        return jass_pushnullhandle(j, "event");
+    }
+    evt = G_MakeEvent(*whichPlayerUnitEvent);
+    if (!evt) {
+        jass_ordr_log_event(j, "PLAYER_UNIT_EVENT_FULL",
+                            "TriggerRegisterPlayerUnitEvent allocation failed");
+        return jass_pushnullhandle(j, "event");
+    }
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
@@ -355,25 +408,55 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     return jass_pushlighthandle(j, evt, "event");
 }
 uint32_t TriggerRegisterPlayerAllianceChange(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //handle_t whichAlliance = jass_checkhandle(j, 3, "alliancetype");
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger=jass_checkhandle(j,1,"trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
+    player_t *player=jass_checkhandle(j,2,"player");
+    uint32_t *alliance=jass_checkhandle(j,3,"alliancetype");
+    event_t *reg;
+    if(!trigger||!player||!alliance||*alliance>ALLIANCE_SHARED_VISION_FORCED)
+        return jass_pushnullhandle(j,"event");
+    reg=G_MakeEvent(EVENT_PLAYER_ALLIANCE_CHANGED);
+    if(!reg)return jass_pushnullhandle(j,"event");
+    G_SetPlayerEventSubject(reg,PLAYER_ENT(player));
+    reg->trigger=trigger;
+    reg->state=*alliance;
+    return jass_pushlighthandle(j,G_EventHandle(reg),"event");
 }
 uint32_t TriggerRegisterPlayerStateEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //handle_t whichState = jass_checkhandle(j, 3, "playerstate");
-    //handle_t opcode = jass_checkhandle(j, 4, "limitop");
-    //float limitval = jass_checknumber(j, 5);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
+    player_t *player = jass_checkhandle(j, 2, "player");
+    uint32_t *state = jass_checkhandle(j, 3, "playerstate");
+    uint32_t *opcode = jass_checkhandle(j, 4, "limitop");
+    float value = jass_checknumber(j, 5);
+    event_t *evt;
+    if (!trigger || !player || !state || !opcode ||
+        *state >= MAX_STATS || *opcode > WC3_LIMITOP_NOT_EQUAL)
+        return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_PLAYER_STATE_LIMIT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(player));
+    evt->trigger = trigger;
+    evt->state = *state;
+    evt->limitop = *opcode;
+    evt->limitval = value;
+    return jass_pushlighthandle(j, G_EventHandle(evt), "event");
 }
 uint32_t TriggerRegisterPlayerChatEvent(jass_t *j) {
-    //trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
-    //player_t *whichPlayer = jass_checkhandle(j, 2, "player");
-    //cstring_t chatMessageToDetect = jass_checkstring(j, 3);
-    //bool exactMatchOnly = jass_checkboolean(j, 4);
-    return jass_pushnullhandle(j, "event");
+    trigger_t *trigger = jass_checkhandle(j, 1, "trigger");
+    if (!trigger || trigger->destroyed) return jass_pushnullhandle(j, "event");
+    player_t *player = jass_checkhandle(j, 2, "player");
+    cstring_t pattern = jass_checkstring(j, 3);
+    bool exact = jass_checkboolean(j, 4);
+    event_t *evt;
+    if (!trigger || !player) return jass_pushnullhandle(j, "event");
+    evt = G_MakeEvent(EVENT_PLAYER_CHAT);
+    if (!evt) return jass_pushnullhandle(j, "event");
+    G_SetPlayerEventSubject(evt, PLAYER_ENT(player));
+    evt->trigger = trigger;
+    evt->chat_exact = exact;
+    strlcpy(evt->chat_match, pattern ? pattern : "", sizeof(evt->chat_match));
+    return jass_pushlighthandle(j, G_EventHandle(evt), "event");
 }
 uint32_t TriggerRegisterDeathEvent(jass_t *j) {
     /* Fire whichTrigger when whichWidget dies.  "widget" is the base type of
@@ -393,6 +476,7 @@ uint32_t TriggerRegisterDeathEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterUnitStateEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     edict_t *whichUnit = jass_checkhandle(j, 2, "unit");
     uint32_t *whichState = jass_checkhandle(j, 3, "unitstate");
     uint32_t *opcode = jass_checkhandle(j, 4, "limitop");
@@ -419,6 +503,7 @@ uint32_t TriggerRegisterUnitStateEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterUnitEvent(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     edict_t *whichUnit = jass_checkhandle(j, 2, "unit");
     EVENTTYPE *whichEvent = jass_checkhandle(j, 3, "unitevent");
     if (!whichTrigger || !whichUnit || !whichEvent) {
@@ -449,6 +534,7 @@ uint32_t TriggerRegisterFilterUnitEvent(jass_t *j) {
 }
 uint32_t TriggerRegisterUnitInRange(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     edict_t *whichUnit = jass_checkhandle(j, 2, "unit");
     float range = jass_checknumber(j, 3);
 //    handle_t filter = jass_checkhandle(j, 4, "boolexpr");
@@ -464,9 +550,20 @@ uint32_t TriggerRegisterUnitInRange(jass_t *j) {
 }
 uint32_t TriggerAddCondition(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "triggercondition");
     gTriggerCondition_t *condition = gi.MemAlloc(sizeof(gTriggerCondition_t));
     condition->expr = jass_checkhandle(j, 2, "boolexpr");
-    ADD_TO_LIST(condition, whichTrigger->conditions);
+    /* Warcraft evaluates trigger conditions in registration order. A
+     * prepended list reversed ORDR's Lu startup callbacks, so the last
+     * callback ran first and short-circuited the difficulty timer setup. */
+    condition->next = NULL;
+    if (!whichTrigger->conditions) {
+        whichTrigger->conditions = condition;
+    } else {
+        gTriggerCondition_t *tail = whichTrigger->conditions;
+        while (tail->next) tail = tail->next;
+        tail->next = condition;
+    }
     if (QuestPeonStageDebugEnabled() && QuestPeonStageTrigger(whichTrigger)) {
         cstring_t func = condition->expr ? jass_functionname(condition->expr) : NULL;
         fprintf(stderr,
@@ -503,6 +600,7 @@ uint32_t TriggerClearConditions(jass_t *j) {
 }
 uint32_t TriggerAddAction(jass_t *j) {
     trigger_t *whichTrigger = jass_checkhandle(j, 1, "trigger");
+    if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "triggeraction");
     gTriggerAction_t *action = gi.MemAlloc(sizeof(gTriggerAction_t));
     action->func = jass_checkcode(j, 2);
     ADD_TO_LIST(action, whichTrigger->actions);

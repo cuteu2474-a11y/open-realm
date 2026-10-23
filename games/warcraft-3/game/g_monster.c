@@ -82,9 +82,34 @@ bool player_pay(player_t *ps, uint32_t project) {
     return true;
 }
 
-bool M_IsDead(edict_t const *ent) {
-    return ent->health.value <= 0;
+/* Retail maps may author 'HP' without the optional 'realHP' SLK column.
+ * ORDR's e0IX/e0HP wisps are HP=10, realHP=(empty): treating a missing
+ * derived column as zero made every wisp an instant corpse. The same defect
+ * blocked IssuePointOrder (M_IsDead), region-enter rewards and enemy waves.
+ * Preserve explicit positive realHP, otherwise use the map's actual HP. */
+static float G_AuthoredUnitMaxHealth(UnitBalance_t const *balance) {
+    if (!balance) return 0.0f;
+    if (balance->maxHealth > 0.0f) return balance->maxHealth;
+    return balance->baseHealth > 0 ? (float)balance->baseHealth : 0.0f;
 }
+
+bool M_IsDead(edict_t const *ent) {
+    return !ent || ent->health.value <= 0.0f || (ent->svflags & SVF_DEADMONSTER);
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_unit, absent_realhp_uses_authored_hp) {
+    UnitBalance_t balance = {0};
+    balance.baseHealth = 10;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 10.0f);
+    balance.maxHealth = 150.0f;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 150.0f);
+    balance.baseHealth = 0;
+    balance.maxHealth = 0.0f;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 0.0f);
+}
+#endif
 
 /* Advance the unit's animation frame by its scaled simulation timestep.
  * If the new frame would exceed the animation's end interval, the current
@@ -457,8 +482,11 @@ void SP_SpawnUnit(edict_t *self) {
     }
     self->mana.max_value = b->maxMana;
     self->mana.value = MIN(self->mana.max_value, b->initialMana);
-    self->health.value = b->maxHealth;
-    self->health.max_value = b->maxHealth;
+    /* Use the authored base HP when 'realHP' is absent in the map SLK.
+     * Never invent a constant 1 HP: the map specifies 10 HP for both
+     * ORDR wisps, and valid combat units have different base HP values. */
+    self->health.value = G_AuthoredUnitMaxHealth(b);
+    self->health.max_value = self->health.value;
     G_InitStockSlots(self);
     self->invulnerable = G_ActorHasSkill(self, "Avul");
     G_ApplyUnitAbilityTraits(self);

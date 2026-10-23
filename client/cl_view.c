@@ -174,6 +174,25 @@ static void Matrix4_getPreviewLightMatrix(vec3_t const *sunangles, vec3_t const 
     Matrix4_multiply(&proj, &view, output);
 }
 
+/* A top-down Warcraft camera can point directly along the world-up vector.
+ * Matrix4_lookAt cannot build a valid basis from parallel direction/up axes;
+ * retaining the Euler camera's own screen-up vector at the pole keeps the
+ * authored yaw and the difficulty selection scene upright. At ordinary
+ * orbit pitches the familiar world-Z up convention remains unchanged. */
+static vec3_t CL_CameraSafeWorldUp(vec3_t const *direction, mat4_t const *euler_view) {
+    vec3_t const world_up = { 0, 0, 1 };
+    float const length_sq = Vector3_lengthsq(direction);
+    float const horizontal_sq = direction->x * direction->x + direction->y * direction->y;
+    if (length_sq > 0.0f && horizontal_sq <= 0.03f * length_sq) {
+        mat4_t inverse;
+        Matrix4_inverse(euler_view, &inverse);
+        vec3_t up = { inverse.v[4], inverse.v[5], inverse.v[6] };
+        if (Vector3_lengthsq(&up) > 0.01f)
+            return up;
+    }
+    return world_up;
+}
+
 void Matrix4_getCameraMatrix(mat4_t *output) {
     if (!world_loaded) {
         Matrix4_identity(output);
@@ -224,7 +243,8 @@ void Matrix4_getCameraMatrix(mat4_t *output) {
     } else if (distance > 0.0f && CL_GameCameraUsesWorldUp()) {
         /* Some game cameras orbit a target and require a world-up basis to keep low shots upright. */
         vec3_t direction = Vector3_sub(&origin, &cl.viewDef.camerastate[0].eye);
-        Matrix4_lookAt(&view, &cl.viewDef.camerastate[0].eye, &direction, &(vec3_t){0, 0, 1});
+        vec3_t const up = CL_CameraSafeWorldUp(&direction, &view);
+        Matrix4_lookAt(&view, &cl.viewDef.camerastate[0].eye, &direction, &up);
     }
     Matrix4_multiply(&proj, &view, output);
 }
@@ -829,6 +849,21 @@ TEST(client_camera, server_view_offsets_interpolate_onto_target_and_eye) {
     T_FEQ(cl.viewDef.camerastate[0].eye.y, steady_eye.y - 2.0f, 0.01f);
     T_FEQ(cl.viewDef.camerastate[0].eye.z, steady_eye.z, 0.01f);
     cl.viewDef = saved; re = api; world_loaded = loaded;
+}
+
+/* At a Warcraft top-down camera angle, the world-up vector is parallel
+ * to the view direction; the fallback must remain perpendicular and finite. */
+TEST(client_camera, top_down_world_up_avoids_degenerate_basis) {
+    mat4_t euler_view;
+    Matrix4_identity(&euler_view);
+    vec3_t direction = { 0, 0, -1 };
+    vec3_t up = CL_CameraSafeWorldUp(&direction, &euler_view);
+    T_FEQ(up.x, 0.0f, 0.001f);
+    T_FEQ(up.y, 1.0f, 0.001f);
+    T_FEQ(up.z, 0.0f, 0.001f);
+    direction = (vec3_t){ 0, -1, -1 };
+    up = CL_CameraSafeWorldUp(&direction, &euler_view);
+    T_FEQ(up.z, 1.0f, 0.001f);
 }
 
 /* Sky and particles consume the same interpolated eye used to build the final view. */

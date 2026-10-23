@@ -272,7 +272,7 @@ enum {
 #define MAX_GAME_ENTITIES 16000
 #define MAX_PACKET_ENTITIES 1024 // per-frame packet snapshot budget
 #define MAX_CLIENTS 24
-#define MAX_MODELS 512 // campaign maps can reference more than 255 distinct models
+#define MAX_MODELS 2048 // custom WC3 maps can exceed 1,200 distinct unit models (ORDR)
 #define MAX_FONTSTYLES 256
 #define MAX_SOUNDS 1024 // campaign maps can reference more than 512 unit and ambient sounds
 #define MAX_IMAGES 2048 // UI-heavy games can reference hundreds of distinct command/status textures in one map session
@@ -369,6 +369,7 @@ typedef enum {
 #define SND_OFFSET      0x10 // byte; start delay in milliseconds; used by svc_sound
 #define SND_PRIORITY    0x20 // ushort; playback importance, higher values win
 #define SND_POLICY      0x40 // explicit admission policy, independent of spatial source
+#define SND_STOP        0x80 // sound index identifies an active playback to stop
 
 /* Reliable client music-control commands carried by svc_music.  The payload is
  * presentation-only state; game modules choose the command and the client owns

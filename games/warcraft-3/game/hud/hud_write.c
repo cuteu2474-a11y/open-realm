@@ -252,6 +252,14 @@ cstring_t UI_FormatMessageText(cstring_t text) {
     out[0] = '\0';
 
     for (cstring_t p = source; *p && strlen(temp) < sizeof(temp) - 1;) {
+        /* Some ORDR scripts store the two literal bytes \n in a JASS
+         * message, whereas Warcraft layout text expects |n. Normalize
+         * on the presentation side without rewriting saved map strings. */
+        if (p[0] == '\\' && p[1] == 'n') {
+            UI_AppendMessageText(temp, sizeof(temp), "|n");
+            p += 2;
+            continue;
+        }
         if (quest_message && p[0] == ' ' && p[1] == '-' && p[2] == ' ') {
             UI_AppendMessageText(temp, sizeof(temp), "|n- ");
             p += 3;

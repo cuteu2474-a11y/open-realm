@@ -67,10 +67,25 @@ uint32_t GroupClear(jass_t *j) {
 /* Enumeration filters run with each candidate bound as GetFilterUnit(). Apply
  * counted limits after the filter accepts a unit, and restore context so nested
  * group callbacks do not leak their candidate. */
+/* WC3 unit-name groups accept both raw FourCC and object-editor display
+ * name, and evaluate the supplied JASS filter for each candidate. */
+static bool JassGroupTypeMatches(edict_t const *ent,cstring_t name) {
+    UnitProfile_t const *profile;
+    if(!ent||!name||!*name)return false;
+    if(!strcmp(GetClassName(ent->class_id),name))return true;
+    profile=ent->data.UnitProfile?ent->data.UnitProfile:G_UnitProfile(ent->class_id);
+    return profile&&profile->name&&!strcmp(profile->name,name);
+}
 uint32_t GroupEnumUnitsOfType(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //cstring_t unitname = jass_checkstring(j, 2);
-    //handle_t filter = jass_checkhandle(j, 3, "boolexpr");
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    cstring_t name=jass_checkstring(j,2);
+    jassFunc_t const *filter=jass_checkhandle(j,3,"boolexpr");
+    if(!G_JassGroupValid(group)||!name||!*name)return 0;
+    FOR_LOOP(n,globals.num_edicts){
+        edict_t *u=&globals.edicts[n];
+        if(IS_UNIT(u)&&!G_IsDeferredFree(u)&&JassGroupTypeMatches(u,name)&&
+            jass_evaluateboolexpr(j,filter,u))group_add_entity(group,u);
+    }
     return 0;
 }
 uint32_t GroupEnumUnitsOfPlayer(jass_t *j) {
@@ -90,10 +105,19 @@ uint32_t GroupEnumUnitsOfPlayer(jass_t *j) {
     return 0;
 }
 uint32_t GroupEnumUnitsOfTypeCounted(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //cstring_t unitname = jass_checkstring(j, 2);
-    //handle_t filter = jass_checkhandle(j, 3, "boolexpr");
-    //int32_t countLimit = jass_checkinteger(j, 4);
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    cstring_t name=jass_checkstring(j,2);
+    jassFunc_t const *filter=jass_checkhandle(j,3,"boolexpr");
+    int32_t count=jass_checkinteger(j,4);
+    if(!G_JassGroupValid(group)||!name||!*name||count<=0)return 0;
+    FOR_LOOP(n,globals.num_edicts){
+        edict_t *u=&globals.edicts[n];
+        if(IS_UNIT(u)&&!G_IsDeferredFree(u)&&JassGroupTypeMatches(u,name)&&
+            jass_evaluateboolexpr(j,filter,u)){
+            group_add_entity(group,u);
+            if(!--count)break;
+        }
+    }
     return 0;
 }
 uint32_t GroupEnumUnitsInRect(jass_t *j) {
@@ -238,9 +262,13 @@ uint32_t GroupImmediateOrder(jass_t *j) {
  * their string counterparts; the return value is the aggregate acceptance
  * result, not a placeholder success flag. */
 uint32_t GroupImmediateOrderById(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //int32_t order = jass_checkinteger(j, 2);
-    return jass_pushboolean(j, 0);
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,2));
+    bool any=false;
+    if(!G_JassGroupValid(group)||!order||!*order)return jass_pushboolean(j,false);
+    FOR_LOOP(n,group->num_units)
+        if(unit_issueimmediateorder(group->units[n],order))any=true;
+    return jass_pushboolean(j,any);
 }
 uint32_t GroupPointOrder(jass_t *j) {
     ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
@@ -265,17 +293,34 @@ uint32_t GroupPointOrderLoc(jass_t *j) {
     return jass_pushboolean(j, any);
 }
 uint32_t GroupPointOrderById(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //int32_t order = jass_checkinteger(j, 2);
-    //float x = jass_checknumber(j, 3);
-    //float y = jass_checknumber(j, 4);
-    return jass_pushboolean(j, 0);
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    vec2_t dest={jass_checknumber(j,3),jass_checknumber(j,4)};
+    cstring_t order=G_OrderId2String(id);
+    bool any=false;
+    if(!G_JassGroupValid(group))return jass_pushboolean(j,false);
+    FOR_LOOP(n,group->num_units){
+        edict_t *u=group->units[n];
+        bool ok=G_UnitIsBuilding(id)?G_IssueBuildOrder(u,id,&dest):
+            (order&&*order&&unit_issueorder(u,order,&dest));
+        if(ok)any=true;
+    }
+    return jass_pushboolean(j,any);
 }
 uint32_t GroupPointOrderByIdLoc(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //int32_t order = jass_checkinteger(j, 2);
-    //handle_t whichLocation = jass_checkhandle(j, 3, "location");
-    return jass_pushboolean(j, 0);
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    vec2_t const *dest=jass_checkhandle(j,3,"location");
+    cstring_t order=G_OrderId2String(id);
+    bool any=false;
+    if(!G_JassGroupValid(group)||!dest)return jass_pushboolean(j,false);
+    FOR_LOOP(n,group->num_units){
+        edict_t *u=group->units[n];
+        bool ok=G_UnitIsBuilding(id)?G_IssueBuildOrder(u,id,dest):
+            (order&&*order&&unit_issueorder(u,order,dest));
+        if(ok)any=true;
+    }
+    return jass_pushboolean(j,any);
 }
 uint32_t GroupTargetOrder(jass_t *j) {
     ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
@@ -289,10 +334,15 @@ uint32_t GroupTargetOrder(jass_t *j) {
     return jass_pushboolean(j, any);
 }
 uint32_t GroupTargetOrderById(jass_t *j) {
-    //ggroup_t *whichGroup = jass_checkhandle(j, 1, "group");
-    //int32_t order = jass_checkinteger(j, 2);
-    //handle_t targetWidget = jass_checkhandle(j, 3, "widget");
-    return jass_pushboolean(j, 0);
+    ggroup_t *group=jass_checkhandle(j,1,"group");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,2));
+    edict_t *target=jass_checkhandle(j,3,"widget");
+    bool any=false;
+    if(!G_JassGroupValid(group)||!target||!target->inuse||!order||!*order)
+        return jass_pushboolean(j,false);
+    FOR_LOOP(n,group->num_units)
+        if(unit_issuetargetorder(group->units[n],order,target))any=true;
+    return jass_pushboolean(j,any);
 }
 /* Retail enumerates a retained snapshot, so callbacks may remove units or change the group. */
 uint32_t ForGroup(jass_t *j) {

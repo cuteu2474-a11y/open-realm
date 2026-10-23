@@ -39,9 +39,9 @@
 #define MAX_REGION_SIZE 16
 #define MAX_REGIONS 2048 // fixed region data slots; generation tokens let retired slots be reused safely
 #define REGION_TOKEN_SLOT_BITS 13 // 2048 slots plus a two-bit tag; upper uintptr_t bits carry a generation
-#define EVENT_TOKEN_SLOT_BITS 12 // 1024 slots plus a two-bit tag; upper bits carry a generation
+#define EVENT_TOKEN_SLOT_BITS 16 // 16384 slots plus a two-bit tag; upper bits carry a generation
 #define REGION_HANDLE_ID_GENERATION_BITS 17 // keeps region GetHandleId values unique in a positive 28-bit range
-#define EVENT_HANDLE_ID_GENERATION_BITS 18 // keeps region-event GetHandleId values unique in a positive 28-bit range
+#define EVENT_HANDLE_ID_GENERATION_BITS 14 // keep total slot + generation bits at 30 for 32-bit GetHandleId compatibility
 #define REGION_HANDLE_GENERATION_MAX ((1u << REGION_HANDLE_ID_GENERATION_BITS) - 1)
 #define EVENT_HANDLE_GENERATION_MAX ((1u << EVENT_HANDLE_ID_GENERATION_BITS) - 1)
 #define REGION_HANDLE_ID_BASE 0x10000000u
@@ -212,6 +212,7 @@ enum {
     AI_PROJECTILE_FIXED_TARGET = 1 << 11, /* projectile flies to channel.origin snapshot rather than homing */
     AI_SOUL_TRAPPED = 1 << 12, /* entity remains alive but leaves world interaction until Soul Trap release */
     AI_SUMMON_EXPLODES_ON_DEATH = 1 << 13, /* spirit/beast summon magical death effect, no corpse */
+    AI_CORPSE_DECAY_SUSPENDED = 1 << 14, /* UnitSuspendDecay: preserve current corpse phase */
 };
 
 typedef enum {
@@ -979,11 +980,13 @@ typedef struct gameevent_s {
     uint32_t source_spawn_time;
     bool source_spawn_tracked;
     int32_t value; /* scalar JASS callback payload (for example spell/research rawcode) */
+    uint32_t learned_level; /* immutable rank when the skill event was published */
     vec2_t point;
     bool has_point;
     event_t *responseTo;
     uint32_t dialog_id, button_id;
     uint32_t dialog_player; /* one-based player index; zero means no override */
+    char chat_text[256]; /* queued player chat, including command prefixes */
 } gameEvent_t;
 
 typedef struct {
@@ -1034,7 +1037,7 @@ typedef struct {
 #define MAX_GROUP_SIZE 256 // entities; Warcraft III group enumeration cap used by JASS group handles
 #define JASS_GROUP_INITIAL_CAPACITY 64 // handle pointer slots; grows dynamically while group objects stay at stable addresses
 #define MAX_TRIGGERS 4096 // handles; bounds deterministic per-map trigger registry slots
-#define MAX_TIMERS 1024 // handles; bounds deterministic per-map timer registry slots
+#define MAX_TIMERS 8192 // ORDR: larger stable per-map timer arena, pointer-safe for JASS handles
 #define MAX_TIMERDIALOGS 64 // handles; bounds map-lifetime timer-dialog registry slots
 #define MAX_LEADERBOARDS 32 // handles; fixed save-stable leaderboard registry
 #define MAX_LEADERBOARD_ITEMS 24 // rows; covers classic player/campaign boards
@@ -1054,7 +1057,7 @@ typedef struct {
 #define WC3_LAYER_TIMERDIALOG LAYER_GAME_0
 #define WC3_LAYER_LEADERBOARD LAYER_GAME_1
 #define WC3_LAYER_MULTIBOARD LAYER_GAME_3 // custom multiboard / Team Resources; LAYER_GAME_2 belongs to WC3_LAYER_COMMAND_ERROR
-#define MAX_EVENTS 1024 // handlers; region-event tokens allow safe reuse of retired handler slots
+#define MAX_EVENTS 16384 // ORDR startup registers >1024 player-unit events; retain stable handle slots
 #define MAX_QUESTS 256 // quests; fixed quest slots preserve stable pointers across removal
 #define MAX_QUESTITEMS 16 // items per quest; matches the practical quest objective display capacity
 #define MAX_WAYPOINTS 256 // entities; fixed g_edicts ring used by point-target movement
@@ -1132,6 +1135,10 @@ struct gtrigger_s {
     gTriggerAction_t *actions;
     gTriggerCondition_t *conditions;
     bool disabled;
+    bool destroyed; /* tombstone: active contexts may still reference this stable slot */
+    bool wait_on_sleeps; /* TriggerWaitOnSleeps */
+    uint32_t evaluation_count; /* TriggerEvaluate/event condition calls */
+    uint32_t execution_count;  /* TriggerExecute/accepted event actions */
 };
 
 struct gtimer_s {
@@ -1959,6 +1966,7 @@ struct edict_s {
     edict_t *build;
     animation_t const *animation;
     float animation_speed; /* JASS SetUnitTimeScale multiplier for the simulation animation clock */
+    uint32_t animation_index; /* one-based model sequence; zero selects by name */
     bool animation_override; /* JASS presentation animation may advance while gameplay is paused */
     /* Warcraft Required Animation Names (UnitProfile.animProps/uani) plus
      * AddUnitAnimationProperties mutations. The request is retained separately
@@ -2102,6 +2110,7 @@ struct gevent_s {
     EVENTTYPE type;
     trigger_t *trigger;
     gtimer_t *timer;
+    bool owns_timer;
     struct jass_function const *filter;
     handle_t region;
     uint32_t dialog_id, button_id; /* registration target, one-based */
@@ -2110,9 +2119,12 @@ struct gevent_s {
     uint32_t limitop;
     float limitval;
     cstring_t variable;
+    char chat_match[256]; /* immutable registered chat prefix/exact string */
+    bool chat_exact;
     bool inuse;
     uint32_t handle_generation;
     uint8_t generation_exhausted;
+    uint32_t registration_sequence; /* event created after a movement scan began must not see that crossing */
 };
 
 typedef struct {
@@ -2130,6 +2142,9 @@ typedef struct {
 
 typedef struct {
     event_t handlers[MAX_EVENTS];
+    uint32_t next_handler_hint; /* first likely unused slot; reset alongside level.events */
+    uint32_t handler_scan_limit; /* highest ever allocated index + 1; skip empty tail in hot event loops */
+    uint32_t registration_sequence; /* monotonically increasing per map; reset alongside level.events */
     gameEvent_t queue[MAX_EVENT_QUEUE];
     uint32_t write, read;
 } levelEvents_t;
@@ -2317,6 +2332,7 @@ typedef struct {
 
 typedef struct {
     float elapsed;
+    float scale; /* simulation clock multiplier, default 1 */
     float pending;
     bool pending_valid;
     bool suspended;
@@ -2374,6 +2390,10 @@ struct level_locals {
      * Team Resources) G_UpdateMultiboards rewrites this frame. */
     uint32_t multiboard_dirty_clients;
     uint32_t multiboard_suppressed_clients; /* serialized local display suppression */
+    /* The map's JASS controls whether local world selection is enabled. */
+    uint8_t selection_disabled[MAX_PLAYERS];
+    uint8_t drag_selection_disabled[MAX_PLAYERS];
+    uint8_t preselection_disabled[MAX_PLAYERS];
     uint32_t team_resources_collapsed_clients; /* serialized local Team Resources panel state */
     uint32_t timer_dialog_dirty_clients; /* transient: clients whose timer layer must be resent */
     int32_t timer_dialog_last_index[MAX_CLIENTS]; /* transient player-number cache */
@@ -2424,12 +2444,15 @@ struct level_locals {
     bool started;
     bool scriptsConfigured;
     bool scriptsStarted;
+    /* One shot per map session; never replay the original ORDR chat command. */
+    bool ordr_auto_offline_queued;
+    bool ordr_offline_chat_registered_early;
     bool cinematic_debug_result_window; /* per-map debug latch for result-window tracing */
     bool campaign_select_on_end; /* ForceCampaignSelectScreen defers campaign selection until EndGame */
 };
 
 #define FOR_EACH_EVENT(property) \
-for (uint32_t event_index = 0; event_index < MAX_EVENTS; ++event_index) \
+for (uint32_t event_index = 0; event_index < level.events.handler_scan_limit; ++event_index) \
     for (event_t *property = &level.events.handlers[event_index]; property; property = NULL) \
         if (property->inuse)
 
@@ -2471,6 +2494,9 @@ bool G_RemovePlayerWithResult(uint32_t player_num, uint32_t game_result);
 bool G_GameResultDebugEnabled(void);
 void G_GameResultDebug(cstring_t format, ...);
 bool G_IsSinglePlayer(void);
+void G_JassPlayerStateChanged(uint32_t player_num, uint32_t state, float before, float after);
+/* Offline camera/GetLocalPlayer fallback for callbacks lacking currentplayer. */
+gameClient_t *G_SinglePlayerLocalClient(void);
 void G_RequestEndGame(bool do_score_screen);
 void G_RequestQuitGame(void);
 void G_RequestChangeLevel(cstring_t map, bool do_score_screen);
@@ -2655,6 +2681,7 @@ void G_FowSendFull(edict_t *ent);
 bool G_FowPlayerCanSeeEntity(uint32_t player, edict_t const *ent);
 bool G_FowPlayerCanHoverEntity(uint32_t player, edict_t const *ent);
 bool G_FowPlayersShareVision(uint32_t viewer, uint32_t owner);
+uint32_t G_FowPointState(uint32_t player, float world_x, float world_y);
 bool G_UnitSharesVisionWith(edict_t const *unit, uint32_t viewer);
 void G_SetUnitSharedVision(edict_t *unit, uint32_t viewer, bool share);
 void G_AddUnitForcedVisibility(edict_t *unit, uint32_t viewer);
@@ -2767,6 +2794,7 @@ void G_BlightMarkClientFull(edict_t *ent);
 bool G_BlightDatagramPending(edict_t *ent);
 uint32_t G_BlightWriteDatagram(edict_t *ent, uint8_t *data, uint32_t size);
 trigger_t *G_AllocJassTrigger(void);
+void G_DestroyJassTrigger(trigger_t *trigger);
 gtimer_t *G_AllocJassTimer(void);
 timerdialog_t *G_AllocTimerDialog(gtimer_t *timer);
 void G_FreeTimerDialog(timerdialog_t *dialog);
@@ -2838,6 +2866,7 @@ void monster_think(edict_t *);
 void         G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size);
 int          G_RegisterModel(cstring_t filename);
 animation_t const *G_GetAnimation(uint32_t modelindex, cstring_t animname);
+animation_t const *G_GetAnimationByIndex(uint32_t modelindex, int32_t index);
 animation_t const *G_SelectAnimationForProperties(animation_t const *animations, uint32_t count, cstring_t animname, cstring_t properties);
 animation_t const *G_SelectAnimationVariantForProperties(animation_t const *animations, uint32_t count, cstring_t animname, cstring_t properties, bool randomize);
 animation_t const *G_GetAnimationForProperties(uint32_t modelindex, cstring_t animname, cstring_t properties);
@@ -3229,6 +3258,13 @@ void UI_AddCreateGameSlot(uint32_t, cstring_t, cstring_t, cstring_t, uint32_t);
 void UI_PrintClasses(void);
 void UI_ClearTemplates(void);
 void UI_ResetHud(void);
+void ORDR_DzReset(void);
+void ORDR_DzRenderFrames(void);
+void ORDR_DzClickFrame(edict_t *ent, uint32_t handle);
+void ORDR_DzFrameEvent(edict_t *ent, uint32_t handle, int event);
+void ORDR_DzSelectFrameItem(edict_t *ent, uint32_t handle, int index);
+void ORDR_DzEditFrame(edict_t *ent, uint32_t handle, cstring_t text);
+void ORDR_DzKeyInput(edict_t *ent, int key, int down);
 void UI_LoadHud(void);
 void UI_LoadHudLoading(void);
 void UI_LoadHudTimerDialogs(void);
@@ -3253,6 +3289,7 @@ uint16_t UI_TestSelectedTimedStatusStat(gameClient_t *client, edict_t *selected)
 #endif
 void UI_WriteLayout(edict_t *, frameDef_t const *, uint32_t);
 void UI_WriteStart(uint32_t);
+void UI_WriteEnd(edict_t *);
 void UI_ClearLayer(edict_t *, uint32_t);
 void UI_ShowGameResult(edict_t *, uint32_t);
 void UI_FlushPendingGameResults(void);
@@ -3307,6 +3344,7 @@ float Theme_Float(cstring_t, cstring_t);
 // ui_write.c
 void UI_WriteFrame(frameDef_t const *);
 void UI_WriteFrameValue(frameDef_t const *, float);
+void UI_PrepareScrollBar(frameDef_t const *);
 uint32_t UI_GetWrittenFrameNumber(frameDef_t const *);
 void UI_WriteFrameWithChildren(frameDef_t const *, frameDef_t const *);
 void UI_WriteFrameWithChildrenWithTriggers(edict_t *, frameDef_t const *, frameDef_t const *, uiTrigger_t const *);
@@ -3457,6 +3495,7 @@ void G_ResetHeroPassiveCaches(void);
 int G_AttackDamage(edict_t *, edict_t *, int);
 int G_AttackDamageWithType(edict_t *, edict_t *, int, uint32_t);
 void T_Damage(edict_t *, edict_t *, int);
+void JassUnitDamagePointThink(edict_t *);
 
 // g_utils.c
 bool G_UnitIsWorldActive(edict_t const *);
@@ -3736,6 +3775,7 @@ void jass_runevents(jass_t *);
 // g_events.c
 void G_RunEntities(void);
 void G_RunEvents(void);
+void G_ORDRTryAutoOfflineMode(void);
 /* Host save/restore lifecycle; the basic filename is only visible during these callbacks. */
 bool G_BeforeSaveGame(cstring_t name);
 void G_AfterLoadGame(cstring_t name);

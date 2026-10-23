@@ -142,11 +142,25 @@ void G_RunDeferredFrees(void) {
 void G_ResetDeferredFrees(void) { deferred_free_count = 0; }
 
 event_t *G_MakeEvent(EVENTTYPE type) {
-    FOR_LOOP(i, MAX_EVENTS) if (!level.events.handlers[i].inuse && !level.events.handlers[i].generation_exhausted) {
+    /* Most trigger registrations are append-only during map initialization.
+     * Restarting a linear scan at zero for every one of ORDR's thousands of
+     * player-unit events is quadratic. Search from the high-water hint, then
+     * wrap to reuse retired slots with their generation intact. */
+    uint32_t const start = level.events.next_handler_hint % MAX_EVENTS;
+    FOR_LOOP(offset, MAX_EVENTS) {
+        uint32_t const i = (start + offset) % MAX_EVENTS;
         event_t *evt = &level.events.handlers[i];
-        uintptr_t generation = evt->handle_generation;
-        memset(evt, 0, sizeof(*evt)); evt->handle_generation = generation;
-        evt->inuse = true; evt->type = type; return evt;
+        if (evt->inuse || evt->generation_exhausted) continue;
+        uintptr_t const generation = evt->handle_generation;
+        memset(evt, 0, sizeof(*evt));
+        evt->handle_generation = generation;
+        evt->inuse = true;
+        evt->type = type;
+        evt->registration_sequence = ++level.events.registration_sequence;
+        if (i + 1 > level.events.handler_scan_limit)
+            level.events.handler_scan_limit = i + 1;
+        level.events.next_handler_hint = (i + 1) % MAX_EVENTS;
+        return evt;
     }
     fprintf(stderr, "WC3: event slot limit %u reached\n", MAX_EVENTS);
     return NULL;
@@ -550,6 +564,26 @@ trigger_t *G_AllocJassTrigger(void) {
     memset(trigger, 0, sizeof(*trigger)); return trigger;
 }
 
+void G_DestroyJassTrigger(trigger_t *trigger) {
+    if (!trigger || trigger->destroyed) return;
+    trigger->destroyed = trigger->disabled = true;
+    FOR_EACH_EVENT(event) if (event->trigger == trigger) {
+        if (event->owns_timer && event->timer) G_TimerDestroy(event->timer);
+        /* Retired registration slots may be reused before the queue drains. */
+        FOR_LOOP(i, MAX_EVENT_QUEUE)
+            if (level.events.queue[i].responseTo == event) level.events.queue[i].responseTo = NULL;
+        if (event->variable) gi.MemFree((void *)event->variable);
+        event->variable = NULL; event->trigger = NULL; event->timer = NULL;
+        event->inuse = false;
+        if (event->handle_generation == EVENT_HANDLE_GENERATION_MAX) event->generation_exhausted = true;
+        else event->handle_generation++;
+    }
+    DELETE_LIST(gTriggerAction_t, trigger->actions, gi.MemFree);
+    DELETE_LIST(gTriggerCondition_t, trigger->conditions, gi.MemFree);
+    trigger->actions = NULL;
+    trigger->conditions = NULL;
+}
+
 bool G_RegionContains(region_t const *region, vec2_t const *point) {
     FOR_LOOP(i, region->num_rects) {
         if (Box2_containsPoint(region->rects+i, point)) {
@@ -623,6 +657,15 @@ void G_SetPlayerAlliance(player_t const *p1, player_t const *p2, PLAYERALLIANCE 
 
     if (value) level.alliances[p1->number][p2->number] |= flag;
     else level.alliances[p1->number][p2->number] &= ~flag;
+
+    /* Only actual changes publish the registered alliance event, with the
+     * source player as trigger player and the changed alliance enum as
+     * eventValue. No event fires while merely defining initial map alliances. */
+    if (before != level.alliances[p1->number][p2->number] && level.vm) {
+        edict_t *who=G_GetPlayerEntityByNumber(p1->number);
+        if(who)G_PublishEventWithValue(who,EVENT_PLAYER_ALLIANCE_CHANGED,
+                  G_GetPlayerEntityByNumber(p2->number),(int32_t)type);
+    }
 
     /* Warcraft alliance state is directional: SetPlayerAlliance(source, other, ...)
      * changes only source -> other. Consumers such as fog and shared command

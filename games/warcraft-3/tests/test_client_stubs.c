@@ -167,6 +167,8 @@ void CL_Disconnect(cstring_t reason, bool notify) { (void)reason; (void)notify; 
 void CL_EntityEvent(entityState_t const *ent) { (void)ent; }
 void S_RegisterSound(cstring_t path) { (void)path; }
 void S_PlaySoundFile(cstring_t path) { (void)path; }
+/* The standalone client parser tests do not link the real SDL mixer. */
+void S_StopSoundPacket(cstring_t path) { (void)path; }
 void S_PlaySoundPacket(cstring_t path, vec3_t const *origin, bool positioned, int channel, float volume, float attenuation,
                        float timeofs) {
     (void)path; (void)origin; (void)positioned; (void)channel; (void)volume; (void)attenuation; (void)timeofs;

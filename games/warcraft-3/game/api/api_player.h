@@ -158,55 +158,107 @@ uint32_t GetPlayerName(jass_t *j) {
     }
     return jass_pushstring(j, name);
 }
+/* WC3 neutral shops accept a purchaser player and an independently owned
+ * neutral-passive structure. Do not change its owner or fabricate a purchase:
+ * forward the original order through the existing stock/command system. */
+static bool JassNeutralShopOrderAllowed(player_t const *buyer, edict_t const *shop) {
+    return buyer && shop && shop->inuse && G_UnitIsWorldActive(shop) &&
+           G_UnitIsStructure(shop) &&
+           shop->s.player == PLAYER_NEUTRAL_PASSIVE &&
+           !(shop->svflags & SVF_DEADMONSTER) && !M_IsDead(shop);
+}
+/* Neutral merchandise must charge the requesting player, not the
+ * Neutral Passive shop. Share the server's stock and purchase validation. */
+static bool JassNeutralPurchase(player_t const *buyer,edict_t *shop,uint32_t id) {
+    edict_t *client_ent;
+    if(!JassNeutralShopOrderAllowed(buyer,shop))return false;
+    client_ent=G_GetPlayerEntityByNumber(PLAYER_NUM(buyer));
+    if(!client_ent||!client_ent->client)return false;
+    if(G_ShopSellsItem(shop,id))return G_ShopPurchaseItem(client_ent,shop,id);
+    if(G_ShopSellsUnit(shop,id))return G_ShopPurchaseUnit(client_ent,shop,id);
+    return false;
+}
 uint32_t IssueNeutralImmediateOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    if(!JassNeutralShopOrderAllowed(buyer,shop)||!order||!*order)
+        return jass_pushboolean(j,false);
+    if(strlen(order)==4){
+        uint32_t id;memcpy(&id,order,4);
+        if(G_ShopSellsItem(shop,id)||G_ShopSellsUnit(shop,id))
+            return jass_pushboolean(j,JassNeutralPurchase(buyer,shop,id));
+    }
+    return jass_pushboolean(j,unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralImmediateOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    uint32_t id=(uint32_t)jass_checkinteger(j,3);
+    cstring_t order=G_OrderId2String(id);
+    if(!JassNeutralShopOrderAllowed(buyer,shop))return jass_pushboolean(j,false);
+    if(G_ShopSellsItem(shop,id)||G_ShopSellsUnit(shop,id))
+        return jass_pushboolean(j,JassNeutralPurchase(buyer,shop,id));
+    return jass_pushboolean(j,order&&*order&&unit_issueimmediateorder(shop,order));
 }
 uint32_t IssueNeutralPointOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    //float x = jass_checknumber(j, 4);
-    //float y = jass_checknumber(j, 5);
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    vec2_t dest={jass_checknumber(j,4),jass_checknumber(j,5)};
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&order&&*order&&
+        G_IssueUnitPointOrder(shop,order,&dest,false,PLAYER_NUM(buyer),0.0f));
 }
 uint32_t IssueNeutralPointOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    //float x = jass_checknumber(j, 4);
-    //float y = jass_checknumber(j, 5);
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,3));
+    vec2_t dest={jass_checknumber(j,4),jass_checknumber(j,5)};
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&order&&*order&&
+        G_IssueUnitPointOrder(shop,order,&dest,false,PLAYER_NUM(buyer),0.0f));
 }
 uint32_t IssueNeutralTargetOrder(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //cstring_t unitToBuild = jass_checkstring(j, 3);
-    //handle_t target = jass_checkhandle(j, 4, "widget");
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=jass_checkstring(j,3);
+    edict_t *target=jass_checkhandle(j,4,"widget");
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&
+        target&&target->inuse&&order&&*order&&
+        G_IssueUnitTargetOrder(shop,order,target,false,PLAYER_NUM(buyer)));
 }
 uint32_t IssueNeutralTargetOrderById(jass_t *j) {
-    //handle_t forWhichPlayer = jass_checkhandle(j, 1, "player");
-    //handle_t neutralStructure = jass_checkhandle(j, 2, "unit");
-    //int32_t unitId = jass_checkinteger(j, 3);
-    //handle_t target = jass_checkhandle(j, 4, "widget");
-    return jass_pushboolean(j, 0);
+    player_t *buyer=jass_checkhandle(j,1,"player");
+    edict_t *shop=jass_checkhandle(j,2,"unit");
+    cstring_t order=G_OrderId2String((uint32_t)jass_checkinteger(j,3));
+    edict_t *target=jass_checkhandle(j,4,"widget");
+    return jass_pushboolean(j,JassNeutralShopOrderAllowed(buyer,shop)&&
+        target&&target->inuse&&order&&*order&&
+        G_IssueUnitTargetOrder(shop,order,target,false,PLAYER_NUM(buyer)));
 }
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_neutral_orders, require_live_neutral_shop_not_player_unit) {
+    edict_t unit={0};
+    player_t purchaser={0};
+    T_ASSERT(!JassNeutralShopOrderAllowed(NULL,NULL));
+    T_ASSERT(!JassNeutralShopOrderAllowed(&purchaser,NULL));
+    T_ASSERT(!JassNeutralShopOrderAllowed(&purchaser,&unit));
+}
+#endif
 uint32_t Player(jass_t *j) {
     int32_t number = jass_checkinteger(j, 1);
     player_t *player = G_GetPlayerByNumber(number);
     return jass_pushlighthandle(j, player, "player");
 }
 uint32_t GetLocalPlayer(jass_t *j) {
-    return jass_pushlighthandle(j, (mapPlayer_t *)currentplayer, "player");
+    /* GetLocalPlayer remains meaningful inside an offline timer callback.
+     * ORDR's BDk indexes camera setup arrays by the local player's ID. */
+    player_t *local = currentplayer;
+    if (!local) {
+        gameClient_t *client = G_SinglePlayerLocalClient();
+        if (client) local = &client->ps;
+    }
+    return jass_pushlighthandle(j, local, "player");
 }
 uint32_t IsPlayerAlly(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 1, "player");
@@ -229,38 +281,43 @@ uint32_t IsPlayerObserver(jass_t *j) {
     //player_t *whichPlayer = jass_checkhandle(j, 1, "player");
     return jass_pushboolean(j, 0);
 }
+/* Use the game FOW grid, not the camera's rendering flag or a constant
+ * placeholder, for all six Warcraft III JASS point/location queries. */
+static bool PlayerFogMatches(player_t const *who, vec2_t const *location,
+                             uint32_t fog_state) {
+    return who && location &&
+        G_FowPointState(PLAYER_NUM(who), location->x, location->y) == fog_state;
+}
+
 uint32_t IsVisibleToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_VISIBLE));
 }
 uint32_t IsLocationVisibleToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_VISIBLE));
 }
 uint32_t IsFoggedToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_FOGGED));
 }
 uint32_t IsLocationFoggedToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_FOGGED));
 }
 uint32_t IsMaskedToPlayer(jass_t *j) {
-    //float x = jass_checknumber(j, 1);
-    //float y = jass_checknumber(j, 2);
-    //handle_t whichPlayer = jass_checkhandle(j, 3, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t location = { jass_checknumber(j,1), jass_checknumber(j,2) };
+    player_t *who = jass_checkhandle(j,3,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,&location,WC3_FOG_STATE_MASKED));
 }
 uint32_t IsLocationMaskedToPlayer(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
-    //handle_t whichPlayer = jass_checkhandle(j, 2, "player");
-    return jass_pushboolean(j, 0);
+    vec2_t const *location = jass_checkhandle(j,1,"location");
+    player_t *who = jass_checkhandle(j,2,"player");
+    return jass_pushboolean(j,PlayerFogMatches(who,location,WC3_FOG_STATE_MASKED));
 }
 uint32_t GetPlayerRace(jass_t *j) {
     player_t *whichPlayer = jass_checkhandle(j, 1, "player");
@@ -457,7 +514,11 @@ uint32_t SetPlayerState(jass_t *j) {
             (unsigned)whichPlayer->number, (long)*whichPlayerState,
             (unsigned)client->ps.stats[*whichPlayerState], (long)value);
     }
+    uint16_t const before = client->ps.stats[*whichPlayerState];
     client->ps.stats[*whichPlayerState] = (uint16_t)MIN(MAX(0, value), USHRT_MAX);
+    G_JassPlayerStateChanged(whichPlayer->number, *whichPlayerState,
+                             (float)before,
+                             (float)client->ps.stats[*whichPlayerState]);
     if (*whichPlayerState == PLAYERSTATE_RESOURCE_FOOD_USED) {
         G_RecomputePlayerUpkeep(client);
     }
@@ -653,6 +714,21 @@ uint32_t DisplayTimedTextToPlayer(jass_t *j) {
     float y = jass_checknumber(j, 3);
     float duration = jass_checknumber(j, 4);
     cstring_t message = jass_checkstring(j, 5);
+    /* Do not disguise a failed ORDR mode probe by relabeling 'online'.
+     * BJJ must really set Lw=false after the native single-player cheat.
+     * Only rename the genuine single-player branch for the iPad display. */
+    if (message && G_IsSinglePlayer() &&
+        (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_"))) {
+        if (!strcmp(message, "현재 온라인입니다."))
+            jass_ordr_log_event(level.vm, "ORDR_ONLINE_PROBE_FAILURE",
+                                "map BJJ still concluded online; check GreedIsGood and connected player");
+        else if (!strcmp(message, "현재 싱글모드 입니다. 세이브/로드가 불가능합니다."))
+            message = "원랜디 오프라인 모드입니다. 세이브/로드가 불가능합니다.";
+    }
+    if (message && strstr(message, "오프라인 모드 작동") &&
+        (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_")))
+        jass_ordr_log_event(level.vm, "ORDR_OFFLINE_CONFIRMED",
+                            "original CIg chat action executed; JASS map offline flag set");
     if (TutorialTextDebugEnabledPlayer()) {
         int32_t trigger_ordinal;
         cstring_t caller;

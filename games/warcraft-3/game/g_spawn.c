@@ -97,9 +97,88 @@ unsupported:
     return false;
 }
 
+/* ORDR 2.323[C] single-player practice shortcut.
+ *
+ * The original CUM() is the authoritative difficulty commit. It normally
+ * requires a clicked selection unit and trigger-player context, which the
+ * iPad's non-rendering selection scene cannot provide. Instead of faking
+ * click events or reimplementing difficulty balance in C, copy precisely
+ * CUM's post-validation JASS body into one map-local timer callback and
+ * preselect NL (Nightmare) and th[tn] (Isekai). This retains CT9, research,
+ * resources, modifiers, timers, cinematic transitions and LB dispatch.
+ *
+ * Input is never changed; jass_dobuffer mutates its own allocated output.
+ * The production gate below checks the exact map script size and signatures.
+ */
+static char *G_ORDRAutoNightmareScript(cstring_t script, bool exact_map) {
+    static cstring_t const cum_header = "function CUM takes nothing returns nothing\n";
+    static cstring_t const cun_header = "function CUN takes nothing returns nothing\n";
+    static cstring_t const commit_start = "\ncall CT9()\n";
+    static cstring_t const commit_end = "\nendfunction";
+    static cstring_t const insert_after =
+        "set tP=CUF($75303036,880,-375,250)\n"
+        "call SetUnitAnimation(tP,\"Stand\")\n";
+    static cstring_t const schedule =
+        "call TimerStart(BHs(0),.25,false,function ORDR_AutoNightmareIsekai)\n";
+    static cstring_t const helper_start =
+        "\nfunction ORDR_AutoNightmareIsekai takes nothing returns nothing\n"
+        "local integer EK=0\n"
+        "call BHu(GetExpiredTimer())\n"
+        "if tU then\n"
+        "return\n"
+        "endif\n"
+        "set NE=NL\n"
+        "set th[tl]=false\n"
+        "set th[tn]=true\n"
+        "set th[tp]=false\n";
+    static cstring_t const helper_end = "\nendfunction\n";
+    cstring_t cum, cun, core, cum_end, spot, cun_end;
+    char *out, *w;
+    size_t source_bytes, first_bytes, last_bytes, core_bytes, capacity;
+
+    if (!script || !strstr(script, "function CUO takes") ||
+        !strstr(script, "function CUW takes") ||
+        strstr(script, "function ORDR_AutoNightmareIsekai takes"))
+        return NULL;
+    source_bytes = strlen(script);
+    if (exact_map && source_bytes != 2503677u) return NULL;
+    cum = strstr(script, cum_header);
+    cun = strstr(script, cun_header);
+    if (!cum || !cun || !(cum < cun)) return NULL;
+    cum_end = strstr(cum, commit_end);
+    core = strstr(cum, commit_start);
+    cun_end = strstr(cun, commit_end);
+    spot = strstr(cun, insert_after);
+    if (!cum_end || !core || core >= cum_end ||
+        !cun_end || !spot || spot >= cun_end) return NULL;
+    core++; /* exclude the newline before "call CT9()" */
+    spot += strlen(insert_after);
+    first_bytes = (size_t)(spot - script);
+    last_bytes = source_bytes - first_bytes;
+    core_bytes = (size_t)(cum_end - core);
+    capacity = source_bytes + strlen(schedule) + strlen(helper_start) +
+               core_bytes + strlen(helper_end) + 1;
+    out = gi.MemAlloc(capacity);
+    if (!out) return NULL;
+    w = out;
+#define ORDR_COPY(SRC, LEN) do { memcpy(w, (SRC), (LEN)); w += (LEN); } while (0)
+    ORDR_COPY(script, first_bytes);
+    ORDR_COPY(schedule, strlen(schedule));
+    ORDR_COPY(spot, last_bytes);
+    ORDR_COPY(helper_start, strlen(helper_start));
+    ORDR_COPY(core, core_bytes);
+    ORDR_COPY(helper_end, strlen(helper_end));
+#undef ORDR_COPY
+    *w = '\0';
+    return out;
+}
+
 #ifdef BZ_TESTS
 bool G_TestMapObjectCreatedByMapScript(uint32_t id) { return G_MapObjectCreatedByMapScript(id); }
 bool G_TestFixOrc07BridgeRestoreScript(char *script) { return G_FixOrc07BridgeRestoreScript(script); }
+char *G_TestORDRAutoNightmareScript(cstring_t script) {
+    return G_ORDRAutoNightmareScript(script, false);
+}
 #endif
 
 static void G_JassCoroutineTrace(jass_t *vm, handle_t coroutine, handle_t trigger_handle,
@@ -851,6 +930,7 @@ void G_SpawnEntities(void) {
     G_FowShutdown();
     G_BlightShutdown();
     memset(&level, 0, sizeof(level));
+    level.timeofday.scale = 1.0f;
     G_ResetSelectionSoundState();
     G_CommandErrorReset();
     G_ResetHeroPassiveCaches();
@@ -953,8 +1033,40 @@ void G_SpawnEntities(void) {
 //    jass_dofilenative(level.vm, "/Users/igor/Desktop/war3map.j");
     G_DumpPrologue02BurrowHandoffSource(level.mapinfo->mapscript);
     if (level.mapinfo->mapscript) {
+        bool parsed;
+        char detail[256];
+        size_t const bytes = strlen(level.mapinfo->mapscript);
+        bool const ordr = strstr(level.mapinfo->mapscript, "function CUO") &&
+                          strstr(level.mapinfo->mapscript, "function CUW");
         G_FixOrc07BridgeRestoreScript(level.mapinfo->mapscript);
-        jass_dobuffer(level.vm, level.mapinfo->mapscript);
+        /* Normal gameplay uses the map's original clickable difficulty,
+         * mode and start buttons. Retain the old Nightmare+Isekai shortcut
+         * strictly as an explicit diagnostic opt-in (wc3_ordr_autostart=1);
+         * otherwise it silently commits a difficulty before the user taps. */
+        char *auto_script = NULL;
+        cstring_t auto_opt = gi.CvarString
+            ? gi.CvarString("wc3_ordr_autostart", "0") : "0";
+        if (ordr && G_IsSinglePlayer() && auto_opt && atoi(auto_opt) != 0)
+            auto_script = G_ORDRAutoNightmareScript(level.mapinfo->mapscript, true);
+        parsed = jass_dobuffer(level.vm,
+                               auto_script ? auto_script : level.mapinfo->mapscript);
+        snprintf(detail, sizeof(detail),
+                 "script_bytes=%u parse_ok=%u config=%u main=%u CUO=%u CUW=%u error=%.80s",
+                 (unsigned)bytes, (unsigned)parsed,
+                 (unsigned)jass_hasfunction(level.vm, "config"),
+                 (unsigned)jass_hasfunction(level.vm, "main"),
+                 (unsigned)jass_hasfunction(level.vm, "CUO"),
+                 (unsigned)jass_hasfunction(level.vm, "CUW"),
+                 jass_rterror_pending(level.vm) ? jass_rterror_message(level.vm) : "none");
+        if (ordr) {
+            fprintf(stderr, "ORDR-PARSE: %s\n", detail);
+            jass_ordr_log_event(level.vm, "MAP_PARSE", detail);
+            jass_ordr_log_event(level.vm, "AUTO_NIGHTMARE_ISEKAI",
+                auto_script ? (parsed ? "patch=applied mode=nightmare+isekai timer=250ms" :
+                               "patch=applied but script failed to parse") :
+                              "patch=disabled or map source does not match");
+        }
+        if (auto_script) gi.MemFree(auto_script);
     } else
         fprintf(stderr, "G_SpawnEntities: missing mapscript; skipping jass_dobuffer\n");
     gi.LoadingFrame();

@@ -476,6 +476,29 @@ TEST(menu_fdf, compact_pool_preserves_capacity_and_reports_exhaustion) {
     T_ASSERT(sizeof(framePoint_t) <= sizeof(void *) + 8);
 }
 
+TEST(menu_fdf, exhausted_pool_skips_nested_fdf_without_crashing) {
+    frameDef_t *root;
+
+    reset_ui_state();
+    /* Keep one slot for the top-level frame; its nested child must fail to
+     * allocate without dereferencing NULL or consuming the next declaration. */
+    FOR_LOOP(i, MAX_UI_CLASSES - 2) T_NOT_NULL(UI_Spawn(FT_FRAME, NULL));
+    parse_fdf("exhausted.fdf",
+              "Frame \"FRAME\" \"OverflowRoot\" { "
+              "Frame \"BACKDROP\" \"MissingChild\" { BackdropBackground \"TestUI\\\\missing.blp\", } "
+              "Width 0.4, } "
+              "Frame \"TEXT\" \"MissingSibling\" { Text \"later\", }");
+    root = UI_FindFrame("OverflowRoot");
+    T_NOT_NULL(root);
+    if (root) T_FEQ(root->Width, 0.4f, 0.001f);
+    T_NULL(UI_FindFrame("MissingChild"));
+    T_NULL(UI_FindFrame("MissingSibling"));
+    UI_FreeFrameTree(root);
+    parse_fdf("after-exhaustion.fdf", "Frame \"TEXT\" \"Recovered\" { Text \"ok\", }");
+    T_NOT_NULL(UI_FindFrame("Recovered"));
+    reset_ui_state();
+}
+
 TEST(menu_fdf, failed_tree_clone_reclaims_partial_pool_allocations) {
     frameDef_t *root, *child, *last = NULL, *frame;
     uint32_t before = 0, after = 0;

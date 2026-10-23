@@ -141,6 +141,7 @@ void S_PlaySoundFile(cstring_t path);
 void S_PlaySoundAt(cstring_t path, vec2_t const *origin);
 void S_PlaySoundPacket(cstring_t path, vec3_t const *origin, bool positioned, int channel, float volume, float attenuation,
                        float timeofs);
+void S_StopSoundPacket(cstring_t path);
 bool S_PollSoundEvent(soundEvent_t *event);
 void S_ClearSoundEvents(void);
 bool S_PlaySoundPolicy(cstring_t path, vec3_t const *origin, bool positioned, int channel, float volume, float attenuation, float timeofs, soundPolicy_t const *policy);

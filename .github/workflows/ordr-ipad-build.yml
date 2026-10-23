@@ -1,19 +1,56 @@
-name: ORDR iPad unsigned build check
+name: ORDR iPad SideStore IPA build
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - 'packaging/ipad/**'
       - 'games/warcraft-3/**'
+      - 'tools/ordr/**'
+      - 'tests/test_ordr_startup_log.py'
       - '.github/workflows/ordr-ipad-build.yml'
+# Avoid redundant builds when newer commits arrive on the same branch.
+concurrency:
+  group: ordr-ipad-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  regression:
+    name: ORDR JASS regressions
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/corepunch/open-realm-ci:ubuntu-24.04
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify startup log analyzer
+        run: python3 -m unittest discover -s tests -p 'test_ordr_startup_log.py' -v
+      - name: Run full engine tests
+        run: make test
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORDR-JASS-regression-results
+          path: build/tests/junit/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
   compile-ipad:
-    runs-on: macos-15
+    needs: regression
+    # Intel runner uses a separate macOS pool; clang still cross-compiles for iPad arm64.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Check tools
+      - name: Check tools and record build revision
         run: |
+          echo "ORDR build commit: $(git rev-parse HEAD)"
+          echo "Build runner architecture: $(uname -m)"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
           cmake --version
@@ -23,10 +60,18 @@ jobs:
         run: |
           test -d build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
           find build/ipad -maxdepth 5 -name '*.app' -print
-      - name: Upload unsigned app for diagnostics only
+      - name: Package unsigned IPA for SideStore signing
+        run: |
+          mkdir -p build/ipad/ipa-staging/Payload
+          cp -R build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app build/ipad/ipa-staging/Payload/
+          cd build/ipad/ipa-staging
+          /usr/bin/zip -qry ../ORDR-iPad-SideStore-unsigned.ipa Payload
+          test -s ../ORDR-iPad-SideStore-unsigned.ipa
+          /usr/bin/unzip -t ../ORDR-iPad-SideStore-unsigned.ipa
+      - name: Upload unsigned IPA for SideStore
         uses: actions/upload-artifact@v4
         with:
-          name: openrealm-ipad-unsigned
-          path: build/ipad/iphoneos-arm64/warcraft3/Warcraft3.app
+          name: ORDR-iPad-SideStore-IPA
+          path: build/ipad/ORDR-iPad-SideStore-unsigned.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

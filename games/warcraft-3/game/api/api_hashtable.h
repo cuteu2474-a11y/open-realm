@@ -152,6 +152,8 @@ uint32_t InitHashtable(jass_t *j) {
 }
 
 uint32_t GetHandleId(jass_t *j) {
+    uint32_t value;
+    if (jass_enumvalue(j, 1, &value)) return jass_pushinteger(j, (int32_t)value);
     return jass_pushinteger(j, (int32_t)hashtable_handle_id(jass_checkhandle(j, 1, "handle")));
 }
 

@@ -97,6 +97,40 @@ static char test_sprite_anim[96];
 static uint32_t test_sprite_draws;
 static model_t const *test_portrait_model;
 static rect_t test_portrait_viewport;
+static char test_model_frame_anim[96];
+static model_t const *test_model_frame_anim_model;
+static uint32_t test_font_refresh_loads,test_font_refresh_size;
+static PATHSTR test_font_refresh_path;
+
+static font_t *capture_font_refresh(cstring_t path, uint32_t size) {
+    test_font_refresh_loads++;
+    test_font_refresh_size=size;
+    snprintf(test_font_refresh_path,sizeof(test_font_refresh_path),"%s",path?path:"");
+    return (font_t *)(uintptr_t)(0x2000+test_font_refresh_loads);
+}
+
+/* DzFrameSetFont registers fonts dynamically. A later configstring update
+ * (including reusing a numbered slot after a map change) cannot leave the
+ * old glyph atlas installed at that same index. */
+TEST(client_layout, updated_font_configstring_rebinds_renderer_face) {
+    uint32_t const idx=5;
+    uint32_t const cs=CS_FONTS+idx;
+    __typeof__(re.LoadFont) old_load;
+    test_client_stubs_init();
+    cl.fonts[idx]=(font_t *)(uintptr_t)0x1234;
+    snprintf(cl.configstrings[cs],sizeof(cl.configstrings[cs]),"Fonts\\Morpheus.ttf,18");
+    old_load=re.LoadFont;
+    re.LoadFont=capture_font_refresh;
+    test_font_refresh_loads=0;
+    test_font_refresh_path[0]='\0';
+    test_font_refresh_size=0;
+    CL_UpdateConfigString(cs,"Fonts\\FRIZQT__.TTF,14");
+    T_EQ(test_font_refresh_loads,1u);
+    T_STREQ(test_font_refresh_path,"Fonts\\Morpheus.ttf");
+    T_EQ(test_font_refresh_size,18u);
+    T_ASSERT(cl.fonts[idx]==(font_t *)(uintptr_t)0x2001);
+    re.LoadFont=old_load;
+}
 
 static model_t *capture_load_model(cstring_t filename) {
     uint32_t slot = test_model_loads;
@@ -2681,6 +2715,34 @@ TEST(net, initial_model_configstring_defers_registration_until_refresh) {
     T_EQ(test_model_releases, 0);
 }
 
+/* Custom WC3 maps such as ORDR have more than 1,200 distinct UnitUI model
+ * paths. The model registry must preserve late-spawned workers as well as
+ * the models initialized at map start; otherwise a missing model prevents
+ * both rendering and client-side ray/selection fallback. */
+TEST(net, custom_map_model_configstring_roundtrips_above_512) {
+    uint8_t buf[512];
+    sizeBuf_t sb = make_msg_buf(buf, sizeof(buf));
+    uint32_t const model = 1223;
+    cstring_t const path = "Units\\NightElf\\Wisp\\Wisp.mdx";
+
+    T_ASSERT(MAX_MODELS > model);
+    if (MAX_MODELS <= model) return;
+    test_client_stubs_init();
+    test_model_loads = test_model_releases = 0;
+    re.LoadModel = capture_load_model;
+    re.ReleaseModel = capture_release_model;
+    cl.refresh_prepped = false;
+
+    MSG_WriteByte(&sb, svc_configstring);
+    MSG_WriteShort(&sb, CS_MODELS + model);
+    MSG_WriteString(&sb, path);
+    CL_ParseServerMessage(&sb);
+
+    T_STREQ(cl.configstrings[CS_MODELS + model], path);
+    T_NULL(cl.models[model]);
+    T_EQ(test_model_loads, 0);
+}
+
 TEST(net, late_model_configstring_refreshes_world_and_portrait_models_together) {
     uint8_t buf[512];
     sizeBuf_t sb = make_msg_buf(buf, sizeof(buf));
@@ -3035,6 +3097,39 @@ TEST(client_layout, cinematic_portrait_uses_full_registered_model_index) {
     T_FEQ(test_portrait_viewport.h, screen.h / UI_BASE_HEIGHT, 0.0001f);
     re.SetEntityAnimFrame = old_anim;
     re.RenderFrame = old_render;
+}
+
+/* A MODEL frame is an in-world/UI model widget, not a unit portrait. When a
+ * model has a companion _Portrait asset, the MODEL widget must still render
+ * the requested base model and its Stand animation. */
+static bool capture_model_frame_anim(model_t const *model, cstring_t anim, renderEntity_t *entity) {
+    (void)entity;
+    test_model_frame_anim_model=model;
+    snprintf(test_model_frame_anim,sizeof(test_model_frame_anim),"%s",anim?anim:"");
+    return true;
+}
+
+TEST(client_layout, model_widget_uses_base_model_and_stand_animation) {
+    uiFrame_t frame={ .number=19, .flags.type=FT_MODEL, .tex.index=259 };
+    rect_t screen={ 0.1f,0.1f,0.15f,0.15f };
+    model_t *base=(model_t *)(uintptr_t)0x1001u;
+    model_t *portrait=(model_t *)(uintptr_t)0x1002u;
+    __typeof__(re.SetEntityAnimFrame) old_anim;
+    __typeof__(re.RenderFrame) old_render;
+    test_client_stubs_init();
+    cl.models[259]=base;
+    cl.portraits[259]=portrait;
+    old_anim=re.SetEntityAnimFrame;
+    old_render=re.RenderFrame;
+    re.SetEntityAnimFrame=capture_model_frame_anim;
+    re.RenderFrame=capture_portrait_frame;
+    test_model_frame_anim_model=NULL;
+    test_model_frame_anim[0]='\0';
+    SCR_LayoutDrawPortrait(&frame,&screen);
+    T_ASSERT(test_model_frame_anim_model==base);
+    T_STREQ(test_model_frame_anim,"Stand");
+    re.SetEntityAnimFrame=old_anim;
+    re.RenderFrame=old_render;
 }
 
 TEST(net, playerstat_pair_after_gameplay_states_roundtrips) {

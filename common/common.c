@@ -1159,6 +1159,35 @@ handle_t FS_ReadFile(cstring_t filename, uint32_t *size) {
     return buffer;
 }
 
+/* A map's root Units\\UnitUI.slk must win over stock Custom_V1\\Units\\UnitUI.slk.
+ * FS_ReadFile on a prefixed path can fall through to the base archives, so
+ * distinguish a real member of the current map from the installed game data. */
+handle_t FS_ReadPriorityFile(cstring_t filename, uint32_t *size) {
+    handle_t fp = NULL;
+    uint32_t file_size = 0, read_size = 0;
+    uint8_t *buffer;
+    if (size) *size = 0;
+    if (!priority_archive || !filename || !*filename ||
+        !SFileOpenFileEx(priority_archive, filename, SFILE_OPEN_FROM_MPQ, &fp))
+        return NULL;
+    file_size = SFileGetFileSize(fp, NULL);
+    buffer = MemAlloc((long)file_size + 1);
+    if (!buffer) {
+        SFileCloseFile(fp);
+        return NULL;
+    }
+    if (file_size && (!SFileReadFile(fp, buffer, file_size, &read_size, NULL) ||
+                      read_size != file_size)) {
+        MemFree(buffer);
+        SFileCloseFile(fp);
+        return NULL;
+    }
+    buffer[file_size] = 0;
+    SFileCloseFile(fp);
+    if (size) *size = file_size;
+    return buffer;
+}
+
 void FS_FreeFile(void *buf) {
     MemFree(buf);
 }

@@ -167,7 +167,15 @@ void SV_BuildClientFrame(client_t *client) {
         /* Owner-only entities are private snapshot state, unlike ordinary owned units. */
         if ((edict->svflags & SVF_OWNER_ONLY) && edict->s.player != clent->client->ps.number)
             continue;
-        if (!edict->s.model && !edict->s.sound && !edict->s.event) {
+        /* A model lookup can fail in asset-heavy custom maps while the game
+         * still owns an ordinary selectable actor. Preserve its authoritative
+         * snapshot for the client's projected-unit picking fallback; empty
+         * props and enemy entities without presentation stay culled. */
+        bool const owned_selectable_unit =
+            (edict->s.flags & EF_UNIT) && !(edict->s.flags & EF_NOT_SELECTABLE) &&
+            edict->s.player == clent->client->ps.number;
+        if (!edict->s.model && !edict->s.sound && !edict->s.event &&
+            !owned_selectable_unit) {
 #ifdef WC3_DEBUG_MINING
             if (mining_entity) fprintf(stderr, "WC3_MINING snapshot-skip client=%d ent=%d reason=no-presentation "
                                            "hidden=%d noclient=%d\n", client->edict->client->ps.number, index,

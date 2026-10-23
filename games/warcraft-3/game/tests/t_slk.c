@@ -17,6 +17,7 @@ void setup_test_world(void);
 void reset_entities(void);
 edict_t *alloc_test_unit(uint32_t class_id, float x, float y);
 void CM_ReadDoodadOverrides(handle_t archive);
+bool run_test_jass(cstring_t src);
 
 static void wc3_slk_write_u32(uint8_t **cursor, uint32_t value) {
     memcpy(*cursor, &value, sizeof(value));
@@ -214,6 +215,87 @@ TEST(wc3_slk, reign_of_chaos_ability_targets_apply_to_every_rank) {
     T_STREQ(G_AbilityLevel(tft, 3)->targs, "air,friend");
 
     G_SetSLKRows("AbilityData", old); free_slk_rows(rows);
+}
+
+/* ORDR 2.323[C] embeds a complete Units\UnitUI.slk with u000-u00C
+ * imported button models. The installed Custom_V0/V1 sheet must not hide
+ * that root member, or every spawned unit is tagged SVF_NOCLIENT/model=0. */
+TEST(wc3_slk, map_root_unit_ui_overrides_installed_custom_dataset) {
+    typedef struct { uint32_t id; cstring_t model; } unitUiProbe_t;
+    static slkField_t const schema[] = {
+        { "", offsetof(unitUiProbe_t, id), STB_SLK_FOURCC },
+        { "file", offsetof(unitUiProbe_t, model), STB_SLK_STR },
+        { NULL, 0, 0 }
+    };
+    cstring_t const slk =
+        "ID;PWXL;N;E\r\n"
+        "B;X3;Y2;D0\r\n"
+        "C;X1;Y1;K\"unitUIID\"\r\n"
+        "C;X3;K\"file\"\r\n"
+        "C;X1;Y2;K\"u000\"\r\n"
+        "C;X3;K\"war3mapImported\\Button Easy.mdl\"\r\n"
+        "E\r\n";
+    cstring_t const path = Test_TempPath("map-priority-unit-ui.mpq");
+    char saved_prefix[sizeof(game.data_prefix)];
+    handle_t archive = NULL;
+    unitUiProbe_t *rows = NULL;
+    uint32_t count;
+
+    T_NOT_NULL(gi.SetPriorityArchive);
+    T_NOT_NULL(gi.ReadPriorityFile);
+    strlcpy(saved_prefix, game.data_prefix, sizeof(saved_prefix));
+    T_ASSERT(SFileCreateArchive(path, 0, 8, &archive));
+    T_ASSERT(SFileAddFileFromBuffer(archive, "Units\\UnitUI.slk", slk, (uint32_t)strlen(slk)));
+    T_ASSERT(SFileCloseArchive(archive));
+    archive = NULL;
+    T_ASSERT(SFileOpenArchive(path, 0, 0, &archive));
+    gi.SetPriorityArchive(archive);
+    strlcpy(game.data_prefix, "Custom_V0", sizeof(game.data_prefix));
+
+    count = Stb_SlkLoad("Units\\UnitUI.slk", schema, (void **)&rows, sizeof(*rows));
+    T_EQ(count, 1);
+    T_NOT_NULL(rows);
+    T_EQ(rows[0].id, MAKEFOURCC('u','0','0','0'));
+    T_STREQ(rows[0].model, "war3mapImported\\Button Easy.mdl");
+    FS_SLKFreeRows(schema, rows, count, sizeof(*rows));
+
+    gi.SetPriorityArchive(NULL);
+    SFileCloseArchive(archive);
+    strlcpy(game.data_prefix, saved_prefix, sizeof(game.data_prefix));
+}
+
+
+/* ORDR's protected war3map.j stores object IDs as numeric big-endian FourCCs:
+ * $75303030 denotes "u000", whereas SLK's key is MAKEFOURCC('u','0','0','0').
+ * The entity preserves the numeric script ID; typed lookup must find the art. */
+TEST(wc3_slk, ordr_numeric_fourcc_uses_map_embedded_ui_model) {
+    static cstring_t const slk =
+        "ID;PWXL;N;E\r\n"
+        "B;X3;Y3;D0\r\n"
+        "C;X1;Y1;K\"unitUIID\"\r\n"
+        "C;X3;K\"file\"\r\n"
+        "C;X1;Y2;K\"u000\"\r\n"
+        "C;X3;K\"war3mapImported\\Button Easy.mdl\"\r\n"
+        "C;X1;Y3;K\"hfoo\"\r\n"
+        "C;X3;K\"units\\human\\Footman.mdl\"\r\n"
+        "E\r\n";
+    slkTestData_t *rows, *old;
+    T_ASSERT(run_test_jass(
+        "function CUO takes nothing returns nothing\nendfunction\n"
+        "function CUW takes nothing returns nothing\nendfunction\n"
+        "function CUN takes nothing returns nothing\nendfunction\n"
+        "function main takes nothing returns nothing\nendfunction\n"
+    ));
+    rows = parse_slk_string(slk);
+    old = G_SetSLKRows("UnitUI", rows);
+    T_NOT_NULL(old);
+    T_NOT_NULL(G_UnitUI(0x75303030u)->modelFile);
+    if (G_UnitUI(0x75303030u)->modelFile)
+        T_STREQ(G_UnitUI(0x75303030u)->modelFile, "war3mapImported\\Button Easy.mdl");
+    T_STREQ(G_UnitUI(MAKEFOURCC('h','f','o','o'))->modelFile,
+            "units\\human\\Footman.mdl");
+    G_SetSLKRows("UnitUI", old);
+    free_slk_rows(rows);
 }
 
 TEST(wc3_slk, sheet_reader_prefers_active_map_data_overlay) {

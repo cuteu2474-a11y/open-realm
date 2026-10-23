@@ -212,14 +212,27 @@ static handle_t G_ReadGameDataFile(cstring_t filename, uint32_t *size) {
 
     if (!filename || !*filename) return NULL;
     if (!size) size = &ignored_size;
+    /* Warcraft map-local SLKs supersede installed game data even when the
+     * active W3I data-set selects Custom_V0/Custom_V1. A prefixed gi.ReadFile
+     * can fall through to the stock game archive and mask Units\\UnitUI.slk
+     * in ORDR, leaving every custom unit with model=0 and SVF_NOCLIENT.
+     * Check only actual map-archive members before allowing base fallback. */
+    if (gi.ReadPriorityFile) {
+        if (game.data_prefix[0]) {
+            snprintf(path, sizeof(path), "%s\\%s", game.data_prefix, filename);
+            data = gi.ReadPriorityFile(path, size);
+            if (data) return data;
+        }
+        data = gi.ReadPriorityFile(filename, size);
+        if (data) return data;
+    }
     if (game.data_prefix[0]) {
         snprintf(path, sizeof(path), "%s\\%s", game.data_prefix, filename);
         data = gi.ReadFile(path, size);
         if (data) return data;
         fprintf(stderr, "WC3: map data overlay missing %s; using base %s\n", path, filename);
     }
-    data = gi.ReadFile(filename, size);
-    return data;
+    return gi.ReadFile(filename, size);
 }
 
 static bool starting_resource_cheat_armed;
@@ -395,7 +408,7 @@ void G_UpdateTimeOfDay(void) {
             level.timeofday.pending_valid = false;
         } else if (!level.timeofday.suspended) {
             level.timeofday.elapsed = fmodf(
-                level.timeofday.elapsed + (float)FRAMETIME / 1000.0f,
+                level.timeofday.elapsed + level.timeofday.scale * (float)FRAMETIME / 1000.0f,
                 day_length);
         }
     }
@@ -432,6 +445,7 @@ static bool G_LoadMap(cstring_t mapFilename) {
     gi.ClearWorld();
     /* Old edicts can retain pointers into typed rows, so clear the world and
      * HUD before swapping the map-selected object-data overlay. */
+    ORDR_DzReset();
     UI_ResetHud();
     G_ApplyMapGameDataSet(CM_GetMapInfo());
     G_ApplyTilesetWaterHeight(CM_GetMapInfo());
@@ -451,10 +465,47 @@ static bool G_LoadMap(cstring_t mapFilename) {
     gi.LoadingFrame();
     G_SpawnEntities();
     gi.LoadingFrame();
+    if (level.vm && jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW") &&
+        jass_functionbyname(level.vm, "CUN")) {
+        /* Compare the numeric JASS rawcode against the canonical SLK key.
+         * ORDR's Units\\UnitUI.slk embeds model art for every difficulty
+         * button. This reveals whether the failure is table loading or a
+         * FourCC representation mismatch before rendering begins. */
+        extern uint32_t g_UnitUICount;
+        UnitUI_t const *numeric = G_UnitUI(0x75303030u);
+        UnitUI_t const *canonical = G_UnitUI(MAKEFOURCC('u','0','0','0'));
+        UnitBalance_t const *choice_balance = G_UnitBalance(0x75303030u);
+        extern uint32_t g_UnitBalanceCount;
+        uint32_t source_bytes = 0, balance_source_bytes = 0;
+        handle_t source = gi.ReadPriorityFile ?
+            gi.ReadPriorityFile("Units\\UnitUI.slk", &source_bytes) : NULL;
+        handle_t balance_source = gi.ReadPriorityFile ?
+            gi.ReadPriorityFile("Units\\UnitBalance.slk", &balance_source_bytes) : NULL;
+        char detail[420];
+        snprintf(detail, sizeof(detail),
+                 "UnitUI_rows=%u embedded_bytes=%u UnitBalance_rows=%u balance_bytes=%u u000_HP=%.0f u000_numeric_model=%s u000_canonical_model=%s",
+                 (unsigned)g_UnitUICount, (unsigned)source_bytes,
+                 (unsigned)g_UnitBalanceCount, (unsigned)balance_source_bytes,
+                 choice_balance ? (double)choice_balance->maxHealth : -1.0,
+                 numeric && numeric->modelFile && numeric->modelFile[0] ?
+                    numeric->modelFile : "(none)",
+                 canonical && canonical->modelFile && canonical->modelFile[0] ?
+                    canonical->modelFile : "(none)");
+        jass_ordr_log_event(level.vm, "MAP_UNIT_DATA_AUDIT", detail);
+        if (source) gi.MemFree(source);
+        if (balance_source) gi.MemFree(balance_source);
+    }
     strlcpy(level.map_path, mapFilename, sizeof(level.map_path));
+    /* ORDR iPad startup checkpoints: distinguish a completed JASS main()
+     * from a crash in loading-frame rendering or world activation. */
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_BEFORE_JASS", "G_LoadMap entering G_StartScripts");
     G_StartScripts();
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_AFTER_JASS", "G_StartScripts returned; next loading frame");
     gi.LoadingFrame();
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_AFTER_LOADING_FRAME", "loading frame returned; marking level started");
     level.started = true;
+    if (level.vm) jass_ordr_log_event(level.vm, "MAP_LOAD_READY", "G_LoadMap completed");
     return true;
 }
 
@@ -791,12 +842,60 @@ static vec3_t G_MakeCameraOrigin(gameClient_t *client, float x, float y, float z
     return (vec3_t){ x, y, base + z_offset };
 }
 
+/* The ORDR 2.323[C] script calls SetCameraBounds once, reconstructing the
+ * map's authored W3I camera rectangle, and later requests a pan to its
+ * difficulty stage at (-6000,-8864). On the actual iPad run the resulting
+ * camera bounds exclude that scene, despite GetCameraMargin returning the
+ * correct four insets. Reconcile against the map's authoritative W3I rectangle
+ * rather than letting a corrupt/replaced runtime restriction hide the scene.
+ * This only applies to the exact map geometry and JASS function signature. */
+static bool G_ORDRAuthoredCameraBounds(box2_t *authored) {
+    if (!level.vm || !level.mapinfo || !authored ||
+        !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN")) return false;
+    mapCameraBounds_t const *map_camera = &level.mapinfo->cameraBounds;
+    float const *c = map_camera->bounds;
+    if (map_camera->complement.left != 26 ||
+        map_camera->complement.right != 16 ||
+        map_camera->complement.bottom != 20 ||
+        map_camera->complement.top != 32) return false;
+    authored->min = (vec2_t){ MIN(MIN(c[0], c[2]), MIN(c[4], c[6])),
+                                MIN(MIN(c[1], c[3]), MIN(c[5], c[7])) };
+    authored->max = (vec2_t){ MAX(MAX(c[0], c[2]), MAX(c[4], c[6])),
+                                MAX(MAX(c[1], c[3]), MAX(c[5], c[7])) };
+    return fabsf(authored->min.x + 8960.0f) < 0.01f &&
+           fabsf(authored->min.y + 10496.0f) < 0.01f &&
+           fabsf(authored->max.x - 9216.0f) < 0.01f &&
+           fabsf(authored->max.y - 6912.0f) < 0.01f;
+}
+
 vec2_t G_ClampCameraPosition(gameClient_t *client, vec2_t const *position) {
     vec2_t clamped = position ? *position : (vec2_t){ 0, 0 };
     box2_t bounds = level.camera_bounds;
+    box2_t authored;
+    static unsigned ordr_recovery_log_count;
 
     (void)client;
     if (!position) return clamped;
+    if (G_ORDRAuthoredCameraBounds(&authored)) {
+        bool mismatch = fabsf(bounds.min.x - authored.min.x) > 0.01f ||
+                        fabsf(bounds.min.y - authored.min.y) > 0.01f ||
+                        fabsf(bounds.max.x - authored.max.x) > 0.01f ||
+                        fabsf(bounds.max.y - authored.max.y) > 0.01f;
+        if (mismatch && ordr_recovery_log_count++ < 8) {
+            char detail[240];
+            snprintf(detail, sizeof(detail),
+                     "requested=(%.0f,%.0f) incorrect=(%.0f,%.0f)..(%.0f,%.0f) authored=(%.0f,%.0f)..(%.0f,%.0f)",
+                     (double)clamped.x, (double)clamped.y,
+                     (double)bounds.min.x, (double)bounds.min.y,
+                     (double)bounds.max.x, (double)bounds.max.y,
+                     (double)authored.min.x, (double)authored.min.y,
+                     (double)authored.max.x, (double)authored.max.y);
+            jass_ordr_log_event(level.vm, "CAMERA_BOUNDS_RECOVER", detail);
+        }
+        bounds = authored;
+    }
     if (bounds.max.x > bounds.min.x)
         clamped.x = MAX(bounds.min.x, MIN(bounds.max.x, clamped.x));
     if (bounds.max.y > bounds.min.y)
@@ -835,6 +934,19 @@ void G_SetCameraBounds(float const bounds[8]) {
             MAX(MAX(bounds[0], bounds[2]), MAX(bounds[4], bounds[6])),
             MAX(MAX(bounds[1], bounds[3]), MAX(bounds[5], bounds[7])),
         });
+    if (level.vm && jass_functionbyname(level.vm, "CUW") &&
+        jass_functionbyname(level.vm, "CUN")) {
+        char detail[320];
+        snprintf(detail, sizeof(detail),
+                 "raw=(%.0f,%.0f),(%.0f,%.0f),(%.0f,%.0f),(%.0f,%.0f) bounds=(%.0f,%.0f)..(%.0f,%.0f)",
+                 (double)bounds[0], (double)bounds[1],
+                 (double)bounds[2], (double)bounds[3],
+                 (double)bounds[4], (double)bounds[5],
+                 (double)bounds[6], (double)bounds[7],
+                 (double)level.camera_bounds.min.x, (double)level.camera_bounds.min.y,
+                 (double)level.camera_bounds.max.x, (double)level.camera_bounds.max.y);
+        jass_ordr_log_event(level.vm, "SET_CAMERA_BOUNDS", detail);
+    }
     FOR_LOOP(i, game.max_clients)
         G_ReclampClientCamera(game.clients + i);
 }
@@ -1178,7 +1290,14 @@ static void G_StartScripts(void) {
      */
     G_SetDestructableScriptBinding(true);
 
-    jass_callbyname(level.vm, "main", true);
+    if (jass_hasfunction(level.vm, "main")) {
+        jass_callbyname(level.vm, "main", true);
+        jass_ordr_log_event(level.vm, "START_SCRIPTS", "main queued; event scheduler starting");
+    } else {
+        jass_ordr_log_event(level.vm, "START_BLOCKED",
+                            "main not registered: inspect MAP_PARSE for script parse failure");
+        fprintf(stderr, "WC3: main not registered; JASS map initialization blocked\n");
+    }
     level.scriptsStarted = true;
     jass_runevents(level.vm);
 
@@ -1188,12 +1307,52 @@ static void G_StartScripts(void) {
 bool G_IsSinglePlayer(void) {
     uint32_t humans = 0;
 
+    /* ORDR declares several human-capable slots even for a real solo
+     * session. Count connected players for this map only. Warcraft III's
+     * own multiplayer menus, transport, and other maps are unaffected. */
+    if (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_")) {
+        uint32_t connected = 0;
+        if (game.clients) {
+            FOR_LOOP(i, game.max_clients)
+                if (game.clients[i].connected) connected++;
+        }
+        if (connected) return connected == 1;
+    }
     if (!level.mapinfo) return true;
     FOR_LOOP(i, MAX_PLAYERS) {
         mapPlayer_t const *player = level.mapinfo->players + i;
         if (player->used && player->playerType == kPlayerTypeHuman) humans++;
     }
     return humans <= 1;
+}
+
+/* On an offline map there is one actual local game client, even when a
+ * timer/trigger callback has no player context (currentplayer == NULL).
+ * Camera natives and GetLocalPlayer must resolve that client consistently.
+ * Never infer a local client for multiplayer, where doing so could direct
+ * one player's camera changes to somebody else's view. */
+gameClient_t *G_SinglePlayerLocalClient(void) {
+    if (!G_IsSinglePlayer() || !game.clients) return NULL;
+    /* Prefer the connected human over neutral/computer map slots. */
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->connected && client->mapplayer &&
+            client->mapplayer->playerType == kPlayerTypeHuman)
+            return client;
+    }
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->connected) return client;
+    }
+    /* During early map loading, a declared human slot may not yet be
+     * connected. Preserve scripted camera state on that player. */
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (client->mapplayer &&
+            client->mapplayer->playerType == kPlayerTypeHuman)
+            return client;
+    }
+    return NULL;
 }
 
 bool G_GameResultDebugEnabled(void) {
@@ -1306,6 +1465,112 @@ void G_RequestCampaignSelect(void) {
     level.campaign_select_on_end = true;
 }
 
+/* Temporary, map-specific iPad diagnosis. The VM's ORDR milestone mask
+ * separates missing script/timer execution from missing world rendering.
+ * Surface it in the running game because iPad app logs may omit stderr. */
+static void G_ORDRShowFlowStatus(void) {
+    uint32_t mask;
+    uint32_t difficulty_units = 0;
+    uint32_t choice_screen_units = 0;
+    char message[224];
+    if (!level.vm || level.framenum % (5000 / FRAMETIME) != 0 ||
+        !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN")) return;
+    mask = jass_ordr_flow_mask(level.vm);
+    /* CUN creates six difficulty picks (u000-u005) and six supporting
+     * selection-scene units (u006-u009, u00A-u00C). Confirm they're
+     * still live after the JASS handler returns. */
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t const *ent = &g_edicts[i];
+        if (!ent->inuse) continue;
+        if (ent->class_id >= 0x75303030u && ent->class_id <= 0x75303035u)
+            difficulty_units++;
+        if ((ent->class_id >= 0x75303030u && ent->class_id <= 0x75303039u) ||
+            (ent->class_id >= 0x75303041u && ent->class_id <= 0x75303043u))
+            choice_screen_units++;
+    }
+    snprintf(message, sizeof(message),
+             "ORDR DEBUG: main=%u init=%u timerReg=%u timerFire=%u choice=%u picks=%u/6 scene=%u/12 worldEnt=%u",
+             (unsigned)((mask & (1u << 0)) != 0),
+             (unsigned)((mask & (1u << 3)) != 0),
+             (unsigned)((mask & (1u << 5)) != 0),
+             (unsigned)((mask & (1u << 6)) != 0),
+             (unsigned)((mask & (1u << 7)) != 0),
+             (unsigned)difficulty_units,
+             (unsigned)choice_screen_units,
+             (unsigned)globals.num_edicts);
+    jass_ordr_log_event(level.vm, "STATE", message);
+    /* A registered model is not proof of actual client visibility. Audit
+     * the simulated camera, the render model indices and FOW separately.
+     * The first sample happens after the 4-second menu-unit spawn and after
+     * a complete FOW update. */
+    {
+        gameClient_t *viewer = G_SinglePlayerLocalClient();
+        unsigned with_model = 0, visible = 0, hovered = 0, total = 0, examples = 0;
+        char audit[320];
+        if (viewer) {
+            FOR_LOOP(i, globals.num_edicts) {
+                edict_t const *unit = &g_edicts[i];
+                if (!unit->inuse ||
+                    !((unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u) ||
+                      (unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u)))
+                    continue;
+                total++;
+                if (unit->s.model) with_model++;
+                if (G_FowPlayerCanSeeEntity(viewer->ps.number, unit)) visible++;
+                if (G_FowPlayerCanHoverEntity(viewer->ps.number, unit)) hovered++;
+                /* Capture ALL original difficulty controls once, not just
+                 * the three decorative labels; the controls may have very
+                 * different HP/selection traits from their title models. */
+                if (level.time <= 5500 && examples++ < 12) {
+                    snprintf(audit, sizeof(audit),
+                             "unit=%c%c%c%c entity=%u model=%u svflags=0x%x renderflags=0x%x owner=%u pos=(%.0f,%.0f) visible=%d hp=%.0f maxhp=%.0f selectable=%d",
+                             (int)((unit->class_id >> 24) & 255),
+                             (int)((unit->class_id >> 16) & 255),
+                             (int)((unit->class_id >> 8) & 255),
+                             (int)(unit->class_id & 255),
+                             (unsigned)unit->s.number, (unsigned)unit->s.model,
+                             (unsigned)unit->svflags, (unsigned)unit->s.flags,
+                             (unsigned)unit->s.player, (double)unit->s.origin.x,
+                             (double)unit->s.origin.y,
+                             (int)G_FowPlayerCanSeeEntity(viewer->ps.number, unit),
+                             (double)unit->health.value,
+                             unit->data.UnitBalance ? (double)unit->data.UnitBalance->maxHealth : -1.0,
+                             (int)G_UnitCanBeSelected(viewer, unit));
+                    jass_ordr_log_event(level.vm, "CHOICE_MODEL_AUDIT", audit);
+                }
+            }
+            snprintf(audit, sizeof(audit),
+                     "player=%u connected=%d ui=%u camera=(%.0f,%.0f) vieworigin=(%.0f,%.0f,%.0f) angles=(%.1f,%.1f,%.1f) distance=%.0f fogflags=0x%x buttons=%u modeled=%u visible=%u hoverable=%u",
+                     (unsigned)viewer->ps.number, (int)viewer->connected,
+                     (unsigned)viewer->ps.client_ui_state,
+                     (double)viewer->camera.state.position.x,
+                     (double)viewer->camera.state.position.y,
+                     (double)viewer->ps.vieworigin.x,
+                     (double)viewer->ps.vieworigin.y,
+                     (double)viewer->ps.vieworigin.z,
+                     (double)viewer->ps.viewangles.x,
+                     (double)viewer->ps.viewangles.y,
+                     (double)viewer->ps.viewangles.z,
+                     (double)viewer->ps.distance,
+                     (unsigned)viewer->ps.rdflags,
+                     total, with_model, visible, hovered);
+            jass_ordr_log_event(level.vm, "CHOICE_RENDER_AUDIT", audit);
+        } else {
+            jass_ordr_log_event(level.vm, "CHOICE_RENDER_AUDIT", "offline local client not found");
+        }
+    }
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        edict_t *ent;
+        if (!client->connected) continue;
+        ent = G_GetPlayerEntityByNumber(client->ps.number);
+        if (ent && ent->client)
+            UI_ShowTransientText(ent, &MAKE(vec2_t, 0.03f, 0.12f), message, 4.7f);
+    }
+}
+
 /* One complete server-frame simulation step.
  * Skipped until the first map has been started; on the very first frame after
  * a map loads, the JASS "main" function is invoked to run map initialization
@@ -1320,11 +1585,35 @@ static void G_RunFrame(void) {
     level.framenum++;
     level.time = gi.GetTime();
 
+    /* Record the server boundary around long ORDR map initialization.
+     * If the log stops before FRAME_AFTER_JASS, the active JASS coroutine
+     * or a script-side trigger did not return to the simulation frame. */
+    bool ordr_frame_trace = level.vm &&
+        (level.framenum <= 8 || level.framenum % 100 == 0) &&
+        jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW");
+    char ordr_frame_detail[96];
+    if (ordr_frame_trace) {
+        snprintf(ordr_frame_detail, sizeof(ordr_frame_detail),
+                 "frame=%u time_ms=%u", (unsigned)level.framenum,
+                 (unsigned)level.time);
+        jass_ordr_log_event(level.vm, "FRAME_ENTER", ordr_frame_detail);
+    }
     G_StartScripts();
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_AFTER_START", ordr_frame_detail);
     G_UpdateTimeOfDay();
     G_RunTimers();
     G_RunEvents();
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_BEFORE_JASS", ordr_frame_detail);
     jass_runevents(level.vm);
+    if (ordr_frame_trace)
+        jass_ordr_log_event(level.vm, "FRAME_AFTER_JASS", ordr_frame_detail);
+    /* Original ORDR-only -offline/-오프라인모드 command, delivered after
+     * main() has registered player chat handlers. Never bypass JASS. */
+    G_ORDRTryAutoOfflineMode();
+    G_ORDRShowFlowStatus();
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 
@@ -1353,6 +1642,7 @@ static void G_RunFrame(void) {
 
     G_UpdateClientInfoPanels();
     G_UpdateClientResourceBars();
+    ORDR_DzRenderFrames();
     /* After the resource compare pass so Team Resources follows an owner's
      * gold/lumber/food change in the same frame as that owner's console. */
     G_UpdateMultiboards();
@@ -1467,7 +1757,14 @@ gameEvent_t *G_PublishEvent(edict_t *edict, EVENTTYPE type) {
 
 void G_PublishEventResponse(edict_t *edict, EVENTTYPE type, event_t *response_to) {
     gameEvent_t *event = G_PublishEvent(edict, type);
-    if (event) event->responseTo = response_to;
+    if (event) {
+        event->responseTo = response_to;
+        /* The registered state is the identity returned by
+         * GetEventGameState / GetEventUnitState. Preserve it on the queued
+         * event so nested and suspended JASS trigger calls don't race. */
+        if (response_to && type == EVENT_GAME_STATE_LIMIT)
+            event->value = (int32_t)response_to->state;
+    }
 }
 
 void G_PublishSummonEvents(edict_t *summoner, edict_t *summoned) {
