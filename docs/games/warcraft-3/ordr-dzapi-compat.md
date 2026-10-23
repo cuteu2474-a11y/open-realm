@@ -31,7 +31,7 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    `DzFrameSetTexture` drives `Backdrop.Background` for BACKDROP frames.
 4. Changed frames are sent through `LAYER_GAME_3` using the existing game-authored
    `svc_layout`/generic client UI protocol, *once per dirty simulation frame*.
-   `DzFrameSetScriptByCode` click event 1 creates a real `OnClick` command; `dzframe`
+   `DzFrameSetScriptByCode` click event 1 creates a real input descriptor; `dzframe` (legacy)
    validates a live, visible, enabled single-player frame before delivering the
    corresponding JASS UI event with the correct player context.
 5. Reset Dz frame handles/callbacks, sync registrations and key registrations at map
@@ -46,10 +46,13 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    The Dz walker does **not** call the stock UI scroll-bar preparation helper; imported Dz
    scrolling controls still need a dedicated integration test.
 2. `DzFrameSetScriptByCode` retains event IDs 0–31 instead of silently dropping ID 9
-   (edit-box text changed). The game can deliver any retained event by
-   `ORDR_DispatchFrameEvent`; live click 1 and edit text change 9 are wired from
-   actual client interactions. Mouse enter/leave, up/down, wheel, checkbox and
-   popup selections still lack independent event dispatch.
+   (edit-box text changed). Live click 1 and edit text change 9, plus mouse enter 2,
+   leave 3, release 4, press 5, wheel 6 and checkbox checked 7/unchecked 8, now
+   traverse an actual pointer event → authenticated `uievent` game command → JASS
+   coroutine. Event 7/8 is selected from **server-owned** checkbox toggle state,
+   independent of the client's requested edge. The game validates that every
+   ancestor is currently visible/enabled. Imported popup/list item selection
+   event 10 still needs proper menu item selection semantics.
 3. The generic client now forwards non-repeating physical keyboard down/up edges through
    its **opt-in** `cl_game_keycmd` (configured to `dzkey` by the Warcraft III share config).
    This reuses `clc_stringcmd` and does not change the wire schema. The game validates
@@ -62,7 +65,8 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    `false` clears it. The universal client retains typed text/caret state across
    ordinary layout redraws, activates SDL text input on tap or a focus hint,
    and sends an escaped quoted value through the editor's server-authored
-   `OnClick` command (`dzedit <frame> "<value>"`). The game validates the live
+   `OnClick` command (`uievent <frame> 9 "<value>"` for subscribed editor frames;
+   the earlier `dzedit` command is still accepted). The game validates the live
    visible/enabled editor, updates `DzFrameGetText`, and invokes registered
    callback event **9** with the actual client-player context. This path is
    single-player only. A keyboard and pointer event fixture proves client
@@ -70,8 +74,26 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
 5. The client editor has one active field at a time and does not yet implement
    multi-field Tab traversal, pointer caret placement or a complete IME
    composition lifecycle. Server-authored changes to a *currently edited*
-   value are not reconciled with a local in-progress edit. Event IDs 2–8 and
-   10, scroll bar controls and actual ORDR in-game testing remain pending.
+   value are not reconciled with a local in-progress edit. Event 10, scroll bar
+   controls and actual ORDR in-game testing remain pending.
+
+## Generic UI event input contract (current)
+
+- A frame that subscribes to UI events publishes the existing `OnClick`
+  metadata string `#uievent <frame-handle> <bitmask>`. This is a client-generic
+  descriptor; **no uiFrame_t wire field, stat width, or protocol flag changed**.
+  The `stat` field is only one byte on the wire and must not be repurposed for
+  32-bit event masks/handles. The generic client parses the descriptor and sends
+  `uievent <handle> <event-id>` as a `clc_stringcmd`. For an editor, it appends
+  the quoted full text to event 9. Ordinary non-script `OnClick` commands and
+  the legacy direct `dzframe`/`dzedit` game commands remain valid.
+- Touch taps and mouse clicks share the existing `SCR_LayoutMouseEvent` path.
+  Each real hover boundary emits at most one 2/3 edge; mouse presses/releases
+  emit 5/4 only for subscribed frames; wheel motion emits 6; checkbox release
+  asks the server to toggle, which reports 7 or 8 according to its state.
+- `CHECKBOX`, `GLUECHECKBOX`, `SIMPLECHECKBOX`, `POPUPMENU`,
+  `GLUEPOPUPMENU` and `LISTBOX` names can now be spawned by tag. The latter menu
+  types can be instantiated, but item **selection** and event 10 remain unproven.
 
 Tests were written first: frame priority order, event 9 callback and `dzkey` JASS action all
 failed on the prior implementation, then passed after changes. The generic client test
@@ -85,7 +107,7 @@ now proves both physical key edges and console-mode suppression.
 | UI lifecycle | `DzGetGameUI`, `DzCreateFrame`, `DzCreateFrameByTagName`, `DzFrameFindByName`, `DzLoadToc` | Exercise the **actual ORDR imported TOC/FDF and asset references** on a loaded map. |
 | Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Compare on-device text alignment, layered textures/alpha, model animation and absolute screen positions against the retail UI. |
 | Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority sets **sibling order on wire**; edit focus drives client text entry, but full focus navigation/IME parity is unverified. |
-| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Click event 1 and edit event 9 reach JASS through real client commands. Remaining mouse/scroll/check events and actual iPad interaction are unverified. |
+| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Events 1–9 (including client mouse 2–6 and checkbox 7/8) have unit/command-path coverage. Item selection event 10, additional unenumerated events and actual iPad interaction remain unverified. |
 | Local single-player sync | `DzTriggerRegisterSyncData`, `DzSyncData`, `DzGetTriggerSyncData`, `DzGetTriggerSyncPlayer` | Existing local dispatch is not a multiplayer transport. Audit async event order and trigger lifecycle on real ORDR. |
 | Keyboard | `DzTriggerRegisterKeyEventByCode`, `DzGetTriggerKeyPlayer` | Physical keyboard now travels via opted-in `cl_game_keycmd`/`dzkey` to JASS; verify retail status semantics on imported ORDR. iPad touch keyboard still needs its own control path. |
 
@@ -93,6 +115,9 @@ Headless tests: `wc3_api.dz_edit_focus_and_text_input_round_trip`,
 `client_input.persistent_editbox_taps_accept_text_and_send_authored_command`,
 `wc3_api.dz_toc_and_frame_creation_find_real_template_children`,
 `wc3_api.dz_frames_emit_real_ui_payloads`, and
-`wc3_api.dz_click_flows_through_actual_client_command_and_respects_visibility`.
+`wc3_api.dz_click_flows_through_actual_client_command_and_respects_visibility`,
+`wc3_api.dz_script_frame_mouse_events_and_checkbox_toggle_are_authoritative`,
+`client_input.scripted_layout_reports_real_pointer_edges_and_checkbox_toggles`,
+and `client_input.scripted_editbox_text_uses_generic_event_command`.
 These cover parse/clone, generic wire output, a real `G_ClientCommand` click callback and
 hidden-frame rejection. **They do not establish complete iPad ORDR playability.**

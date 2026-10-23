@@ -121,7 +121,7 @@ static void dz_test_write(pfWriteType_t type, void const *value) {
     if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
     uiFrame_t const *frame=value;
     dz_written_frames++;
-    if(frame->flags.type==FT_EDITBOX && frame->onclick && !strcmp(frame->onclick,"dzedit 2")){
+    if(frame->flags.type==FT_EDITBOX && frame->onclick && !strcmp(frame->onclick,"#uievent 2 512")){
         dz_edit_wire_focus=frame->value;
         dz_edit_wire_command=true;
     }
@@ -226,6 +226,81 @@ TEST(wc3_api, dz_click_flows_through_actual_client_command_and_respects_visibili
     jass_callbyname(level.vm,"verifyOnce",false);
     gi.Write=old_write;
     gi.unicast=old_unicast;
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_api, dz_script_frame_mouse_events_and_checkbox_toggle_are_authoritative) {
+    gameClient_t *client=&game.clients[0];
+    setup_test_world();
+    client->connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzFrameShow takes integer frame, boolean shown returns nothing\n"
+        "globals\n"
+        " integer frameId = 0\n"
+        " integer hover = 0\n"
+        " integer down = 0\n"
+        " integer up = 0\n"
+        " integer wheel = 0\n"
+        " integer checked = 0\n"
+        " integer unchecked = 0\n"
+        "endglobals\n"
+        "function enter takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == frameId, \"wrong hover source\")\n"
+        " set hover = hover + 1\n"
+        "endfunction\n"
+        "function press takes nothing returns nothing\n"
+        " set down = down + 1\n"
+        "endfunction\n"
+        "function release takes nothing returns nothing\n"
+        " set up = up + 1\n"
+        "endfunction\n"
+        "function scroll takes nothing returns nothing\n"
+        " set wheel = wheel + 1\n"
+        "endfunction\n"
+        "function check takes nothing returns nothing\n"
+        " set checked = checked + 1\n"
+        "endfunction\n"
+        "function uncheck takes nothing returns nothing\n"
+        " set unchecked = unchecked + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set frameId = DzCreateFrameByTagName(\"CHECKBOX\", \"checkedTest\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(frameId, 2, function enter, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 4, function release, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 5, function press, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 6, function scroll, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 7, function check, false)\n"
+        " call DzFrameSetScriptByCode(frameId, 8, function uncheck, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(hover == 1 and down == 1 and up == 1 and wheel == 1, \"mouse events lost\")\n"
+        " call BJassAssert(checked == 1 and unchecked == 1, \"toggle edges wrong\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(frameId, false)\n"
+        "endfunction\n"));
+    T_STREQ(ordr_frames[2].ui->OnClick,"#uievent 2 500");
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","2"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","5"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","4"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","6"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(ordr_frame_extra[2].checked);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(!ordr_frame_extra[2].checked);
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","7"});
+    T_ASSERT(!ordr_frame_extra[2].checked);
+    /* Disallow out-of-range events and nonexistent frames. */
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","31"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","9999","7"});
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
@@ -339,7 +414,7 @@ TEST(wc3_api, dz_edit_focus_and_text_input_round_trip) {
     gi.unicast=old_unicast;
     T_ASSERT(dz_edit_wire_command);
     T_FEQ(dz_edit_wire_focus,1.0f,0.001f);
-    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzedit","2","hello there"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","9","hello there"});
     jass_runevents(level.vm);
     jass_callbyname(level.vm,"verify",false);
     T_ASSERT(!jass_rterror_pending(level.vm));
@@ -352,7 +427,7 @@ TEST(wc3_api, dz_edit_focus_and_text_input_round_trip) {
     gi.unicast=old_unicast;
     T_FEQ(dz_edit_wire_focus,0.0f,0.001f);
     jass_callbyname(level.vm,"hide",false);
-    G_ClientCommand(g_edicts,3,(cstring_t[]){"dzedit","2","should be ignored"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","9","should be ignored"});
     jass_runevents(level.vm);
     jass_callbyname(level.vm,"verify",false);
     T_ASSERT(!jass_rterror_pending(level.vm));

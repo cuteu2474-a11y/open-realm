@@ -25,6 +25,7 @@ typedef struct {
 typedef struct {
     ordr_anchor_t anchors[16];
     int anchor_count, priority, text_align, focused;
+    bool checked;
     int model_type, model_flag, font_flag;
     float font_height;
     char font[260],model[512],kind[64];
@@ -200,16 +201,13 @@ uint32_t DzFrameSetScriptByCode(jass_t *j) {
         ordr_frame_trace("register-callback",id,ordr_frame(id)->name);
         ordr_frame_extra[id].callbacks[event]=callback;
         ordr_frame_extra[id].callback_sync[event]=(unsigned char)sync;
-        if(event==1 && ordr_frames[id].ui){
-            /* The universal client reports actual button clicks via OnClick;
-             * the game command validates the source before dispatching JASS. */
-            UI_SetOnClick(ordr_frames[id].ui,"dzframe %d",id);
-            ordr_frames_dirty=true;
-        }
-        if(event==9 && ordr_frames[id].ui &&
-           (ordr_frames[id].ui->Type==FT_EDITBOX || ordr_frames[id].ui->Type==FT_GLUEEDITBOX ||
-            ordr_frames[id].ui->Type==FT_SLASHCHATBOX)){
-            UI_SetOnClick(ordr_frames[id].ui,"dzedit %d",id);
+        if(event>=1 && event<=10 && ordr_frames[id].ui){
+            /* The generic layout's OnClick string supports an event-descriptor
+             * form: #uievent <id> <mask>. This uses an existing string field,
+             * not stat (a one-byte wire field) or new protocol bits. */
+            uint32_t mask=0;
+            for(int n=1;n<=10;n++)if(ordr_frame_extra[id].callbacks[n])mask|=1u<<n;
+            UI_SetOnClick(ordr_frames[id].ui,"#uievent %d %u",id,mask);
             ordr_frames_dirty=true;
         }
     }
@@ -360,6 +358,9 @@ static void ordr_write_frame_tree(int id) {
     if(frame->ui->Type==FT_EDITBOX || frame->ui->Type==FT_GLUEEDITBOX ||
        frame->ui->Type==FT_SLASHCHATBOX)
         UI_WriteFrameValue(frame->ui,ordr_frame_extra[id].focused?1.0f:0.0f);
+    else if(frame->ui->Type==FT_CHECKBOX || frame->ui->Type==FT_GLUECHECKBOX ||
+            frame->ui->Type==FT_SIMPLECHECKBOX)
+        UI_WriteFrameValue(frame->ui,ordr_frame_extra[id].checked?1.0f:0.0f);
     else UI_WriteFrame(frame->ui);
     int last_prio=INT_MIN, last_id=0;
     while(true){
@@ -407,19 +408,45 @@ void ORDR_DzRenderFrames(void) {
 /* Only a live, visible, enabled clickable frame may forward client input into
  * the current script. This prevents fabricated/stale button handles from
  * calling registered JASS code outside the actual displayed frame tree. */
-void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
+static bool ORDR_DzFrameInputAllowed(edict_t *ent,uint32_t handle) {
     ordr_frame_t *f=ordr_frame(handle);
-    player_t *old;
     if(!ent || !ent->client || !ent->client->connected || !level.vm || !G_IsSinglePlayer() ||
-       !f || !f->ui || !ordr_frame_extra[handle].callbacks[1])return;
+       !f || !f->ui)return false;
     for(int p=(int)handle;p>0;){
         ordr_frame_t *ancestor=ordr_frame(p);
-        if(!ancestor || !ancestor->visible || !ancestor->enabled)return;
+        if(!ancestor || !ancestor->visible || !ancestor->enabled)return false;
         p=ancestor->parent;
     }
+    return true;
+}
+void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
+    player_t *old;
+    if(!ORDR_DzFrameInputAllowed(ent,handle) ||
+       !ordr_frame_extra[handle].callbacks[1])return;
     old=currentplayer;
     currentplayer=&ent->client->ps;
     ORDR_DispatchFrameEvent(level.vm,(int)handle,1);
+    currentplayer=old;
+}
+
+/* Generic client input events: hover, mouse buttons, wheel, checkbox toggle.
+ * A checkbox is a toggle action: the server derives checked/unchecked from
+ * authoritative state rather than trusting a forged client-side state bit. */
+void ORDR_DzFrameEvent(edict_t *ent,uint32_t handle,int event) {
+    ordr_frame_t *f=ordr_frame(handle);
+    player_t *old;
+    if(event<2 || event>8 || !ORDR_DzFrameInputAllowed(ent,handle))return;
+    if(event==7 || event==8){
+        if(f->ui->Type!=FT_CHECKBOX && f->ui->Type!=FT_GLUECHECKBOX &&
+           f->ui->Type!=FT_SIMPLECHECKBOX)return;
+        event=ordr_frame_extra[handle].checked?8:7;
+        ordr_frame_extra[handle].checked=!ordr_frame_extra[handle].checked;
+        ordr_frames_dirty=true;
+    }
+    if(!ordr_frame_extra[handle].callbacks[event])return;
+    old=currentplayer;
+    currentplayer=&ent->client->ps;
+    ORDR_DispatchFrameEvent(level.vm,(int)handle,event);
     currentplayer=old;
 }
 
@@ -427,14 +454,8 @@ void ORDR_DzClickFrame(edict_t *ent,uint32_t handle) {
 void ORDR_DzEditFrame(edict_t *ent,uint32_t handle,cstring_t text) {
     ordr_frame_t *f=ordr_frame(handle);
     player_t *old;
-    if(!ent || !ent->client || !ent->client->connected || !level.vm || !G_IsSinglePlayer() ||
-       !f || !f->ui || !text ||
+    if(!ORDR_DzFrameInputAllowed(ent,handle) || !text ||
        (f->ui->Type!=FT_EDITBOX && f->ui->Type!=FT_GLUEEDITBOX && f->ui->Type!=FT_SLASHCHATBOX))return;
-    for(int p=(int)handle;p>0;){
-        ordr_frame_t *ancestor=ordr_frame(p);
-        if(!ancestor || !ancestor->visible || !ancestor->enabled)return;
-        p=ancestor->parent;
-    }
     snprintf(f->text,sizeof(f->text),"%.255s",text);
     UI_SetText(f->ui,"%s",f->text);
     ordr_frames_dirty=true;

@@ -32,6 +32,20 @@ static bool SCR_LayoutIsEdit(uiFrame_t const *frame) {
          frame->flags.type == FT_SLASHCHATBOX);
 }
 
+/* Optional generic OnClick descriptor for server-authored event controls.
+ * Keeping the metadata in the existing command string preserves all network
+ * field widths and leaves the renderer independent of the owning game. */
+static bool SCR_LayoutScriptDescriptor(uiFrame_t const *frame,uint32_t *handle,uint32_t *mask) {
+    unsigned int id,bits;
+    char extra;
+    if(!frame || !frame->onclick ||
+       sscanf(frame->onclick,"#uievent %u %u %c",&id,&bits,&extra)!=2 || !id || !bits)
+        return false;
+    if(handle)*handle=id;
+    if(mask)*mask=bits;
+    return true;
+}
+
 static void SCR_LayoutFocusEdit(uiFrame_t const *frame, uint32_t layer) {
     if (!SCR_LayoutIsEdit(frame)) return;
     if (layout_editor.active && layout_editor.frame == frame->number && layout_editor.layer == layer) return;
@@ -39,7 +53,10 @@ static void SCR_LayoutFocusEdit(uiFrame_t const *frame, uint32_t layer) {
     layout_editor.active = true;
     layout_editor.layer = layer;
     layout_editor.frame = frame->number;
-    strlcpy(layout_editor.command, frame->onclick, sizeof(layout_editor.command));
+    uint32_t handle;
+    if(SCR_LayoutScriptDescriptor(frame,&handle,NULL))
+        snprintf(layout_editor.command,sizeof(layout_editor.command),"uievent %u 9",handle);
+    else strlcpy(layout_editor.command, frame->onclick, sizeof(layout_editor.command));
     uiEditBox_t const *wire = frame->buffer.size >= sizeof(uiEditBox_t) ? frame->buffer.data : NULL;
     layout_editor.max_chars = wire && wire->maxChars ? MIN(wire->maxChars, 255u) : 255u;
     cstring_t value = frame->text;
@@ -400,6 +417,7 @@ static uint32_t layout_right_press_frame, layout_right_press_layer;
 static char layout_held_command[CMDARG_LEN * 2];
 static uint32_t layout_hovered_number;
 static uint32_t layout_hovered_layer;
+static uint32_t layout_pointer_frame,layout_pointer_layer;
 static uint32_t layout_current_layer;
 static handle_t layout_hovered;
 static handle_t layout_current;
@@ -1728,6 +1746,7 @@ void SCR_SetLayoutLayer(uint32_t layer, handle_t data) {
 void SCR_ClearLayoutLayer(uint32_t layer) {
     if (layer < MAX_LAYOUT_LAYERS) layout_layers[layer] = NULL;
     if (layout_editor.active && layout_editor.layer == layer) SCR_LayoutBlurEdit();
+    if(layout_pointer_frame && layout_pointer_layer==layer)layout_pointer_frame=0;
 }
 
 void SCR_ReleaseLayoutCameraEvents(uint32_t layer) {
@@ -1756,6 +1775,33 @@ void SCR_ClearLayoutResources(void) {
 }
 
 static bool SCR_LayoutLayerVisible(uint32_t layer) { return layer < MAX_LAYOUT_LAYERS && layout_layers[layer] && !((1u << layer) & cl.playerstate.uiflags); }
+
+/* Script-owned frames advertise their event subscriptions in the existing
+ * OnClick descriptor. The renderer reports generic UI input; it knows
+ * nothing about JASS or any particular game's native function names. */
+static bool SCR_LayoutScriptEvent(uiFrame_t const *frame,int event) {
+    uint32_t mask,target;
+    if(!frame || (frame->flagsvalue & UIFRAME_DISABLED) || event<1 || event>8 ||
+       !SCR_LayoutScriptDescriptor(frame,&target,&mask))return false;
+    bool checkbox=frame->flags.type==FT_CHECKBOX || frame->flags.type==FT_GLUECHECKBOX ||
+                  frame->flags.type==FT_SIMPLECHECKBOX;
+    /* A checkbox click toggles the server-owned value even if neither toggle
+     * callback is registered (but this frame has another subscribed event). */
+    if(!(mask & (1u<<event)) && !(checkbox && event==7))return false;
+    MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+    SZ_Printf(&cls.netchan.message,"uievent %u %d",target,event);
+    return true;
+}
+
+static uiFrame_t const *SCR_LayoutFindScriptEventFrame(uint32_t layer,uint32_t number) {
+    if(!number || !SCR_LayoutLayerVisible(layer))return NULL;
+    SCR_Clear(layout_layers[layer]);
+    FOR_LOOP(i,SCR_NumFrames()) {
+        uiFrame_t const *frame=SCR_Frame(i);
+        if(frame && frame->number==number && SCR_LayoutFrameRowsVisible(frame))return frame;
+    }
+    return NULL;
+}
 
 /* Result screens outrank Quest when malformed/server-overlapping modal layers coexist. */
 static int SCR_LayoutModalLayer(void) {
@@ -1813,6 +1859,28 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
         if (layout_hovered_number) break;
     }
 
+    if(event==MENU_MOUSE_MOVE) {
+        bool sent=false;
+        if(layout_pointer_frame!=layout_hovered_number ||
+           (layout_pointer_frame && layout_pointer_layer!=layout_hovered_layer)) {
+            uiFrame_t const *previous=SCR_LayoutFindScriptEventFrame(layout_pointer_layer,layout_pointer_frame);
+            if(previous)sent|=SCR_LayoutScriptEvent(previous,3);
+            if(hovered_frame){
+                /* SCR_Clear swaps the shared layout decode buffer; re-find
+                 * the new frame after looking up the previous hover. */
+                uiFrame_t const *next=SCR_LayoutFindScriptEventFrame(layout_hovered_layer,layout_hovered_number);
+                if(next)sent|=SCR_LayoutScriptEvent(next,2);
+            }
+        }
+        layout_pointer_frame=layout_hovered_number;
+        layout_pointer_layer=layout_hovered_layer;
+        return sent;
+    }
+    if(event==MENU_MOUSE_SCROLL) {
+        if(MENU_MOUSE_PARAM_Y(param)==0)return false;
+        return SCR_LayoutScriptEvent(hovered_frame,6);
+    }
+
     /* Proxy command buttons may carry a secondary command in text. Warcraft
      * uses this for right-click autocast toggles while preserving left-click
      * targeting on the same icon. Consume both right-button edges so the click
@@ -1840,11 +1908,13 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
         layout_editor.frame == hovered_frame->number && layout_editor.layer == layout_hovered_layer) {
         layout_left_down = false;
         layout_press_frame = 0;
+        SCR_LayoutScriptEvent(hovered_frame,4);
         return true;
     }
     if (event == MENU_MOUSE_DOWN) {
         if (SCR_LayoutIsEdit(hovered_frame)) {
             SCR_LayoutFocusEdit(hovered_frame, layout_hovered_layer);
+            SCR_LayoutScriptEvent(hovered_frame,5);
             layout_left_down = true;
             layout_press_frame = 0;
             return true;
@@ -1854,13 +1924,15 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
         layout_left_down = true;
         layout_press_frame = hovered_frame ? hovered_frame->number : 0;
         layout_press_layer = hovered_frame ? layout_hovered_layer : 0;
+        bool script_frame=SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL);
+        SCR_LayoutScriptEvent(hovered_frame,5);
         /* Multiselect icons are server-authored gameplay controls. They do not
          * have an onclick string, so consume the press here and resolve the
          * concrete entity on release below. */
         if (hovered_frame && hovered_frame->flags.type == FT_MULTISELECT) return true;
-        if (!hovered_frame || layout_held_command[0]) return false;
+        if (!hovered_frame || layout_held_command[0]) return script_frame;
         SCR_LayoutFormatOnClickCommand(hovered_frame->onclick, command, sizeof(command));
-        if (command[0] != '+') return false;
+        if (command[0] != '+') return script_frame;
         strlcpy(layout_held_command, command, sizeof(layout_held_command));
         MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
         SZ_Printf(&cls.netchan.message, "%s", layout_held_command);
@@ -1882,6 +1954,16 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     }
 
     if (!matched) return false;
+    bool script_release=SCR_LayoutScriptEvent(hovered_frame,4);
+    bool script_toggle=false;
+    if(SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL) &&
+       (hovered_frame->flags.type==FT_CHECKBOX || hovered_frame->flags.type==FT_GLUECHECKBOX ||
+        hovered_frame->flags.type==FT_SIMPLECHECKBOX))
+        script_toggle=SCR_LayoutScriptEvent(hovered_frame,7);
+    if(SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL)){
+        SCR_LayoutScriptEvent(hovered_frame,1);
+        return true;
+    }
     FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
         handle_t layout = layout_layers[layer];
         uint32_t flags = cl.playerstate.uiflags;
@@ -1912,7 +1994,7 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
             }
         }
     }
-    return false;
+    return script_release || script_toggle;
 }
 
 /* Dispatch a command-button hotkey the same way a mouse click on that */

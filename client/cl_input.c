@@ -1519,6 +1519,7 @@ static void CL_TestMarqueeRelease(uint32_t hits, uint32_t num_selected, uint32_t
 }
 static bool CL_TestCameraUsesTerrainHeight(void) { return false; }
 static size2_t CL_TestWindowSize(void) { return (size2_t){ 1024, 768 }; }
+static void CL_TestUIScene(rect_t const *scene) { (void)scene; }
 
 static int smart_trace_order;
 static bool CL_TestSmartEntityOrder(viewDef_t const *view, float x, float y, uint32_t *number) {
@@ -1824,6 +1825,123 @@ TEST(client_input, persistent_editbox_taps_accept_text_and_send_authored_command
     cls.netchan.message = old_msg;
     FOR_LOOP(i, MAX_LAYOUT_LAYERS) SCR_SetLayoutLayer(i, cl.layout[i]);
     SDL_QuitSubSystem(SDL_INIT_EVENTS);
+}
+
+TEST(client_input, scripted_layout_reports_real_pointer_edges_and_checkbox_toggles) {
+    struct client_state *old_cl=MemAlloc(sizeof(cl));
+    struct client_static old_cls=cls;
+    refExport_t old_re=re;
+    sizeBuf_t old_msg=cls.netchan.message;
+    uint8_t packet[1024],data[1024];
+    sizeBuf_t layout_packet;
+    uiFrame_t empty={0};
+    uiFrame_t frame={
+        .number=1,.flags.type=FT_CHECKBOX,
+        .size={UI_BASE_WIDTH,UI_BASE_HEIGHT},
+        .onclick="#uievent 42 508",
+    };
+    char command[128];
+    T_ASSERT(old_cl!=NULL);
+    if(!old_cl)return;
+    memcpy(old_cl,&cl,sizeof(cl));
+    memset(&cl,0,sizeof(cl));
+    cls.state=ca_active;
+    cls.key_dest=key_game;
+    re.GetWindowSize=CL_TestWindowSize;
+    re.SetUIScene=CL_TestUIScene;
+    CL_CanvasWindowChanged();
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet,packet,sizeof(packet));
+    MSG_WriteByte(&layout_packet,LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet,&empty,&frame,true);
+    MSG_WriteByte(&layout_packet,0);
+    MSG_WriteLong(&layout_packet,0);
+    MSG_WriteShort(&layout_packet,0);
+    CL_ParseLayout(&layout_packet);
+    SCR_Clear(cl.layout[LAYER_CONSOLE]);
+    T_EQ(SCR_NumFrames(),2u);
+    uiFrame_t const *decoded=SCR_Frame(1);
+    T_EQ(decoded->flags.type,FT_CHECKBOX);
+    T_STREQ(decoded->onclick,frame.onclick);
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+#define EXPECT_SCRIPT_EVENT(EVENT) do { \
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd); \
+    MSG_ReadString(&cls.netchan.message,command); \
+    T_STREQ(command,"uievent 42 " EVENT); \
+} while(0)
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_MOVE,256,192,0,false}));
+    EXPECT_SCRIPT_EVENT("2");
+    T_ASSERT(!SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_MOVE,256,192,0,false}));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN,256,192,SDL_BUTTON_LEFT,false}));
+    EXPECT_SCRIPT_EVENT("5");
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_UP,256,192,SDL_BUTTON_LEFT,false}));
+    EXPECT_SCRIPT_EVENT("4");
+    EXPECT_SCRIPT_EVENT("7");
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_SCROLL,256,192,MENU_MOUSE_PARAM(0,1),false}));
+    EXPECT_SCRIPT_EVENT("6");
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_MOVE,-20000,-20000,0,false}));
+    EXPECT_SCRIPT_EVENT("3");
+#undef EXPECT_SCRIPT_EVENT
+    MemFree(cl.layout[LAYER_CONSOLE]);
+    cl=*old_cl;MemFree(old_cl);
+    cls=old_cls;re=old_re;
+    cls.netchan.message=old_msg;
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_SetLayoutLayer(i,cl.layout[i]);
+}
+
+TEST(client_input, scripted_editbox_text_uses_generic_event_command) {
+    struct client_state *old_cl=MemAlloc(sizeof(cl));
+    struct client_static old_cls=cls;
+    refExport_t old_re=re;
+    sizeBuf_t old_msg=cls.netchan.message;
+    uint8_t packet[1024],data[1024];
+    sizeBuf_t layout_packet;
+    uiFrame_t empty={0};
+    uiEditBox_t wire={.maxChars=30};
+    uiFrame_t frame={
+        .number=1,.flags.type=FT_EDITBOX,
+        .size={UI_BASE_WIDTH,UI_BASE_HEIGHT},
+        .onclick="#uievent 7 512",
+        .buffer={.data=(handle_t)&wire,.size=sizeof(wire)},
+    };
+    char command[128];
+    T_ASSERT(old_cl!=NULL);
+    if(!old_cl)return;
+    memcpy(old_cl,&cl,sizeof(cl));
+    memset(&cl,0,sizeof(cl));
+    cls.state=ca_active;
+    cls.key_dest=key_game;
+    re.GetWindowSize=CL_TestWindowSize;
+    re.SetUIScene=CL_TestUIScene;
+    CL_CanvasWindowChanged();
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet,packet,sizeof(packet));
+    MSG_WriteByte(&layout_packet,LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet,&empty,&frame,true);
+    MSG_WriteByte(&layout_packet,0);
+    MSG_WriteLong(&layout_packet,0);
+    MSG_WriteShort(&layout_packet,0);
+    CL_ParseLayout(&layout_packet);
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN,256,192,SDL_BUTTON_LEFT,false}));
+    T_ASSERT(SCR_LayoutTextInputActive());
+    T_ASSERT(SCR_LayoutTextInput("test"));
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message,command);
+    T_STREQ(command,"uievent 7 9 \"test\"");
+    SCR_LayoutEditKeyEvent(K_ESCAPE,0);
+    MemFree(cl.layout[LAYER_CONSOLE]);
+    cl=*old_cl;MemFree(old_cl);
+    cls=old_cls;re=old_re;
+    cls.netchan.message=old_msg;
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_SetLayoutLayer(i,cl.layout[i]);
 }
 
 TEST(client_input, zoom_reset_returns_to_default_after_zooming_in) {
