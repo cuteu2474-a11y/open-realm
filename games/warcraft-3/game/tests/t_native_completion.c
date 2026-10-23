@@ -182,4 +182,36 @@ TEST(wc3_native_completion, selection_natives_change_authoritative_flags) {
     T_ASSERT(!level.drag_selection_disabled[0]);
     T_ASSERT(!level.preselection_disabled[0]);
 }
+/* Count, dispel and corpse suspension must mutate the real unit lifecycle,
+ * not just return an empty JASS placeholder. */
+TEST(wc3_native_completion, buff_dispersal_and_decay_suspend_natives) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        " unit tested = null\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        " set tested = CreateUnit(Player(0), 'hfoo', 0.0, 0.0, 0.0)\n"
+        " call UnitApplyTimedLife(tested, 'BTLF', 10.0)\n"
+        " call BJassAssert(UnitCountBuffsEx(tested, true, true, true, true, true, false, false) >= 1, \"timed life exists\")\n"
+        " call UnitRemoveBuffs(tested, true, true)\n"
+        " call BJassAssert(UnitCountBuffsEx(tested, true, true, true, true, true, false, false) >= 1, \"ordinary dispel preserves timed life\")\n"
+        " call UnitRemoveBuffsEx(tested, true, true, true, true, true, false, false)\n"
+        " call BJassAssert(UnitCountBuffsEx(tested, true, true, true, true, true, false, false) == 0, \"timed life removed\")\n"
+        " call UnitSuspendDecay(tested, true)\n"
+        "endfunction\n"
+        "function release takes nothing returns nothing\n"
+        " call UnitSuspendDecay(tested, false)\n"
+        "endfunction\n"));
+    edict_t *unit = NULL;
+    FOR_LOOP(i, globals.num_edicts)
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 0) { unit = &g_edicts[i]; break; }
+    T_NOT_NULL(unit);
+    if (!unit) return;
+    T_ASSERT((unit->aiflags & AI_CORPSE_DECAY_SUSPENDED) != 0);
+    jass_callbyname(level.vm, "release", false);
+    T_ASSERT((unit->aiflags & AI_CORPSE_DECAY_SUSPENDED) == 0);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
 #endif

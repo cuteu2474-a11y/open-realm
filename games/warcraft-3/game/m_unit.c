@@ -115,7 +115,7 @@ void G_RestartCorpseBoneDecayAfterCargo(edict_t *corpse) {
 static void unit_decay_flesh_think(edict_t *self) {
     /* An active corpse consumer owns the remains.  Freeze ordinary decay until
      * that reservation is released or, for Cannibalize, the corpse is consumed. */
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     unit_runwait(self, unit_begin_bone_decay);
 }
 
@@ -153,7 +153,7 @@ void unit_begin_decay(edict_t *self) {
 /* Ordinary corpses are removed. Heroes instead finish their dissipation timer,
  * become hidden/awaiting-revive, and keep the same authoritative edict. */
 void unit_decay_think(edict_t *self) {
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     if (G_UnitIsHero(self) && !(self->aiflags & AI_ILLUSION)) {
         if (!(self->revival && self->revival->awaiting)) unit_runwait(self, hero_become_revivable);
         return;

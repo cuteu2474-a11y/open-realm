@@ -1220,8 +1220,11 @@ uint32_t UnitShareVision(jass_t *j) {
     return 0;
 }
 uint32_t UnitSuspendDecay(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //bool suspend = jass_checkboolean(j, 2);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    bool suspend = jass_checkboolean(j, 2);
+    if (!unit || !unit->inuse) return 0;
+    if (suspend) unit->aiflags |= AI_CORPSE_DECAY_SUSPENDED;
+    else unit->aiflags &= ~AI_CORPSE_DECAY_SUSPENDED;
     return 0;
 }
 uint32_t UnitAddAbility(jass_t *j) {

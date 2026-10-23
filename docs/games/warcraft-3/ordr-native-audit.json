@@ -18,7 +18,7 @@
   "registered": 1295,
   "direct_native_count": 453,
   "referenced_native_count": 514,
-  "placeholder_count": 7,
+  "placeholder_count": 6,
   "missing_declared_natives": [],
   "unresolved_calls": [],
   "natives": [
@@ -4028,7 +4028,7 @@
       "direct_calls": 0,
       "path": "games/warcraft-3/game/api/api_unit.h",
       "line": 1125,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "VersionGet",

@@ -212,6 +212,7 @@ enum {
     AI_PROJECTILE_FIXED_TARGET = 1 << 11, /* projectile flies to channel.origin snapshot rather than homing */
     AI_SOUL_TRAPPED = 1 << 12, /* entity remains alive but leaves world interaction until Soul Trap release */
     AI_SUMMON_EXPLODES_ON_DEATH = 1 << 13, /* spirit/beast summon magical death effect, no corpse */
+    AI_CORPSE_DECAY_SUSPENDED = 1 << 14, /* UnitSuspendDecay: preserve current corpse phase */
 };
 
 typedef enum {
