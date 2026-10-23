@@ -1296,6 +1296,23 @@ uint32_t IssuePointOrder(jass_t *j) {
     float x = jass_checknumber(j, 3);
     float y = jass_checknumber(j, 4);
     bool ret = unit_issueorder(whichUnit, order, &MAKE(vec2_t, x, y));
+    if (level.vm && jass_functionbyname(j, "CUN")) {
+        static unsigned traced;
+        if (traced++ < 40) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u order=%.32s accepted=%u at=(%.0f,%.0f) hp=%.0f/%.0f ai=0x%x speed=%.0f",
+                     (unsigned)(whichUnit ? whichUnit->s.number : 0u),
+                     (unsigned)(whichUnit ? whichUnit->class_id : 0u),
+                     (unsigned)(whichUnit ? whichUnit->s.player : 0u),
+                     order ? order : "", (unsigned)ret, (double)x, (double)y,
+                     (double)(whichUnit ? whichUnit->health.value : 0.0f),
+                     (double)(whichUnit ? whichUnit->health.max_value : 0.0f),
+                     (unsigned)(whichUnit ? whichUnit->aiflags : 0u),
+                     (double)(whichUnit ? whichUnit->unitinfo.MoveSpeed : 0.0f));
+            jass_ordr_log_event(j,"ORDR_POINT_ORDER",detail);
+        }
+    }
     return jass_pushboolean(j, ret);
 }
 uint32_t IssuePointOrderLoc(jass_t *j) {
@@ -1315,7 +1332,25 @@ uint32_t IssuePointOrderById(jass_t *j) {
      * authoritative build path and leave ordinary ids to the generic router. */
     if (G_UnitIsBuilding(order))
         return jass_pushboolean(j, G_IssueBuildOrder(whichUnit, order, &point));
-    return jass_pushboolean(j, unit_issueorder(whichUnit, G_OrderId2String(order), &point));
+    bool accepted = unit_issueorder(whichUnit, G_OrderId2String(order), &point);
+    if (level.vm && jass_functionbyname(j, "CUN")) {
+        static unsigned traced;
+        if (traced++ < 40) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u order_id=%u accepted=%u hp=%.0f/%.0f ai=0x%x speed=%.0f",
+                     (unsigned)(whichUnit ? whichUnit->s.number : 0u),
+                     (unsigned)(whichUnit ? whichUnit->class_id : 0u),
+                     (unsigned)(whichUnit ? whichUnit->s.player : 0u),
+                     (unsigned)order, (unsigned)accepted,
+                     (double)(whichUnit ? whichUnit->health.value : 0.0f),
+                     (double)(whichUnit ? whichUnit->health.max_value : 0.0f),
+                     (unsigned)(whichUnit ? whichUnit->aiflags : 0u),
+                     (double)(whichUnit ? whichUnit->unitinfo.MoveSpeed : 0.0f));
+            jass_ordr_log_event(j,"ORDR_POINT_ORDER",detail);
+        }
+    }
+    return jass_pushboolean(j, accepted);
 }
 uint32_t IssuePointOrderByIdLoc(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");

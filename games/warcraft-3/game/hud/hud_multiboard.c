@@ -3,7 +3,7 @@
 
 #define BZ_WC3_MB_WIDTH 0.287f // FDF units; widened for the resource columns while keeping the panel right-aligned
 #define BZ_WC3_MB_MIN_NAME_WIDTH 0.105f // FDF units; minimum name column preserving the prior resource alignment
-#define BZ_WC3_MB_NAME_CHAR_WIDTH 0.0058f // FDF units per byte; estimate name-column width before placing resource columns
+#define BZ_WC3_MB_NAME_CHAR_WIDTH 0.0058f // FDF units per visible UTF-8 character (not per encoded byte)
 #define BZ_WC3_MB_NAME_MAX_WIDTH 0.300f // FDF units; cap name expansion so long names retain the resource panel
 #define WC3_MB_ROW_HEIGHT 0.016f // FDF units; one resource/cell row at HUD_FONT_SIZE
 #define WC3_MB_HEADER_HEIGHT 0.020f // FDF units; title strip text height
@@ -164,6 +164,33 @@ static uint32_t MultiboardTeamRows(uint32_t viewer) {
     return count;
 }
 
+/* strlen() counts three UTF-8 bytes per Hangul syllable and previously
+ * expanded the player column threefold on Korean clients. */
+static size_t MultiboardUTF8Chars(cstring_t value) {
+    size_t chars = 0;
+    if (!value) return 0;
+    for (unsigned char const *p = (unsigned char const *)value; *p; p++)
+        if ((*p & 0xc0u) != 0x80u) chars++;
+    return chars;
+}
+
+/* MultiboardSetItemWidth / MultiboardSetItemsWidth write per-cell widths.
+ * The old renderer threw them away and drew every column at equal width:
+ * ORDR score columns consequently overlap their neighboring values. Use the
+ * widest authored cell in each column, with an equal fallback only if no
+ * script assigned any width to that column. */
+static float MultiboardAuthoredColumnWidth(multiboard_t const *board,
+                                           uint32_t col, uint32_t cols) {
+    float authored = 0.0f;
+    FOR_LOOP(row, MIN(board->rows, (uint32_t)MAX_MULTIBOARD_ROWS)) {
+        struct gmultiboardcell_s const *cell =
+            &board->cells[row * MAX_MULTIBOARD_COLS + col];
+        if (cell->width > authored) authored = cell->width;
+    }
+    return authored > 0.0f ? MAX(0.014f, authored)
+                            : (BZ_WC3_MB_WIDTH - 0.014f) / (float)cols;
+}
+
 static float MultiboardTeamNameWidth(uint32_t viewer) {
     size_t max_chars = 0;
     FOR_LOOP(i, PLAYER_NEUTRAL_AGGRESSIVE) {
@@ -172,7 +199,7 @@ static float MultiboardTeamNameWidth(uint32_t viewer) {
             cstring_t name;
             if (game.clients[slot].ps.number != i) continue;
             name = game.clients[slot].ps.name ? game.clients[slot].ps.name : "";
-            max_chars = MAX(max_chars, strlen(name));
+            max_chars = MAX(max_chars, MultiboardUTF8Chars(name));
             break;
         }
     }
@@ -186,6 +213,7 @@ void UI_WriteMultiboard(edict_t *ent) {
     uint32_t client_index, viewer, root, rows = 0, cols = 0;
     bool team = false, minimized = false;
     float width = BZ_WC3_MB_WIDTH, name_width = BZ_WC3_MB_MIN_NAME_WIDTH;
+    float column_widths[MAX_MULTIBOARD_COLS] = {0};
     float height, body_height, body_y, x, y;
 
     if (!ent || !(client = ent->client)) return;
@@ -207,6 +235,23 @@ void UI_WriteMultiboard(edict_t *ent) {
         width += name_width - BZ_WC3_MB_MIN_NAME_WIDTH;
     }
     if (!team && !board) { UI_ClearLayer(ent, WC3_LAYER_MULTIBOARD); return; }
+    if (board && cols) {
+        float total = 0.0f;
+        FOR_LOOP(c, cols) {
+            column_widths[c] = MultiboardAuthoredColumnWidth(board, c, cols);
+            total += column_widths[c];
+        }
+        /* Keep scripted proportions but keep the panel on the iPad viewport.
+         * Scaling down all columns is safer than letting the last column fall
+         * offscreen or writing beyond the client UI canvas. */
+        float const available = UI_BASE_WIDTH - 2.0f * HUD_HERO_SHORTCUT_EDGE_X - 0.014f;
+        if (total > available && total > 0.0f) {
+            float const scale = available / total;
+            FOR_LOOP(c, cols) column_widths[c] *= scale;
+            total = available;
+        }
+        width = MAX(BZ_WC3_MB_WIDTH, total + 0.014f);
+    }
 
     body_height = team
         ? (minimized ? 0.0f : rows * WC3_MB_ROW_HEIGHT + 0.012f)
@@ -291,8 +336,9 @@ void UI_WriteMultiboard(edict_t *ent) {
             FOR_LOOP(r, rows) FOR_LOOP(c, cols) {
                 struct gmultiboardcell_s const *cell =
                     &board->cells[r * MAX_MULTIBOARD_COLS + c];
-                float cw = (width - 0.014f) / cols;
-                float xx = x + 0.007f + c * cw;
+                float cw = column_widths[c];
+                float xx = x + 0.007f;
+                FOR_LOOP(prev, c) xx += column_widths[prev];
                 float yy = y + height - WC3_MB_HEADER_HEIGHT - (r + 1) * WC3_MB_ROW_HEIGHT;
                 if (cell->show_icon && cell->icon[0]) {
                     uiFrame_t icon = { 0 };

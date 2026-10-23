@@ -7,6 +7,17 @@ uint32_t CreateDestructable(jass_t *j) {
     int32_t variation = jass_checkinteger(j, 6);
     edict_t *d = G_CreateDestructable(objectid, x, y, CM_GetHeightAtPoint(x, y),
                                      DEG2RAD(face), scale, variation);
+    if ((uint32_t)objectid == MAKEFOURCC('B', '1', '0', '0') && level.vm) {
+        DestructableData_t const *row = G_DestructableData((uint32_t)objectid);
+        char detail[320];
+        snprintf(detail, sizeof(detail),
+                 "unit=B100 native=CreateDestructable created=%u model=%u flags=0x%x svflags=0x%x row_model=%s pos=(%.0f,%.0f,%.0f)",
+                 (unsigned)(d && d->inuse), (unsigned)(d ? d->s.model : 0u),
+                 (unsigned)(d ? d->s.flags : 0u), (unsigned)(d ? d->svflags : 0u),
+                 row && row->file ? row->file : "(missing)",
+                 (double)x, (double)y, (double)(d ? d->s.origin.z : 0.0f));
+        jass_ordr_log_event(level.vm, "ORDR_BACKDROP_SPAWN", detail);
+    }
     return jass_pushlighthandle(j, d, "destructable");
 }
 uint32_t CreateDestructableZ(jass_t *j) {

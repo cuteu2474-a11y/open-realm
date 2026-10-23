@@ -406,7 +406,11 @@ static void ordr_write_frame_tree(int id) {
         int next=0, next_prio=INT_MAX;
         for(int n=2;n<ordr_next_frame;n++){
             ordr_frame_t *child=&ordr_frames[n];
-            if(!child->used || child->parent!=id || !child->ui || child->ui->hidden ||
+            /* A zero-parent Dz frame is a valid top-level gameplay frame.
+             * The legacy walker silently discarded these roots, including
+             * map-authored utility buttons. */
+            if(!child->used || (child->parent!=id && !(id==1 && child->parent==0)) ||
+               !child->ui || child->ui->hidden ||
                UI_IsEmbeddedControlArtPart(frame->ui,child->ui))continue;
             int prio=ordr_frame_extra[n].priority;
             if(prio<last_prio || (prio==last_prio && n<=last_id))continue;
@@ -441,7 +445,17 @@ void ORDR_DzRenderFrames(void) {
         UI_SetCurrentClient(NULL);
         emitted=true;
     }
-    if(emitted)ordr_frames_dirty=false;
+    if(emitted) {
+        static unsigned render_trace_count;
+        if(level.vm && jass_functionbyname(level.vm,"CUN") &&
+           render_trace_count++ < 6) {
+            char detail[128];
+            snprintf(detail,sizeof(detail),"frame_handles=%d connected=%u",
+                     ordr_next_frame-1,(unsigned)game.max_clients);
+            jass_ordr_log_event(level.vm,"ORDR_UI_RENDER",detail);
+        }
+        ordr_frames_dirty=false;
+    }
 }
 
 /* Only a live, visible, enabled clickable frame may forward client input into

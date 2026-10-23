@@ -371,9 +371,25 @@ static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
            jass_functionbyname(level.vm, "CUN");
 }
 
+/* Some ORDR custom player-controlled scene/utility units have no
+ * UnitBalance hit points. Zero *maximum* HP is not a death transition.
+ * Permit selecting those authored units only in ORDR; keep actual corpses,
+ * locust/unselectable units, and neutral decorations excluded. */
+static bool G_IsORDROwnedZeroHealthUnit(edict_t const *ent) {
+    return ent && ent->inuse && level.vm &&
+           jass_functionbyname(level.vm, "CUN") &&
+           (ent->svflags & SVF_MONSTER) &&
+           !(ent->svflags & SVF_DEADMONSTER) &&
+           (ent->s.flags & EF_UNIT) &&
+           !(ent->s.flags & EF_NOT_SELECTABLE) &&
+           ent->s.player < PLAYER_NEUTRAL_AGGRESSIVE &&
+           ent->health.max_value == 0.0f && ent->health.value == 0.0f;
+}
+
 static bool G_IsAliveForSelection(edict_t const *ent) {
     return ent && (ent->health.value > 0.0f ||
-                   G_IsORDRNonCombatChoice(ent));
+                   G_IsORDRNonCombatChoice(ent) ||
+                   G_IsORDROwnedZeroHealthUnit(ent));
 }
 
 #ifdef BZ_TESTS
@@ -481,6 +497,11 @@ bool G_UnitCanBeSelected(gameClient_t *client, edict_t const *ent) {
          S_UnitIsInvisibleToPlayer(ent, client->ps.number))) {
         return false;
     }
+    /* ORDR owns its local utility/building units even when a custom sight
+     * radius is missing from the imported object row. Own units are visible
+     * to their owner; enemy/neutral fog checks remain authoritative. */
+    if (ent->s.player == client->ps.number && level.vm &&
+        jass_functionbyname(level.vm, "CUN")) return true;
     return G_FowPlayerCanHoverEntity(client->ps.number, ent);
 }
 
@@ -915,13 +936,18 @@ CLIENTCOMMAND(Select) {
                 ordr_trace_count++;
             } else if (ordr_world_trace_count < 20 && level.started &&
                        candidate->s.player == client->ps.number) {
-                char detail[200];
+                char detail[400];
                 snprintf(detail, sizeof(detail),
-                         "unit=%u owner=%u raw=0x%08x model=%u can_select=%u can_control=%u ui=%u",
+                         "unit=%u owner=%u raw=0x%08x model=%u can_select=%u can_control=%u hp=%.0f/%.0f flags=0x%x sv=0x%x active=%u fow=%u ai=0x%x speed=%.0f ui=%u",
                          (unsigned)number, (unsigned)candidate->s.player,
                          (unsigned)candidate->class_id, (unsigned)candidate->s.model,
                          (unsigned)G_UnitCanBeSelected(client, candidate),
                          (unsigned)G_UnitCanControl(client, candidate),
+                         (double)candidate->health.value, (double)candidate->health.max_value,
+                         (unsigned)candidate->s.flags, (unsigned)candidate->svflags,
+                         (unsigned)G_UnitIsWorldActive(candidate),
+                         (unsigned)G_FowPlayerCanHoverEntity(client->ps.number, candidate),
+                         (unsigned)candidate->aiflags, (double)candidate->unitinfo.MoveSpeed,
                          (unsigned)client->ps.client_ui_state);
                 jass_ordr_log_event(level.vm, "ORDR_WORLD_SELECT_COMMAND", detail);
                 ordr_world_trace_count++;
