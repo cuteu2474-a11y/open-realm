@@ -367,6 +367,103 @@ TEST(wc3_api, dz_registers_editbox_text_event_and_dispatches_callback) {
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+TEST(wc3_api, dz_listbox_selection_changes_only_for_valid_items) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "native DzGetTriggerUIEventFrame takes nothing returns integer\n"
+        "native DzFrameShow takes integer frame, boolean visible returns nothing\n"
+        "globals\n"
+        " integer listId = 0\n"
+        " integer changed = 0\n"
+        "endglobals\n"
+        "function item_changed takes nothing returns nothing\n"
+        " call BJassAssert(DzGetTriggerUIEventFrame() == listId, \"wrong list frame\")\n"
+        " set changed = changed + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " set listId = DzCreateFrameByTagName(\"LISTBOX\", \"choice\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(listId, 10, function item_changed, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changed == 1, \"expected exactly one item selection change\")\n"
+        "endfunction\n"
+        "function hide takes nothing returns nothing\n"
+        " call DzFrameShow(listId, false)\n"
+        "endfunction\n"));
+    /* Headless JASS literals do not turn backslash-n into separate rows. */
+    snprintf(ordr_frames[2].text,sizeof(ordr_frames[2].text),"first\nsecond\nthird");
+    UI_SetText(ordr_frames[2].ui,"%s",ordr_frames[2].text);
+    T_STREQ(ordr_frames[2].ui->OnClick,"#uievent 2 1024");
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","2"});
+    T_EQ(ordr_frame_extra[2].selected_index,2);
+    T_EQ(ordr_frames[2].ui->ListBox.SelectedIndex,2);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","2"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","7"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","-1"});
+    G_ClientCommand(g_edicts,3,(cstring_t[]){"uievent","2","10"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm,"hide",false);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    T_EQ(ordr_frame_extra[2].selected_index,2);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_api, dz_popup_selection_uses_authored_menu_items) {
+    setup_test_world();
+    game.clients[0].connected=true;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetScriptByCode takes integer frame, integer event, code action, boolean sync returns nothing\n"
+        "globals\n"
+        " integer changes = 0\n"
+        "endglobals\n"
+        "function changed takes nothing returns nothing\n"
+        " set changes = changes + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local integer popup = DzCreateFrameByTagName(\"POPUPMENU\", \"picker\", DzGetGameUI(), \"\", 0)\n"
+        " call DzFrameSetScriptByCode(popup, 10, function changed, false)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(changes == 1, \"selection must change once\")\n"
+        "endfunction\n"));
+    frameDef_t *menu=UI_Spawn(FT_MENU,ordr_frames[2].ui);
+    T_ASSERT(menu!=NULL);
+    if(!menu)return;
+    snprintf(menu->Name,sizeof(menu->Name),"PopupItems");
+    snprintf(ordr_frames[2].ui->Popup.MenuFrame,sizeof(ordr_frames[2].ui->Popup.MenuFrame),"PopupItems");
+    UI_MenuAddItem(menu,"one",0);
+    UI_MenuAddItem(menu,"two",1);
+    UI_MenuAddItem(menu,"three",2);
+    uint8_t typedata[256]={0};
+    char textbuf[128]={0};
+    uiFrame_t wire={0};
+    UI_ResetFrameWriteList();
+    T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,typedata,sizeof(typedata),
+                                   textbuf,sizeof(textbuf)));
+    T_STREQ(wire.text,"one\ntwo\nthree");
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    T_EQ(ordr_frame_extra[2].selected_index,1);
+    T_EQ(ordr_frames[2].ui->Popup.SelectedIndex,1);
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","7"});
+    G_ClientCommand(g_edicts,4,(cstring_t[]){"uievent","2","10","1"});
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm,"verify",false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    UI_ResetFrameWriteList();
+    T_ASSERT(UI_BuildFrameForWrite(ordr_frames[2].ui,&wire,typedata,sizeof(typedata),
+                                   textbuf,sizeof(textbuf)));
+    T_FEQ(wire.value,1.0f,0.01f);
+}
+
 /* A live editor needs focus state plus an authenticated client text change,
  * rather than a registered callback that can only be invoked by C tests. */
 TEST(wc3_api, dz_edit_focus_and_text_input_round_trip) {

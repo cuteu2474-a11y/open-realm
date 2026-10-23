@@ -1944,6 +1944,110 @@ TEST(client_input, scripted_editbox_text_uses_generic_event_command) {
     FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_SetLayoutLayer(i,cl.layout[i]);
 }
 
+TEST(client_input, scripted_listbox_selection_reports_changed_row) {
+    struct client_state *old_cl=MemAlloc(sizeof(cl));
+    struct client_static old_cls=cls;
+    refExport_t old_re=re;
+    sizeBuf_t old_msg=cls.netchan.message;
+    uint8_t packet[2048],data[1024];
+    sizeBuf_t layout_packet;
+    uiFrame_t empty={0};
+    uiListBox_t wire={.itemHeight=UI_BASE_HEIGHT/4.0f,.selectedIndex=0};
+    uiFrame_t frame={
+        .number=1,.flags.type=FT_LISTBOX,
+        .size={UI_BASE_WIDTH,UI_BASE_HEIGHT},
+        .text="first\nsecond\nthird\nfourth",
+        .onclick="#uievent 37 1024",
+        .buffer={.data=(handle_t)&wire,.size=sizeof(wire)},
+    };
+    char command[128];
+    T_ASSERT(old_cl!=NULL);
+    if(!old_cl)return;
+    memcpy(old_cl,&cl,sizeof(cl));
+    memset(&cl,0,sizeof(cl));
+    cls.state=ca_active;
+    cls.key_dest=key_game;
+    re.GetWindowSize=CL_TestWindowSize;
+    re.SetUIScene=CL_TestUIScene;
+    CL_CanvasWindowChanged();
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet,packet,sizeof(packet));
+    MSG_WriteByte(&layout_packet,LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet,&empty,&frame,true);
+    MSG_WriteByte(&layout_packet,sizeof(wire));
+    MSG_Write(&layout_packet,&wire,sizeof(wire));
+    MSG_WriteByte(&layout_packet,0);
+    MSG_WriteLong(&layout_packet,0);
+    MSG_WriteShort(&layout_packet,0);
+    CL_ParseLayout(&layout_packet);
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN,256,192,SDL_BUTTON_LEFT,false}));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_UP,256,192,SDL_BUTTON_LEFT,false}));
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message,command);
+    T_STREQ(command,"uievent 37 10 1");
+    T_EQ(cls.netchan.message.readcount,cls.netchan.message.cursize);
+    MemFree(cl.layout[LAYER_CONSOLE]);
+    cl=*old_cl;MemFree(old_cl);
+    cls=old_cls;re=old_re;
+    cls.netchan.message=old_msg;
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_SetLayoutLayer(i,cl.layout[i]);
+}
+
+TEST(client_input, scripted_popup_selection_only_after_opening_menu) {
+    struct client_state *old_cl=MemAlloc(sizeof(cl));
+    struct client_static old_cls=cls;
+    refExport_t old_re=re;
+    sizeBuf_t old_msg=cls.netchan.message;
+    uint8_t packet[1024],data[1024];
+    sizeBuf_t layout_packet;
+    uiFrame_t empty={0};
+    uiFrame_t frame={
+        .number=1,.flags.type=FT_POPUPMENU,
+        .size={UI_BASE_WIDTH,UI_BASE_HEIGHT/8.0f},
+        .text="first\nsecond\nthird",.value=0.0f,
+        .onclick="#uievent 38 1024",
+    };
+    char command[128];
+    T_ASSERT(old_cl!=NULL);
+    if(!old_cl)return;
+    memcpy(old_cl,&cl,sizeof(cl));
+    memset(&cl,0,sizeof(cl));
+    cls.state=ca_active;
+    cls.key_dest=key_game;
+    re.GetWindowSize=CL_TestWindowSize;
+    re.SetUIScene=CL_TestUIScene;
+    CL_CanvasWindowChanged();
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_ClearLayoutLayer(i);
+    SZ_Init(&layout_packet,packet,sizeof(packet));
+    MSG_WriteByte(&layout_packet,LAYER_CONSOLE);
+    MSG_WriteDeltaUIFrame(&layout_packet,&empty,&frame,true);
+    MSG_WriteByte(&layout_packet,0);
+    MSG_WriteLong(&layout_packet,0);
+    MSG_WriteShort(&layout_packet,0);
+    CL_ParseLayout(&layout_packet);
+    SZ_Init(&cls.netchan.message,data,sizeof(data));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN,256,40,SDL_BUTTON_LEFT,false}));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_UP,256,40,SDL_BUTTON_LEFT,false}));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_DOWN,256,240,SDL_BUTTON_LEFT,false}));
+    T_ASSERT(SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
+        MENU_MOUSE_UP,256,240,SDL_BUTTON_LEFT,false}));
+    T_EQ(MSG_ReadByte(&cls.netchan.message),clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message,command);
+    T_STREQ(command,"uievent 38 10 1");
+    T_EQ(cls.netchan.message.readcount,cls.netchan.message.cursize);
+    MemFree(cl.layout[LAYER_CONSOLE]);
+    cl=*old_cl;MemFree(old_cl);
+    cls=old_cls;re=old_re;
+    cls.netchan.message=old_msg;
+    FOR_LOOP(i,MAX_LAYOUT_LAYERS)SCR_SetLayoutLayer(i,cl.layout[i]);
+}
+
 TEST(client_input, zoom_reset_returns_to_default_after_zooming_in) {
     uint8_t data[128];
     sizeBuf_t old_msg = cls.netchan.message;

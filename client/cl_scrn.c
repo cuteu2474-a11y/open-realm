@@ -14,6 +14,9 @@ static struct {
     char text[256], command[CMDARG_LEN];
 } layout_editor;
 static uint32_t layout_edit_suppress_layer, layout_edit_suppress_frame;
+/* One modal popup chooser per persistent layout, independent of game scripts. */
+static uint32_t layout_popup_layer, layout_popup_frame;
+static int layout_popup_scroll, layout_popup_pressed=-1;
 
 bool SCR_LayoutTextInputActive(void) { return layout_editor.active; }
 
@@ -125,6 +128,7 @@ bool SCR_LayoutEditKeyEvent(int key, uint32_t mods) {
 }
 
 bool scr_initialized;
+static void SCR_LayoutDrawActivePopup(void);
 
 #define SCR_FPS_HEIGHT 8
 #define SCR_FPS_BOTTOM_MARGIN 4
@@ -1720,6 +1724,7 @@ void SCR_DrawLayout(void) {
             SCR_LayoutDrawOverlay(layout);
         }
     }
+    SCR_LayoutDrawActivePopup();
     /* Transient windows are frontmost gameplay UI. The window manager already
      * preserves server-authored z-order, but previously had no screen caller. */
     CL_WindowDraw();
@@ -1747,6 +1752,11 @@ void SCR_ClearLayoutLayer(uint32_t layer) {
     if (layer < MAX_LAYOUT_LAYERS) layout_layers[layer] = NULL;
     if (layout_editor.active && layout_editor.layer == layer) SCR_LayoutBlurEdit();
     if(layout_pointer_frame && layout_pointer_layer==layer)layout_pointer_frame=0;
+    if(layout_popup_frame && layout_popup_layer==layer){
+        layout_popup_frame=0;
+        layout_popup_pressed=-1;
+        layout_popup_scroll=0;
+    }
 }
 
 void SCR_ReleaseLayoutCameraEvents(uint32_t layer) {
@@ -1793,6 +1803,37 @@ static bool SCR_LayoutScriptEvent(uiFrame_t const *frame,int event) {
     return true;
 }
 
+/* Select a rendered LISTBOX row using the exact border, row height and scroll
+ * calculations used by SCR_LayoutDrawListBox. The UI command carries an index;
+ * the authoritative game validates it against its current contents. */
+static bool SCR_LayoutScriptListSelection(uiFrame_t const *frame,vec2_t const *point) {
+    uint32_t mask,handle;
+    uiListBox_t const *lb;
+    rect_t view;
+    int row,visible,scroll_offset,index,count=0;
+    if(!frame || frame->flags.type!=FT_LISTBOX || !frame->buffer.data ||
+       frame->buffer.size<sizeof(uiListBox_t) || !point ||
+       !SCR_LayoutScriptDescriptor(frame,&handle,&mask) || !(mask&(1u<<10)))return false;
+    lb=frame->buffer.data;
+    if(!strcmp(lb->fetchCommand,"FRAME_ROWS"))return false;
+    view=Rect_inset(SCR_LayoutRect(frame),lb->border);
+    if(!Rect_contains(&view,point) || !frame->text || !*frame->text)return true;
+    float item_height=lb->itemHeight>0.0f?lb->itemHeight:0.018f;
+    visible=SCR_LayoutListBoxVisibleRows(frame,&view);
+    row=(int)floorf((point->y-view.y)/item_height);
+    if(row<0 || row>=visible)return true;
+    for(cstring_t p=frame->text;*p;p++)if((*p!='\n' && *p!='\r') &&
+        (p==frame->text || p[-1]=='\n' || p[-1]=='\r'))count++;
+    scroll_offset=SCR_LayoutListBoxMaxScroll(frame);
+    scroll_offset=scroll_offset?
+        (int)lroundf(MIN(MAX(frame->value,0.0f),1.0f)*scroll_offset):0;
+    index=row+scroll_offset;
+    if(index>=count || index==lb->selectedIndex)return true;
+    MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+    SZ_Printf(&cls.netchan.message,"uievent %u 10 %d",handle,index);
+    return true;
+}
+
 static uiFrame_t const *SCR_LayoutFindScriptEventFrame(uint32_t layer,uint32_t number) {
     if(!number || !SCR_LayoutLayerVisible(layer))return NULL;
     SCR_Clear(layout_layers[layer]);
@@ -1801,6 +1842,128 @@ static uiFrame_t const *SCR_LayoutFindScriptEventFrame(uint32_t layer,uint32_t n
         if(frame && frame->number==number && SCR_LayoutFrameRowsVisible(frame))return frame;
     }
     return NULL;
+}
+
+static bool SCR_LayoutIsScriptPopup(uiFrame_t const *frame) {
+    uint32_t mask;
+    return frame && (frame->flags.type==FT_POPUPMENU || frame->flags.type==FT_GLUEPOPUPMENU) &&
+        frame->text && *frame->text && !(frame->flagsvalue & UIFRAME_DISABLED) &&
+        SCR_LayoutScriptDescriptor(frame,NULL,&mask) && (mask&(1u<<10));
+}
+
+static int SCR_LayoutPopupRowCount(uiFrame_t const *frame) {
+    int count=0;
+    bool in_row=false;
+    if(!frame || !frame->text)return 0;
+    for(cstring_t p=frame->text;*p;p++){
+        if(*p=='\n' || *p=='\r')in_row=false;
+        else if(!in_row){count++;in_row=true;}
+    }
+    return count;
+}
+
+static bool SCR_LayoutPopupRowText(uiFrame_t const *frame,int index,char *buf,size_t cap) {
+    cstring_t p;
+    int current=0;
+    if(!frame || !frame->text || !buf || !cap || index<0)return false;
+    p=frame->text;
+    while(*p){
+        while(*p=='\n' || *p=='\r')p++;
+        if(!*p)break;
+        cstring_t end=p;
+        while(*end && *end!='\n' && *end!='\r')end++;
+        if(current++==index){
+            size_t len=MIN((size_t)(end-p),cap-1);
+            memcpy(buf,p,len);buf[len]='\0';
+            return true;
+        }
+        p=end;
+    }
+    return false;
+}
+
+static rect_t SCR_LayoutPopupOptionsRect(uiFrame_t const *frame,int count) {
+    rect_t button=*SCR_LayoutRect(frame);
+    rect_t scene=SCR_LayoutSceneRect();
+    float row_height=MAX(button.h,0.018f);
+    float height=row_height*(float)MIN(count,8);
+    float y=button.y+button.h;
+    if(y+height>scene.y+scene.h && button.y-height>=scene.y)y=button.y-height;
+    return MAKE(rect_t,button.x,y,button.w,height);
+}
+
+static void SCR_LayoutDismissPopup(void) {
+    layout_popup_frame=0;
+    layout_popup_scroll=0;
+    layout_popup_pressed=-1;
+}
+
+static void SCR_LayoutDrawActivePopup(void) {
+    if(!layout_popup_frame)return;
+    uiFrame_t const *frame=SCR_LayoutFindScriptEventFrame(layout_popup_layer,layout_popup_frame);
+    if(!SCR_LayoutIsScriptPopup(frame)){SCR_LayoutDismissPopup();return;}
+    int count=SCR_LayoutPopupRowCount(frame);
+    rect_t menu=SCR_LayoutPopupOptionsRect(frame,count);
+    rect_t scene=SCR_LayoutSceneRect();
+    float row_height=MAX(SCR_LayoutRect(frame)->h,0.018f);
+    if(!count || menu.w<=0 || menu.h<=0)return;
+    SCR_SetLayoutRoot(&scene);
+    re.DrawImageEx(&MAKE(drawImage_t,
+        .texture=NULL,.shader=SHADER_UI,.alphamode=BLEND_MODE_BLEND,
+        .screen=menu,.uv=MAKE(rect_t,0,0,1,1),
+        .color=MAKE(color32_t,13,19,34,245)));
+    for(int visible=0;visible<MIN(count,8);visible++){
+        int index=visible+layout_popup_scroll;
+        char label[256];
+        if(!SCR_LayoutPopupRowText(frame,index,label,sizeof(label)))break;
+        rect_t row=MAKE(rect_t,menu.x,menu.y+visible*row_height,menu.w,row_height);
+        if(index==(int)frame->value)
+            re.DrawImageEx(&MAKE(drawImage_t,
+                .texture=NULL,.shader=SHADER_UI,.alphamode=BLEND_MODE_BLEND,
+                .screen=row,.uv=MAKE(rect_t,0,0,1,1),
+                .color=MAKE(color32_t,50,77,153,200)));
+        re.DrawText(&MAKE(drawText_t,
+            .font=cl.fonts[0],.text=label,.color=COLOR32_WHITE,
+            .halign=FONT_JUSTIFYLEFT,.valign=FONT_JUSTIFYMIDDLE,
+            .textWidth=row.w,.lineHeight=1.33f,.rect=row,
+            .flags=DRAW_CLIP,.clip=row));
+    }
+}
+
+static bool SCR_LayoutPopupMouseEvent(menuMouseEvent_t event,vec2_t const *point,int32_t param) {
+    if(!layout_popup_frame)return false;
+    uiFrame_t const *frame=SCR_LayoutFindScriptEventFrame(layout_popup_layer,layout_popup_frame);
+    if(!SCR_LayoutIsScriptPopup(frame)){SCR_LayoutDismissPopup();return false;}
+    int count=SCR_LayoutPopupRowCount(frame);
+    rect_t menu=SCR_LayoutPopupOptionsRect(frame,count);
+    bool inside=Rect_contains(&menu,point);
+    int visible=MIN(count,8);
+    if(event==MENU_MOUSE_SCROLL && inside){
+        int dy=MENU_MOUSE_PARAM_Y(param);
+        layout_popup_scroll=MIN(MAX(layout_popup_scroll-dy,0),MAX(count-visible,0));
+        return true;
+    }
+    if(param!=SDL_BUTTON_LEFT)return inside;
+    if(event==MENU_MOUSE_DOWN){
+        layout_popup_pressed=inside?
+            (int)floorf((point->y-menu.y)/MAX(SCR_LayoutRect(frame)->h,0.018f))+
+            layout_popup_scroll:-1;
+        if(!inside && !Rect_contains(SCR_LayoutRect(frame),point))SCR_LayoutDismissPopup();
+        return inside;
+    }
+    if(event!=MENU_MOUSE_UP || layout_popup_pressed<0)return false;
+    int index=(int)floorf((point->y-menu.y)/MAX(SCR_LayoutRect(frame)->h,0.018f))+
+        layout_popup_scroll;
+    bool matched=inside && index==layout_popup_pressed && index>=0 && index<count;
+    layout_popup_pressed=-1;
+    if(matched && index!=(int)frame->value){
+        uint32_t handle;
+        SCR_LayoutScriptDescriptor(frame,&handle,NULL);
+        MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+        SZ_Printf(&cls.netchan.message,"uievent %u 10 %d",handle,index);
+    }
+    SCR_LayoutDismissPopup();
+    return true;
 }
 
 /* Result screens outrank Quest when malformed/server-overlapping modal layers coexist. */
@@ -1829,6 +1992,7 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     int const modal_layer = SCR_LayoutModalLayer();
     /* This path handles persistent layout layers, not client-managed windows. */
     layout_current_window = false;
+    if(SCR_LayoutPopupMouseEvent(event,&point,param))return true;
     layout_hovered = NULL;
     layout_hovered_number = 0;
     FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
@@ -1954,6 +2118,21 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     }
 
     if (!matched) return false;
+    if(SCR_LayoutIsScriptPopup(hovered_frame)){
+        if(layout_popup_frame==hovered_frame->number && layout_popup_layer==layout_hovered_layer)
+            SCR_LayoutDismissPopup();
+        else {
+            layout_popup_frame=hovered_frame->number;
+            layout_popup_layer=layout_hovered_layer;
+            layout_popup_scroll=0;
+            layout_popup_pressed=-1;
+        }
+        SCR_LayoutScriptEvent(hovered_frame,4);
+        SCR_LayoutScriptEvent(hovered_frame,1);
+        return true;
+    }
+    if(hovered_frame->flags.type==FT_LISTBOX &&
+       SCR_LayoutScriptListSelection(hovered_frame,&point))return true;
     bool script_release=SCR_LayoutScriptEvent(hovered_frame,4);
     bool script_toggle=false;
     if(SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL) &&

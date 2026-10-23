@@ -276,6 +276,7 @@ struct uiFrameDef_s {
         UINAME ScrollBar;
         UINAME FetchCommand;
         frameDef_t const *EditTarget;
+        int16_t SelectedIndex; /* Runtime selection; serialized through uiListBox_t. */
     } ListBox;
     uiMapListControl_t MapListControl;
     struct {
@@ -306,6 +307,7 @@ struct uiFrameDef_s {
         UINAME MenuFrame;
         UINAME TitleFrame;
         float ButtonInset;
+        int16_t SelectedIndex; /* Runtime item selection for generic layout transport. */
     } Popup;
     struct {
         float LineHeight;

@@ -3256,6 +3256,7 @@ void ORDR_DzReset(void);
 void ORDR_DzRenderFrames(void);
 void ORDR_DzClickFrame(edict_t *ent, uint32_t handle);
 void ORDR_DzFrameEvent(edict_t *ent, uint32_t handle, int event);
+void ORDR_DzSelectFrameItem(edict_t *ent, uint32_t handle, int index);
 void ORDR_DzEditFrame(edict_t *ent, uint32_t handle, cstring_t text);
 void ORDR_DzKeyInput(edict_t *ent, int key, int down);
 void UI_LoadHud(void);

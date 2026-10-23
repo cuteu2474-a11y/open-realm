@@ -51,8 +51,10 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
    traverse an actual pointer event → authenticated `uievent` game command → JASS
    coroutine. Event 7/8 is selected from **server-owned** checkbox toggle state,
    independent of the client's requested edge. The game validates that every
-   ancestor is currently visible/enabled. Imported popup/list item selection
-   event 10 still needs proper menu item selection semantics.
+   ancestor is currently visible/enabled. `LISTBOX` and FDF-authored
+   `POPUPMENU`/`GLUEPOPUPMENU` now forward **event 10** with the selected item
+   index, validated against server-owned menu contents. Duplicate selection and
+   invalid or hidden frame input cannot fire callbacks.
 3. The generic client now forwards non-repeating physical keyboard down/up edges through
    its **opt-in** `cl_game_keycmd` (configured to `dzkey` by the Warcraft III share config).
    This reuses `clc_stringcmd` and does not change the wire schema. The game validates
@@ -74,8 +76,25 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
 5. The client editor has one active field at a time and does not yet implement
    multi-field Tab traversal, pointer caret placement or a complete IME
    composition lifecycle. Server-authored changes to a *currently edited*
-   value are not reconciled with a local in-progress edit. Event 10, scroll bar
-   controls and actual ORDR in-game testing remain pending.
+   value are not reconciled with a local in-progress edit. Scripted selection of
+   popup/list entries has headless tests, but actual ORDR FDF layering, scroll
+   bar controls and on-device interaction remain unverified.
+
+## Event 10: list and popup item selection
+
+- `FT_LISTBOX` mouse release hit-tests the same content inset, item height and
+  vertical scroll offset as the renderer. A changed selectable row emits
+  `uievent <frame-handle> 10 <row-index>`; a client cannot force arbitrary
+  JASS callbacks with a spoofed item index.
+- The WC3 FDF serializer projects `Popup.MenuFrame`'s authored `MENU` items
+  into the existing frame text wire field as separate rows. Its selected index
+  travels in the existing `value` field. The generic client offers a transient
+  selectable popup overlay; no new `uiFrame_t` field or protocol bit is used.
+- The game looks up the authored `MENU` for popup types, validates the index,
+  stores the selection, then runs JASS event 10 in the current player context.
+  Listbox selection updates the existing `uiListBox_t.selectedIndex`.
+- Retail appearance, keyboard navigation, actual imported ORDR assets and
+  iPad touch interaction still need real-device verification.
 
 ## Generic UI event input contract (current)
 
@@ -92,8 +111,8 @@ the count is from `ordr-native-audit.json`, not a claim that all implementations
   emit 5/4 only for subscribed frames; wheel motion emits 6; checkbox release
   asks the server to toggle, which reports 7 or 8 according to its state.
 - `CHECKBOX`, `GLUECHECKBOX`, `SIMPLECHECKBOX`, `POPUPMENU`,
-  `GLUEPOPUPMENU` and `LISTBOX` names can now be spawned by tag. The latter menu
-  types can be instantiated, but item **selection** and event 10 remain unproven.
+  `GLUEPOPUPMENU` and `LISTBOX` names can now be spawned by tag. Menu item
+  selection event 10 has test coverage for click → validated index → JASS.
 
 Tests were written first: frame priority order, event 9 callback and `dzkey` JASS action all
 failed on the prior implementation, then passed after changes. The generic client test
@@ -107,7 +126,7 @@ now proves both physical key edges and console-mode suppression.
 | UI lifecycle | `DzGetGameUI`, `DzCreateFrame`, `DzCreateFrameByTagName`, `DzFrameFindByName`, `DzLoadToc` | Exercise the **actual ORDR imported TOC/FDF and asset references** on a loaded map. |
 | Visual frames | `DzFrameShow`, `DzFrameSetEnable`, `DzFrameSetText`, `DzFrameGetText`, `DzFrameSetTexture`, `DzFrameSetSize`, `DzFrameSetAlpha`, `DzFrameSetPoint`, `DzFrameSetAbsolutePoint`, `DzFrameClearAllPoints`, `DzFrameSetFont`, `DzFrameSetTextAlignment`, `DzFrameSetModel` | Compare on-device text alignment, layered textures/alpha, model animation and absolute screen positions against the retail UI. |
 | Partial properties | `DzFrameSetPriority`, `DzFrameSetFocus` | Priority sets **sibling order on wire**; edit focus drives client text entry, but full focus navigation/IME parity is unverified. |
-| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Events 1–9 (including client mouse 2–6 and checkbox 7/8) have unit/command-path coverage. Item selection event 10, additional unenumerated events and actual iPad interaction remain unverified. |
+| UI events | `DzFrameSetScriptByCode`, `DzGetTriggerUIEventFrame`, `DzGetTriggerUIEventPlayer` | Events 1–10 have headless callback/input-path coverage, including item selection 10. Additional unenumerated events, retail frame behavior and actual iPad interaction remain unverified. |
 | Local single-player sync | `DzTriggerRegisterSyncData`, `DzSyncData`, `DzGetTriggerSyncData`, `DzGetTriggerSyncPlayer` | Existing local dispatch is not a multiplayer transport. Audit async event order and trigger lifecycle on real ORDR. |
 | Keyboard | `DzTriggerRegisterKeyEventByCode`, `DzGetTriggerKeyPlayer` | Physical keyboard now travels via opted-in `cl_game_keycmd`/`dzkey` to JASS; verify retail status semantics on imported ORDR. iPad touch keyboard still needs its own control path. |
 
@@ -118,6 +137,10 @@ Headless tests: `wc3_api.dz_edit_focus_and_text_input_round_trip`,
 `wc3_api.dz_click_flows_through_actual_client_command_and_respects_visibility`,
 `wc3_api.dz_script_frame_mouse_events_and_checkbox_toggle_are_authoritative`,
 `client_input.scripted_layout_reports_real_pointer_edges_and_checkbox_toggles`,
-and `client_input.scripted_editbox_text_uses_generic_event_command`.
+`client_input.scripted_editbox_text_uses_generic_event_command`,
+`client_input.scripted_listbox_selection_reports_changed_row`,
+`client_input.scripted_popup_selection_only_after_opening_menu`,
+`wc3_api.dz_listbox_selection_changes_only_for_valid_items`, and
+`wc3_api.dz_popup_selection_uses_authored_menu_items`.
 These cover parse/clone, generic wire output, a real `G_ClientCommand` click callback and
 hidden-frame rejection. **They do not establish complete iPad ORDR playability.**

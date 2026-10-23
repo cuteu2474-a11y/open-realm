@@ -3170,6 +3170,15 @@ static void CMD_UIFrameEvent(edict_t *ent,uint32_t argc,cstring_t argv[]) {
         if(argc==4)ORDR_DzEditFrame(ent,(uint32_t)handle,argv[3]);
         return;
     }
+    if(event==10){
+        char *end_index;
+        unsigned long index;
+        if(argc!=4 || !argv[3][0] || argv[3][0]=='-')return;
+        index=strtoul(argv[3],&end_index,10);
+        if(*end_index || index>INT16_MAX)return;
+        ORDR_DzSelectFrameItem(ent,(uint32_t)handle,(int)index);
+        return;
+    }
     if(argc!=3)return;
     if(event==1){ORDR_DzClickFrame(ent,(uint32_t)handle);return;}
     ORDR_DzFrameEvent(ent,(uint32_t)handle,(int)event);

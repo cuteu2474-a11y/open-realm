@@ -24,7 +24,7 @@ typedef struct {
 } ordr_anchor_t;
 typedef struct {
     ordr_anchor_t anchors[16];
-    int anchor_count, priority, text_align, focused;
+    int anchor_count, priority, text_align, focused, selected_index;
     bool checked;
     int model_type, model_flag, font_flag;
     float font_height;
@@ -447,6 +447,45 @@ void ORDR_DzFrameEvent(edict_t *ent,uint32_t handle,int event) {
     old=currentplayer;
     currentplayer=&ent->client->ps;
     ORDR_DispatchFrameEvent(level.vm,(int)handle,event);
+    currentplayer=old;
+}
+
+/* A selection event carries an actual row index, not a generic click.
+ * The game validates it against the currently authored options so clients
+ * cannot pick a nonexistent entry or dispatch from a hidden frame. */
+static int ORDR_DzListRowCount(cstring_t text) {
+    int count=0;
+    bool in_row=false;
+    if(!text)return 0;
+    for(cstring_t p=text;*p;p++) {
+        if(*p=='\n' || *p=='\r') in_row=false;
+        else if(!in_row){count++;in_row=true;}
+    }
+    return count;
+}
+
+void ORDR_DzSelectFrameItem(edict_t *ent,uint32_t handle,int index) {
+    ordr_frame_t *f=ordr_frame(handle);
+    int count=0;
+    player_t *old;
+    if(!ORDR_DzFrameInputAllowed(ent,handle) || !f->ui || index<0 || index>INT16_MAX ||
+       !ordr_frame_extra[handle].callbacks[10])return;
+    if(f->ui->Type==FT_LISTBOX)count=ORDR_DzListRowCount(f->text);
+    else if(f->ui->Type==FT_POPUPMENU || f->ui->Type==FT_GLUEPOPUPMENU){
+        frameDef_t *menu=f->ui->Popup.MenuFrame[0]
+            ? UI_FindChildFrame(f->ui,f->ui->Popup.MenuFrame):NULL;
+        if(!menu && f->ui->Popup.MenuFrame[0])
+            menu=UI_FindFrameNear(f->ui,f->ui->Popup.MenuFrame);
+        if(menu && menu->Type==FT_MENU)count=(int)menu->Menu.ItemCount;
+    } else return;
+    if(index>=count || index==ordr_frame_extra[handle].selected_index)return;
+    ordr_frame_extra[handle].selected_index=index;
+    if(f->ui->Type==FT_LISTBOX)f->ui->ListBox.SelectedIndex=(int16_t)index;
+    else f->ui->Popup.SelectedIndex=(int16_t)index;
+    ordr_frames_dirty=true;
+    old=currentplayer;
+    currentplayer=&ent->client->ps;
+    ORDR_DispatchFrameEvent(level.vm,(int)handle,10);
     currentplayer=old;
 }
 
