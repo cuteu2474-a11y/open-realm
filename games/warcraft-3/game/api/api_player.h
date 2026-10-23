@@ -714,6 +714,14 @@ uint32_t DisplayTimedTextToPlayer(jass_t *j) {
     float y = jass_checknumber(j, 3);
     float duration = jass_checknumber(j, 4);
     cstring_t message = jass_checkstring(j, 5);
+#if defined(BZ_IPAD_OFFLINE_ONLY) && BZ_IPAD_OFFLINE_ONLY
+    /* ORDR's BJJ timer guesses "online" from a resource-zero heuristic
+     * before its registered -offline chat handler runs. In the offline-only
+     * iPad build this label is misleading; correct just this exact authored
+     * notification without altering JASS resources or the DzSyncData path. */
+    if (message && !strcmp(message, "현재 온라인입니다."))
+        message = "오프라인 모드입니다.";
+#endif
     if (TutorialTextDebugEnabledPlayer()) {
         int32_t trigger_ordinal;
         cstring_t caller;

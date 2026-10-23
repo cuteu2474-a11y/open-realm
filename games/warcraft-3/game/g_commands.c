@@ -895,9 +895,10 @@ CLIENTCOMMAND(Select) {
     if (level.vm && argc >= 2 && jass_functionbyname(level.vm, "CUN")) {
         uint32_t number = 0;
         static unsigned ordr_trace_count;
-        if (ordr_trace_count < 32 && G_ParseEntityNumber(argv[1], &number)) {
+        static unsigned ordr_world_trace_count;
+        if (G_ParseEntityNumber(argv[1], &number) && number < globals.num_edicts) {
             edict_t const *candidate = &globals.edicts[number];
-            if (candidate->s.player == PLAYER_NEUTRAL_PASSIVE &&
+            if (ordr_trace_count < 32 && candidate->s.player == PLAYER_NEUTRAL_PASSIVE &&
                 ((candidate->class_id >= 0x75303030u && candidate->class_id <= 0x75303039u) ||
                  (candidate->class_id >= 0x75303041u && candidate->class_id <= 0x75303043u))) {
                 char detail[260];
@@ -912,6 +913,18 @@ CLIENTCOMMAND(Select) {
                          (unsigned)client->ps.client_ui_state);
                 jass_ordr_log_event(level.vm, "CHOICE_SELECT_COMMAND", detail);
                 ordr_trace_count++;
+            } else if (ordr_world_trace_count < 20 && level.started &&
+                       candidate->s.player == client->ps.number) {
+                char detail[200];
+                snprintf(detail, sizeof(detail),
+                         "unit=%u owner=%u raw=0x%08x model=%u can_select=%u can_control=%u ui=%u",
+                         (unsigned)number, (unsigned)candidate->s.player,
+                         (unsigned)candidate->class_id, (unsigned)candidate->s.model,
+                         (unsigned)G_UnitCanBeSelected(client, candidate),
+                         (unsigned)G_UnitCanControl(client, candidate),
+                         (unsigned)client->ps.client_ui_state);
+                jass_ordr_log_event(level.vm, "ORDR_WORLD_SELECT_COMMAND", detail);
+                ordr_world_trace_count++;
             }
         }
     }

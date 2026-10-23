@@ -215,3 +215,30 @@ Additional focused tests: `wc3_api.dz_font_updates_fdf_and_serialized_glyph_face
 
 The desktop test suite and `BZ_IPAD_OFFLINE_ONLY` syntax checks do **not**
 prove iOS rendering or that gameplay after difficulty selection is stable.
+
+## Follow-up from the 2026-10-23 post-start iPad test
+
+- The new JASS log continues beyond the previous crash (to roughly 51 s) and
+  shows `ORDR_OFFLINE_STARTUP ... command=-offline` at 12.1 s. The visible
+  "현재 온라인입니다." text is emitted **earlier by ORDR's own `BJJ` JASS
+  function**, which guesses network mode from whether initial gold/lumber is
+  zero. The iPad offline-only build now substitutes "오프라인 모드입니다." for
+  that exact notification, without manipulating economic resources or
+  removing the later map-native `-offline` and local `DzSyncData` event.
+- iOS native `SDL_FINGER*` events previously recognized **two** fingers as a
+  camera pan, but delivered a **one**-finger contact only as a release-time
+  click. One-finger swipes within the real gameplay viewport now pan after
+  12 px of movement, canceling pending clicks. Stationary taps still select.
+  The existing precise entity ray trace now has a constrained, nearest-player-
+  unit screen-space fallback for small MDX meshes; decorative no-op layouts
+  may no longer swallow a world-unit tap. Real windows and UI commands retain
+  priority; two-finger panning is preserved.
+- The original `Background.mdx` and `Background.tga` have now rendered together
+  in the desktop MDX preview renderer, proving the *asset/texture decoder*
+  path. This is **not** proof of in-map placement or visibility. A targeted
+  `ORDR_BACKDROP_SPAWN` JASS log records the actual B100 model, flags, ground
+  height, and authored model path; `ORDR_WORLD_SELECT_COMMAND` distinguishes
+  server-accepted taps from client-side touch dispatch failures. Request an
+  iPad screenshot to pin down the unrelated UI layout offset. Do not claim
+  the invisible background or layout has been fixed until a device screenshot
+  and the new trace confirm them.

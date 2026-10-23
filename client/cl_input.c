@@ -159,7 +159,74 @@ static bool CL_TraceSelectionEntity(float x, float y, uint32_t *number) {
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     if (CL_TraceORDRChoiceCard(x, y, number)) return true;
 #endif
-    return re.TraceEntity(&cl.viewDef, x, y, number);
+    return re.TraceEntity && re.TraceEntity(&cl.viewDef, x, y, number);
+}
+
+/* Touchscreens need a finger-sized target, especially for small imported MDX
+ * units whose triangle mesh does not overlap the visible portrait. This is a
+ * last resort after the accurate model ray test. It never selects scenery,
+ * hidden units, or something outside the real world viewport; the game still
+ * validates ownership and selection through its ordinary select command. */
+static bool CL_TraceFingerUnit(float x, float y, uint32_t *number) {
+    viewDef_t const *view = &cl.viewDef;
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    rect_t viewport = view->viewport;
+    float best = FLT_MAX;
+    uint32_t selected = 0;
+    if (!number || !view->entities || !win.width || !win.height ||
+        viewport.w <= 0 || viewport.h <= 0) return false;
+    float const left = viewport.x * win.width;
+    float const top = (1.0f - viewport.y - viewport.h) * win.height;
+    float const width = viewport.w * win.width;
+    float const height = viewport.h * win.height;
+    if (x < left || x >= left + width || y < top || y >= top + height) return false;
+    float const radius = MAX(24.0f, MIN(58.0f, win.height * 0.06f));
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+            !ent->model || !(ent->flags & RF_UNIT) ||
+            ent->owner != view->player ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE))) continue;
+        vec3_t const projected = Matrix4_multiply_vector3(&view->viewProjectionMatrix, &ent->origin);
+        if (!isfinite(projected.x) || !isfinite(projected.y) ||
+            projected.x < -1.0f || projected.x > 1.0f ||
+            projected.y < -1.0f || projected.y > 1.0f) continue;
+        float const px = left + (projected.x + 1.0f) * width * 0.5f;
+        float const py = top + (1.0f - projected.y) * height * 0.5f;
+        float const dx = x - px, dy = y - py;
+        float const distance2 = dx * dx + dy * dy;
+        if (distance2 <= radius * radius && distance2 < best) {
+            best = distance2;
+            selected = ent->number;
+        }
+    }
+    if (!selected) return false;
+    *number = selected;
+    return true;
+}
+
+static bool CL_TraceFingerSelectionEntity(float x, float y, uint32_t *number) {
+    uint32_t accurate = 0, friendly = 0;
+    if (CL_TraceORDRChoiceCard(x, y, number)) return true;
+    bool const have_accurate = CL_TraceSelectionEntity(x, y, &accurate);
+    bool const have_friendly = CL_TraceFingerUnit(x, y, &friendly);
+    /* Large imported props can overlap a friendly unit's tiny triangle mesh.
+     * Only override the ray when it hits something other than an owned unit. */
+    if (have_accurate) {
+        bool owned_unit = false;
+        FOR_LOOP(i, cl.viewDef.entities ? cl.viewDef.num_entities : 0u) {
+            renderEntity_t const *ent = &cl.viewDef.entities[i];
+            if (ent->number == accurate) {
+                owned_unit = ent->owner == cl.viewDef.player && (ent->flags & RF_UNIT);
+                break;
+            }
+        }
+        *number = !owned_unit && have_friendly ? friendly : accurate;
+        return true;
+    }
+    if (!have_friendly) return false;
+    *number = friendly;
+    return true;
 }
 
 static void IN_LookDown(void) {
@@ -264,8 +331,12 @@ static void CL_SendOrderQueueReleaseOnShiftUp(int sym, SDL_Keymod mods) {
 }
 
 static bool CL_TracePan(float x, float y, vec3_t *point) {
-    return Cvar_Integer("cl_camera_pan_plane", 0)
-        ? re.TraceCameraPlane(&cl.viewDef, x, y, point) : re.TraceLocation(&cl.viewDef, x, y, point);
+    if (Cvar_Integer("cl_camera_pan_plane", 0))
+        return re.TraceCameraPlane(&cl.viewDef, x, y, point);
+    /* Imported maps sometimes have no pickable ground under decorative MDX
+     * artwork; use the camera plane instead of making pan silently inert. */
+    return (re.TraceLocation && re.TraceLocation(&cl.viewDef, x, y, point)) ||
+        (re.TraceCameraPlane && re.TraceCameraPlane(&cl.viewDef, x, y, point));
 }
 
 
@@ -334,8 +405,11 @@ static void CL_FlushPan(void) {
 static struct {
     SDL_FingerID id[2];
     vec2_t pos[2];
+    vec2_t start;
     uint32_t count;
     bool gesture;
+    bool single_can_pan;
+    bool single_panning;
     bool synthetic_down_seen;
     bool synthetic_up_seen;
     bool fallback_sent;
@@ -366,14 +440,17 @@ static vec2_t CL_TouchPanCenter(void) {
  * mouse button pipeline. */
 static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
     int const x = (int)pos.x, y = (int)pos.y;
-    uint32_t world_choice = 0;
+    uint32_t world_choice = 0, world_unit = 0;
     /* ORDR's difficulty cards are selectable world units beneath authored
      * hint/tooltip layouts. A layout hit alone is not permission to swallow
      * the finger release; let the normal select binding target that unit. */
     if (cls.state == ca_active && CL_GameplayInputReady() &&
         CL_TraceORDRChoiceCard(pos.x, pos.y, &world_choice))
         return false;
-    bool const ui = CL_WindowMouseOver(x, y) || SCR_LayoutHitTest(x, y);
+    bool const window = CL_WindowMouseOver(x, y);
+    bool const ui = window || SCR_LayoutHitTest(x, y);
+    bool const world_hit = !window && CL_GameplayInputReady() &&
+        CL_TraceFingerSelectionEntity(pos.x, pos.y, &world_unit);
     bool const shift = (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
     mouse.origin = pos;
     input.touch_pointer = true;
@@ -403,7 +480,12 @@ static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
     if (!released)
         released = SCR_LayoutMouseEvent(&(layoutMouseEvent_t){
             MENU_MOUSE_UP, x, y, SDL_BUTTON_LEFT, shift });
-    return consumed || released || cls.netchan.message.cursize > message_before;
+    /* A decorative texture/hint may report "handled" over the map without
+     * issuing a command. A finger clearly over a selectable friendly model
+     * must then still be delivered to gameplay. An authored command wins. */
+    bool const sent_command = cls.netchan.message.cursize > message_before;
+    if (world_hit && !sent_command) return false;
+    return consumed || released || sent_command;
 }
 /* Complete a physical finger tap on the same binding used by mouse input.
  * The UI receives its own down/up in CL_TouchFallbackUI before this call.
@@ -449,6 +531,16 @@ static bool CL_ORDRFinishChoiceTouch(SDL_TouchFingerEvent const *finger, vec2_t 
     return true;
 }
 
+/* A finger tap must not depend on SDL manufacturing MOUSEBUTTONUP or on a
+ * decorative full-screen frame allowing +select to run. */
+static bool CL_FinishWorldUnitTouch(vec2_t pos) {
+    uint32_t unit;
+    if (!CL_GameplayInputReady() ||
+        !CL_TraceFingerSelectionEntity(pos.x, pos.y, &unit)) return false;
+    CL_ApplySelection(&unit, 1);
+    return true;
+}
+
 static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
     size2_t win = re.GetWindowSize();
     vec2_t pos = { finger->x * win.width, finger->y * win.height };
@@ -464,6 +556,18 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 touch_pan.synthetic_down_seen = false;
                 touch_pan.synthetic_up_seen = false;
                 touch_pan.fallback_sent = false;
+                touch_pan.single_panning = false;
+                touch_pan.start = pos;
+                touch_pan.single_can_pan = CL_GameplayInputReady() &&
+                    !CL_WindowMouseOver((int)pos.x, (int)pos.y) &&
+                    !CL_TraceORDRChoiceCard(pos.x, pos.y, &(uint32_t){0});
+                if (touch_pan.single_can_pan) {
+                    rect_t const viewport = cl.viewDef.viewport;
+                    float const top = (1.0f - viewport.y - viewport.h) * win.height;
+                    touch_pan.single_can_pan = pos.x >= viewport.x * win.width &&
+                        pos.x < (viewport.x + viewport.w) * win.width &&
+                        pos.y >= top && pos.y < top + viewport.h * win.height;
+                }
                 if (cls.state == ca_active && CL_GameplayInputReady() &&
                     CL_iPadChatHit((int)pos.x, (int)pos.y)) {
                     ipad_chat_touch_down = true;
@@ -474,6 +578,8 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             touch_pan.pos[touch_pan.count++] = pos;
             if (touch_pan.count == 2 && CL_GameplayInputReady()) {
                 touch_pan.gesture = true;
+                touch_pan.single_panning = false;
+                pan_motion.pending = false;
                 input.select = false;
                 cl.selection.in_progress = false;
                 /* The first finger may have produced a synthetic mouse-down
@@ -496,14 +602,31 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             if (touch_pan.gesture && touch_pan.count == 2) {
                 vec2_t center = CL_TouchPanCenter();
                 CL_QueuePan(center.x, center.y);
+            } else if (touch_pan.count == 1 && touch_pan.single_can_pan) {
+                float const dx = pos.x - touch_pan.start.x;
+                float const dy = pos.y - touch_pan.start.y;
+                if (!touch_pan.single_panning && dx * dx + dy * dy > 144.0f) {
+                    /* On iPad, a single-finger swipe moves the map; a short
+                     * stationary touch continues to select a unit. */
+                    touch_pan.single_panning = true;
+                    CL_BeginPan(touch_pan.start.x, touch_pan.start.y);
+                }
+                if (touch_pan.single_panning) CL_QueuePan(pos.x, pos.y);
             }
             break;
         case SDL_FINGERUP:
             if (slot < 0) return;
+            if (touch_pan.single_panning) {
+                /* Finger-up can share the SDL poll batch with the last motion;
+                 * apply that motion before ending the drag. */
+                CL_FlushPan();
+                CL_EndPan();
+                touch_pan.fallback_sent = true;
+            }
             /* Do not gate this on CL_GameplayInputReady: the player may be
              * tapping the F10 pause menu, a modal, or the out-of-game menu.
              * If SDL sent a down but omitted its up, synthesize only up. */
-            if (touch_pan.count == 1 && !touch_pan.gesture) {
+            if (touch_pan.count == 1 && !touch_pan.gesture && !touch_pan.single_panning) {
                 if (ipad_chat_touch_down) {
                     ipad_chat_touch_down = false;
                     touch_pan.fallback_sent = true;
@@ -511,16 +634,20 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                     touch_pan.fallback_sent = true;
                 } else {
                     bool const ui_handled = CL_TouchFallbackUI(pos, touch_pan.synthetic_down_seen);
+                    bool const unit_handled = !ui_handled && CL_FinishWorldUnitTouch(pos);
                     /* Release held selection if iOS omitted the synthetic up. */
-                    bool const key_handled = (touch_pan.synthetic_down_seen || !ui_handled) &&
+                    bool const key_handled = !unit_handled && (touch_pan.synthetic_down_seen || !ui_handled) &&
                         CL_CompleteFingerMouseButton(finger, pos, touch_pan.synthetic_down_seen);
-                    touch_pan.fallback_sent = ui_handled || key_handled;
+                    touch_pan.fallback_sent = ui_handled || unit_handled || key_handled;
                 }
             }
             touch_pan.id[slot] = touch_pan.id[touch_pan.count - 1];
             touch_pan.pos[slot] = touch_pan.pos[touch_pan.count - 1];
             if (--touch_pan.count < 2 && touch_pan.gesture) CL_EndPan();
-            if (!touch_pan.count) touch_pan.gesture = false;
+            if (!touch_pan.count) {
+                touch_pan.gesture = false;
+                touch_pan.single_panning = touch_pan.single_can_pan = false;
+            }
             break;
     }
 }
@@ -2637,6 +2764,7 @@ TEST(client_input, two_finger_touch_pans_camera) {
     memset(&cl, 0, sizeof(cl)); input = (__typeof__(input)){ .focus = true };
     memset(&touch_pan, 0, sizeof(touch_pan)); touch_is_direct = CL_TestTouchDirect;
     cls.state = ca_active; cls.key_dest = key_game; cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    cl.viewDef.viewport = (rect_t){ 0, 0, 1, 1 };
     re.TraceMinimap = CL_TestNoMinimap; re.GetWindowSize = CL_TestWindowSize;
     re.CameraUsesTerrainHeight = CL_TestCameraUsesTerrainHeight;
     re.TraceLocation = CL_TestScreenGround; re.TraceEntity = CL_TestSelectEntity;
@@ -2704,6 +2832,21 @@ TEST(client_input, two_finger_touch_pans_camera) {
     MSG_ReadString(&cls.netchan.message, next_tap);
     T_STREQ(next_tap, "select 7");
 
+    /* A single finger moves the map after a small travel threshold, while
+     * never producing the select command reserved for a stationary tap. */
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    event = (SDL_Event){ .tfinger = { .type = SDL_FINGERDOWN, .touchId = 1,
+        .fingerId = 4, .x = 0.4f, .y = 0.5f } };
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERMOTION;
+    event.tfinger.x = 0.5f;
+    T_EQ(SDL_PushEvent(&event), 1);
+    event.type = SDL_FINGERUP;
+    T_EQ(SDL_PushEvent(&event), 1);
+    CL_Input(); Cbuf_Execute();
+    T_EQ(CL_TestCountFocus(&cls.netchan.message, &focus), 1);
+    T_ASSERT(!camera_drag.active && !touch_pan.single_panning && !touch_pan.count);
+
     /* Edge scroll: a touch cursor parked on the edge stays put, a mouse scrolls. */
     Cvar_Set("cl_camera_edge_scroll", "1"); Cvar_Set("cl_camera_scroll_speed", "1000");
     FOR_LOOP(i, 2) {
@@ -2727,6 +2870,39 @@ TEST(client_input, two_finger_touch_pans_camera) {
 
 /* Projected ORDR buttons are selectable even if an imported MDX uses an
  * unpickable billboard mesh; ordinary units never enter this fallback. */
+TEST(client_input, projected_finger_target_only_picks_visible_friendly_world_units) {
+    viewDef_t old_view = cl.viewDef;
+    refExport_t old_re = re;
+    renderEntity_t units[3] = { 0 };
+    uint32_t hit = 0;
+    re.GetWindowSize = CL_TestWindowSize;
+    memset(&cl.viewDef, 0, sizeof(cl.viewDef));
+    Matrix4_identity(&cl.viewDef.viewProjectionMatrix);
+    cl.viewDef.viewport = (rect_t){ 0, 0.22f, 1, 0.76f };
+    cl.viewDef.player = 0;
+    cl.viewDef.entities = units;
+    cl.viewDef.num_entities = 3;
+    units[0] = (renderEntity_t){ .number = 200, .owner = 0,
+        .model = (model_t const *)(void *)&units[0],
+        .flags = RF_UNIT, .origin = { 0, 0, 0 } };
+    units[1] = (renderEntity_t){ .number = 201, .owner = 7,
+        .model = (model_t const *)(void *)&units[0],
+        .flags = RF_UNIT, .origin = { 0, 0, 0 } };
+    units[2] = (renderEntity_t){ .number = 202, .owner = 0,
+        .model = (model_t const *)(void *)&units[0],
+        .flags = RF_UNIT | RF_HIDDEN, .origin = { 0, 0, 0 } };
+    float const top = (1.0f - 0.22f - 0.76f) * 768.0f;
+    float const center_y = top + 0.76f * 768.0f * 0.5f;
+    T_ASSERT(CL_TraceFingerUnit(512, center_y, &hit));
+    T_EQ(hit, 200);
+    units[0].flags |= RF_NOT_SELECTABLE;
+    T_ASSERT(!CL_TraceFingerUnit(512, center_y, &hit));
+    units[0].flags = RF_UNIT;
+    T_ASSERT(!CL_TraceFingerUnit(512, 760, &hit));
+    cl.viewDef = old_view;
+    re = old_re;
+}
+
 TEST(client_input, ordr_choice_touch_hit_uses_projected_card) {
     viewDef_t old_view = cl.viewDef;
     entityState_t old_states[6];
