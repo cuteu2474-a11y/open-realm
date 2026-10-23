@@ -876,6 +876,20 @@ void S_PlaySoundPacket(cstring_t path, vec3_t const *origin, bool positioned, in
                  channel, attenuation, timeofs, NULL);
 }
 
+/* Called by the client network parser on the main thread; synchronize with
+ * the audio callback and preserve notifications for interrupted sounds. */
+void S_StopSoundPacket(cstring_t path) {
+    if (!s.initialized || !path || !*path) return;
+    sfx_t *sfx = S_FindSfx(path, false);
+    if (!sfx || !sfx->cache) return;
+    S_ReserveSoundEvents();
+    S_Lock();
+    FOR_LOOP(ch, S_MAX_CHANNELS)
+        if (s.channels[ch].active && s.channels[ch].sc == sfx->cache)
+            S_EndChannel(ch);
+    S_Unlock();
+}
+
 void S_BeginLoopingSounds(void) {
     if (!s.initialized) return;
     if (++s.loop_generation == 0) ++s.loop_generation;

@@ -71,10 +71,20 @@ uint32_t CreateSoundFromLabel(jass_t *j) {
     return 1;
 }
 uint32_t CreateMIDISound(jass_t *j) {
-    //cstring_t soundLabel = jass_checkstring(j, 1);
-    //int32_t fadeInRate = jass_checkinteger(j, 2);
-    //int32_t fadeOutRate = jass_checkinteger(j, 3);
-    return jass_pushnullhandle(j, "sound");
+    cstring_t label = jass_checkstring(j, 1);
+    int fadein = jass_checkinteger(j, 2), fadeout = jass_checkinteger(j, 3);
+    char path[sizeof(((gsound_t *)0)->fileName)] = {0};
+    int sound_index = 0;
+    float volume = 1.0f;
+    API_ALLOC(gsound_t, sound);
+    G_JassSoundRuntimeInit(sound);
+    if (G_SoundLabelDescriptor(label, path, sizeof(path), &sound_index, &volume)) {
+        strlcpy(sound->fileName, path, sizeof(sound->fileName));
+        sound->soundIndex = sound_index;
+        G_JassSoundSetVolume(sound, volume);
+    }
+    sound->fadeInRate = fadein; sound->fadeOutRate = fadeout;
+    return 1;
 }
 uint32_t SetSoundParamsFromLabel(jass_t *j) {
     gsound_t *sound = jass_checkhandle(j, 1, "sound");
@@ -89,13 +99,15 @@ uint32_t SetSoundParamsFromLabel(jass_t *j) {
     return 0;
 }
 uint32_t SetSoundDistanceCutoff(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //float cutoff = jass_checknumber(j, 2);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    float cutoff = jass_checknumber(j, 2);
+    if (sound && isfinite(cutoff) && cutoff >= 0.0f) sound->distance_cutoff = cutoff;
     return 0;
 }
 uint32_t SetSoundChannel(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //int32_t channel = jass_checkinteger(j, 2);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    int channel = jass_checkinteger(j, 2);
+    if (sound && channel >= 0 && channel <= 7) sound->channel = channel;
     return 0;
 }
 uint32_t SetSoundVolume(jass_t *j) {
@@ -105,28 +117,36 @@ uint32_t SetSoundVolume(jass_t *j) {
     return 0;
 }
 uint32_t SetSoundPitch(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //float pitch = jass_checknumber(j, 2);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    float pitch = jass_checknumber(j, 2);
+    if (sound && isfinite(pitch) && pitch > 0.0f) sound->pitch = pitch;
     return 0;
 }
 uint32_t SetSoundDistances(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //float minDist = jass_checknumber(j, 2);
-    //float maxDist = jass_checknumber(j, 3);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    float minv = jass_checknumber(j, 2), maxv = jass_checknumber(j, 3);
+    if (sound && isfinite(minv) && isfinite(maxv) && minv >= 0.0f && maxv >= minv) {
+        sound->min_distance = minv; sound->max_distance = maxv;
+    }
     return 0;
 }
 uint32_t SetSoundConeAngles(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //float inside = jass_checknumber(j, 2);
-    //float outside = jass_checknumber(j, 3);
-    //int32_t outsideVolume = jass_checkinteger(j, 4);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    float inner = jass_checknumber(j, 2), outer = jass_checknumber(j, 3);
+    int vol = jass_checkinteger(j, 4);
+    if (sound && isfinite(inner) && isfinite(outer) &&
+        inner >= 0.0f && outer >= inner && outer <= 360.0f) {
+        sound->cone_inner = inner;
+        sound->cone_outer = outer;
+        sound->cone_outside_volume = MAX(0, MIN(127, vol));
+    }
     return 0;
 }
 uint32_t SetSoundConeOrientation(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //float x = jass_checknumber(j, 2);
-    //float y = jass_checknumber(j, 3);
-    //float z = jass_checknumber(j, 4);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    float x = jass_checknumber(j, 2), y = jass_checknumber(j, 3), z = jass_checknumber(j, 4);
+    if (sound && isfinite(x) && isfinite(y) && isfinite(z))
+        sound->cone_orientation = MAKE(vec3_t, x, y, z);
     return 0;
 }
 uint32_t SetSoundPosition(jass_t *j) {
@@ -166,31 +186,49 @@ uint32_t StartSound(jass_t *j) {
         edict_t *recipient = PLAYER_ENT(currentplayer);
         if (!recipient || !recipient->client || !recipient->client->connected) return 0;
         if (playback.positioned)
-            G_PlaySound(&playback.origin, recipient, CHAN_OWNER | CHAN_RELIABLE, sound->soundIndex,
+            G_PlaySound(&playback.origin, recipient, CHAN_OWNER | CHAN_RELIABLE | (sound->channel & 7), sound->soundIndex,
                                playback.volume, attenuation, 0.0f);
         else
-            G_PlaySound(NULL, recipient, CHAN_OWNER | CHAN_RELIABLE, sound->soundIndex,
+            G_PlaySound(NULL, recipient, CHAN_OWNER | CHAN_RELIABLE | (sound->channel & 7), sound->soundIndex,
                      playback.volume, attenuation, 0.0f);
         G_JassSoundMarkStarted(sound);
         return 0;
     }
 
     if (playback.positioned)
-        G_PlaySound(&playback.origin, playback.emitter, CHAN_RELIABLE, sound->soundIndex,
+        G_PlaySound(&playback.origin, playback.emitter, CHAN_RELIABLE | (sound->channel & 7), sound->soundIndex,
                            playback.volume, attenuation, 0.0f);
     else
-        G_PlaySound(NULL, NULL, CHAN_RELIABLE, sound->soundIndex, playback.volume, attenuation, 0.0f);
+        G_PlaySound(NULL, NULL, CHAN_RELIABLE | (sound->channel & 7), sound->soundIndex, playback.volume, attenuation, 0.0f);
     G_JassSoundMarkStarted(sound);
     return 0;
 }
+/* StopSound sends an explicit command to the iPad mixer; clearing a JASS
+ * boolean is insufficient because sound playback is client-owned. */
 uint32_t StopSound(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    //bool killWhenDone = jass_checkboolean(j, 2);
-    //bool fadeOut = jass_checkboolean(j, 3);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    bool kill = jass_checkboolean(j, 2), fade = jass_checkboolean(j, 3);
+    (void)fade; /* Mixer ramp remains separate work. */
+    if (!sound) return 0;
+    sound->kill_when_done = kill;
+    sound->started = false;
+    if (sound->soundIndex <= 0) return 0;
+    FOR_LOOP(i, game.max_clients) {
+        gameClient_t *client = &game.clients[i];
+        if (!client->connected) continue;
+        if (currentplayer && client->ps.number != PLAYER_NUM(currentplayer)) continue;
+        edict_t *ent = G_GetPlayerEntityByNumber(client->ps.number);
+        if (!ent || !ent->client) continue;
+        gi.Write(PF_BYTE, &(int32_t){svc_sound});
+        gi.Write(PF_BYTE, &(int32_t){SND_STOP});
+        gi.Write(PF_SHORT, &(int32_t){sound->soundIndex});
+        gi.unicast(ent);
+    }
     return 0;
 }
 uint32_t KillSoundWhenDone(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    if (sound) sound->kill_when_done = true;
     return 0;
 }
 uint32_t SetMusicVolume(jass_t *j) {
@@ -274,8 +312,9 @@ uint32_t VolumeGroupReset(jass_t *j) {
     return 0;
 }
 uint32_t GetSoundIsPlaying(jass_t *j) {
-    //handle_t soundHandle = jass_checkhandle(j, 1, "sound");
-    return jass_pushboolean(j, 0);
+    gsound_t *sound = jass_checkhandle(j, 1, "sound");
+    return jass_pushboolean(j, sound && sound->started &&
+        (sound->looping || !sound->duration || G_JassSoundRemainingDuration(sound) > 0));
 }
 uint32_t GetSoundIsLoading(jass_t *j) {
     //handle_t soundHandle = jass_checkhandle(j, 1, "sound");

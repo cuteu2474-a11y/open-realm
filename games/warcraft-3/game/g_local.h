@@ -2389,6 +2389,10 @@ struct level_locals {
      * Team Resources) G_UpdateMultiboards rewrites this frame. */
     uint32_t multiboard_dirty_clients;
     uint32_t multiboard_suppressed_clients; /* serialized local display suppression */
+    /* The map's JASS controls whether local world selection is enabled. */
+    uint8_t selection_disabled[MAX_PLAYERS];
+    uint8_t drag_selection_disabled[MAX_PLAYERS];
+    uint8_t preselection_disabled[MAX_PLAYERS];
     uint32_t team_resources_collapsed_clients; /* serialized local Team Resources panel state */
     uint32_t timer_dialog_dirty_clients; /* transient: clients whose timer layer must be resent */
     int32_t timer_dialog_last_index[MAX_CLIENTS]; /* transient player-number cache */

@@ -161,4 +161,25 @@ TEST(wc3_native_completion, neutral_selection_routes_by_event_id) {
     if (jass_rterror_pending(level.vm)) fprintf(stderr, "%s\n", jass_rterror_message(level.vm));
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
+TEST(wc3_native_completion, selection_natives_change_authoritative_flags) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " call EnableSelect(false, true)\n"
+        " call EnableDragSelect(false, true)\n"
+        " call EnablePreSelect(false, true)\n"
+        "endfunction\n"
+        "function restore takes nothing returns nothing\n"
+        " call EnableSelect(true, true)\n"
+        " call EnableDragSelect(true, true)\n"
+        " call EnablePreSelect(true, true)\n"
+        "endfunction\n"));
+    T_ASSERT(level.selection_disabled[0]);
+    T_ASSERT(level.drag_selection_disabled[0]);
+    T_ASSERT(level.preselection_disabled[0]);
+    jass_callbyname(level.vm, "restore", false);
+    T_ASSERT(!level.selection_disabled[0]);
+    T_ASSERT(!level.drag_selection_disabled[0]);
+    T_ASSERT(!level.preselection_disabled[0]);
+}
 #endif

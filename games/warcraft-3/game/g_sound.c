@@ -56,6 +56,15 @@ void G_JassSoundRuntimeInit(handle_t handle) {
     state->attached_entity = -1;
     state->attached_spawn_time = 0;
     state->has_position = false;
+    state->channel = CHAN_AUTO;
+    state->pitch = 1.0f;
+    state->min_distance = 400.0f;
+    state->max_distance = 3000.0f;
+    state->distance_cutoff = 3000.0f;
+    state->cone_inner = state->cone_outer = 360.0f;
+    state->cone_outside_volume = 127;
+    state->cone_orientation = (vec3_t){0, 0, 1};
+    state->kill_when_done = false;
 }
 
 void G_JassSoundMarkStarted(handle_t handle) {

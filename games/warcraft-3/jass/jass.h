@@ -63,6 +63,12 @@ typedef struct {
     int32_t attached_entity;
     uint32_t attached_spawn_time;
     bool has_position;
+    int32_t channel;
+    float pitch, min_distance, max_distance, distance_cutoff;
+    vec3_t cone_orientation;
+    float cone_inner, cone_outer;
+    int32_t cone_outside_volume;
+    bool kill_when_done;
 } gsound_t;
 
 struct vm_program {

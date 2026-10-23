@@ -369,6 +369,7 @@ typedef enum {
 #define SND_OFFSET      0x10 // byte; start delay in milliseconds; used by svc_sound
 #define SND_PRIORITY    0x20 // ushort; playback importance, higher values win
 #define SND_POLICY      0x40 // explicit admission policy, independent of spatial source
+#define SND_STOP        0x80 // sound index identifies an active playback to stop
 
 /* Reliable client music-control commands carried by svc_music.  The payload is
  * presentation-only state; game modules choose the command and the client owns

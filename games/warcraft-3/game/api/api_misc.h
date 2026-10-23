@@ -797,7 +797,10 @@ uint32_t StringCase(jass_t *j) {
     return jass_pushstring(j, buf);
 }
 uint32_t GetEventDetectingPlayer(jass_t *j) {
-    return jass_pushnullhandle(j, "player");
+    jassContext_t const *context = jass_getcontext(j);
+    return context && context->playerState ?
+        jass_pushlighthandle(j, context->playerState, "player") :
+        jass_pushnullhandle(j, "player");
 }
 uint32_t GetEventTargetUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
@@ -904,9 +907,31 @@ uint32_t SetAllyColorFilterState(jass_t *j) {
 uint32_t GetCreepCampFilterState(jass_t *j) { (void)j; return jass_pushboolean(j, creep_camp_filter_state); }
 uint32_t SetCreepCampFilterState(jass_t *j) { creep_camp_filter_state = jass_checkboolean(j, 1); return 0; }
 uint32_t EnableMinimapFilterButtons(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnableDragSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnablePreSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnableSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
+/* WC3 selection natives control real input policy, not just a visual hint.
+ * The second UI-feedback parameter is not a substitute for input gating. */
+static void WC3_SetSelectionGate(uint8_t gates[MAX_PLAYERS], bool enable) {
+    if (currentplayer && PLAYER_NUM(currentplayer) < MAX_PLAYERS)
+        gates[PLAYER_NUM(currentplayer)] = !enable;
+    else FOR_LOOP(i, MAX_PLAYERS) gates[i] = !enable;
+}
+uint32_t EnableDragSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.drag_selection_disabled, enable);
+    return 0;
+}
+uint32_t EnablePreSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.preselection_disabled, enable);
+    return 0;
+}
+uint32_t EnableSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.selection_disabled, enable);
+    return 0;
+}
 uint32_t SetReservedLocalHeroButtons(jass_t *j) { (void)jass_checkinteger(j, 1); return 0; }
 uint32_t CopySaveGame(jass_t *j) {
     cstring_t source = jass_checkstring(j, 1);

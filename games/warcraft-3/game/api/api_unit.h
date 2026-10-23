@@ -742,22 +742,35 @@ uint32_t UnitRemoveType(jass_t *j) {
     whichUnit->script_unit_types &= ~(1u << *whichUnitType);
     return jass_pushboolean(j, 1);
 }
+/* Keep removal and count queries consistent with the existing status model.
+ * Unknown polarity is matched only by an explicit broad (+/-) request. */
+static bool WC3_BuffMatchesFilter(heroabilitystatus_t const *status,
+    bool positive, bool negative, bool magic, bool physical,
+    bool timed_life, bool aura, bool auto_dispel) {
+    uint32_t polarity, school;
+    if (!status || !status->level) return false;
+    if (status->code == MAKEFOURCC('B','T','L','F')) return timed_life;
+    polarity = status->buff_flags & (WC3_STATUS_BUFF_POSITIVE | WC3_STATUS_BUFF_NEGATIVE);
+    school = status->buff_flags & (WC3_STATUS_BUFF_MAGICAL | WC3_STATUS_BUFF_PHYSICAL);
+    if (!positive && !negative) return false;
+    if (polarity == WC3_STATUS_BUFF_POSITIVE && !positive) return false;
+    if (polarity == WC3_STATUS_BUFF_NEGATIVE && !negative) return false;
+    if (!polarity && !(positive && negative)) return false;
+    if (school == WC3_STATUS_BUFF_MAGICAL && !magic) return false;
+    if (school == WC3_STATUS_BUFF_PHYSICAL && !physical) return false;
+    if (!magic && !physical && !aura && !auto_dispel) return false;
+    return true;
+}
 uint32_t UnitCountBuffsEx(jass_t *j) {
-    edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    bool timedLife;
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    bool const positive = jass_checkboolean(j, 2), negative = jass_checkboolean(j, 3);
+    bool const magic = jass_checkboolean(j, 4), physical = jass_checkboolean(j, 5);
+    bool const timed_life = jass_checkboolean(j, 6), aura = jass_checkboolean(j, 7);
+    bool const auto_dispel = jass_checkboolean(j, 8);
     int32_t count = 0;
-    /* TODO: positive/negative/magic/physical/aura/autoDispel filters need buff-type metadata. */
-    (void)jass_checkboolean(j, 2); (void)jass_checkboolean(j, 3);
-    (void)jass_checkboolean(j, 4); (void)jass_checkboolean(j, 5);
-    timedLife = jass_checkboolean(j, 6);
-    (void)jass_checkboolean(j, 7); (void)jass_checkboolean(j, 8);
-    if (!whichUnit) return jass_pushinteger(j, 0);
-    FOR_LOOP(i, MAX_UNIT_STATUSES) {
-        heroabilitystatus_t const *s = whichUnit->abilstatus + i;
-        if (!s->level) continue;
-        if (timedLife && s->code != MAKEFOURCC('B', 'T', 'L', 'F')) continue;
-        count++;
-    }
+    if (unit) FOR_LOOP(i, MAX_UNIT_STATUSES)
+        if (WC3_BuffMatchesFilter(&unit->abilstatus[i], positive, negative, magic,
+                                  physical, timed_life, aura, auto_dispel)) count++;
     return jass_pushinteger(j, count);
 }
 uint32_t UnitPauseTimedLife(jass_t *j) {
@@ -1227,15 +1240,38 @@ uint32_t UnitMakeAbilityPermanent(jass_t *j) {
     uint32_t abilityId = jass_checkinteger(j, 3);
     return jass_pushboolean(j, G_ActorSetSkillPermanent(whichUnit, abilityId, permanent));
 }
+static void WC3_RemoveBuffs(edict_t *unit, bool positive, bool negative,
+        bool magic, bool physical, bool timed_life, bool aura, bool auto_dispel) {
+    bool changed = false;
+    if (!unit || !unit->inuse) return;
+    FOR_LOOP(i, MAX_UNIT_STATUSES) {
+        heroabilitystatus_t *status = &unit->abilstatus[i];
+        if (!WC3_BuffMatchesFilter(status, positive, negative, magic,
+                                   physical, timed_life, aura, auto_dispel)) continue;
+        if (!unit_status_can_dispel(status) &&
+            status->code != MAKEFOURCC('B','T','L','F')) continue;
+        unit_removestatus_deferred(unit, status, STATUS_REMOVE_DISPEL);
+        changed = true;
+    }
+    if (changed) {
+        unit_refreshstatusflags(unit);
+        G_InvalidateUnitInfoPanel(unit);
+    }
+}
 uint32_t UnitRemoveBuffs(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    //bool removePositive = jass_checkboolean(j, 2);
-    //bool removeNegative = jass_checkboolean(j, 3);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    bool const positive = jass_checkboolean(j, 2), negative = jass_checkboolean(j, 3);
+    WC3_RemoveBuffs(unit, positive, negative, true, true, false, false, false);
     return 0;
 }
 uint32_t UnitRemoveBuffsEx(jass_t *j) {
-    /* TODO: ability-owned dispel filtering is not represented yet. */
-    (void)j;
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    bool const positive = jass_checkboolean(j, 2), negative = jass_checkboolean(j, 3);
+    bool const magic = jass_checkboolean(j, 4), physical = jass_checkboolean(j, 5);
+    bool const timed_life = jass_checkboolean(j, 6), aura = jass_checkboolean(j, 7);
+    bool const auto_dispel = jass_checkboolean(j, 8);
+    WC3_RemoveBuffs(unit, positive, negative, magic, physical,
+                    timed_life, aura, auto_dispel);
     return 0;
 }
 uint32_t UnitAddSleep(jass_t *j) {

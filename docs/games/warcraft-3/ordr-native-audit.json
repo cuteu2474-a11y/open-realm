@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "method": "Static call closure; nonempty/registered does not mean implemented or correct.",
+  "method": "Current registration audited against api_module.c; needs_review means native has an implementation but WC3 runtime parity is unverified. Classification reflects incremental fixes, not full parity.",
   "sources": [
     {
       "name": "war3map.j",
@@ -15,14 +15,11 @@
       "normalized_sha256": "69cbbe7cc75b274e6e8c929d413a828c57a70e99fabbefbe14a211b510433e92"
     }
   ],
-  "registered": 1289,
+  "registered": 1295,
   "direct_native_count": 453,
   "referenced_native_count": 514,
-  "placeholder_count": 22,
-  "missing_declared_natives": [
-    "IsItemIdSellable",
-    "UnitDamagePoint"
-  ],
+  "placeholder_count": 7,
+  "missing_declared_natives": [],
   "unresolved_calls": [],
   "natives": [
     {
@@ -173,7 +170,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 1943,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "ChooseRandomItemEx",
@@ -295,7 +292,7 @@
       "direct_calls": 0,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 73,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "CreateMultiboard",
@@ -779,7 +776,7 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 907,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "EnableOcclusion",
@@ -795,7 +792,7 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 909,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "EnableTrigger",
@@ -1115,7 +1112,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 799,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "GetEventPlayerChatString",
@@ -2309,7 +2306,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_ordr_singleplayer_extra.h",
       "line": 342,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "KillUnit",
@@ -3303,7 +3300,7 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 96,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundConeAngles",
@@ -3311,7 +3308,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 118,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundConeOrientation",
@@ -3319,7 +3316,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 125,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundDistanceCutoff",
@@ -3327,7 +3324,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 91,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundDistances",
@@ -3335,7 +3332,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 112,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundDuration",
@@ -3351,7 +3348,7 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 107,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "SetSoundPosition",
@@ -3675,7 +3672,7 @@
       "direct_calls": 125,
       "path": "games/warcraft-3/game/api/api_sound.h",
       "line": 186,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "StringCase",
@@ -3999,7 +3996,7 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_unit.h",
       "line": 1146,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "UnitRemoveBuffsEx",
@@ -4007,7 +4004,7 @@
       "direct_calls": 0,
       "path": "games/warcraft-3/game/api/api_unit.h",
       "line": 1152,
-      "status": "placeholder"
+      "status": "needs_review"
     },
     {
       "name": "UnitRemoveItemFromSlot",

@@ -1030,6 +1030,10 @@ CLIENTCOMMAND(Select) {
         bool cleared = false;
         bool hasunits = false;
         bool const same_type = argc >= 3 && !strcmp(argv[2], "sametype");
+        if (client->ps.number < MAX_PLAYERS &&
+            (level.selection_disabled[client->ps.number] ||
+             (argc > 2 && !same_type && level.drag_selection_disabled[client->ps.number])))
+            return;
         edict_t *same_type_anchor = NULL;
         edict_t *voice = NULL;
         edict_t *old_selection[WC3_SELECTION_MAX] = { 0 };
