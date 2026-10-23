@@ -722,6 +722,32 @@ static void CL_SendSmartPointCommand(float x, float y) {
         ? "smartpoint %d %d queue" : "smartpoint %d %d", (int)x, (int)y);
 }
 
+static bool CL_TraceSmartGround(float x, float y, vec3_t *point) {
+    /* ORDR's imported scene models can cover the visible ground without
+     * adding terrain triangles. A camera-plane intersection is still a valid
+     * world click and the server resolves its nearest pathable destination.
+     * Camera panning already uses this fallback; Smart orders must too. */
+    return (re.TraceLocation && re.TraceLocation(&cl.viewDef, x, y, point)) ||
+        (re.TraceCameraPlane && re.TraceCameraPlane(&cl.viewDef, x, y, point));
+}
+
+static bool CL_IsORDRBackgroundTarget(uint32_t number) {
+    cstring_t map = Cvar_String("map", "");
+    if (!map || (!strstr(map, "ORDR") && !strstr(map, "ordr")) ||
+        number >= MAX_CLIENT_ENTITIES || !cl.viewDef.entities) return false;
+    uint32_t raw = cl.ents[number].current.class_id;
+    if (raw != MAKEFOURCC('B', '1', '0', '0') && raw != 0x42313030u)
+        return false;
+    /* The original map uses B100 for Background.mdl. It is scenery, not
+     * an order target; other maps' destructables remain right-clickable. */
+    FOR_LOOP(i, cl.viewDef.num_entities) {
+        renderEntity_t const *entity = &cl.viewDef.entities[i];
+        if (entity->number == number)
+            return !(entity->flags & RF_UNIT);
+    }
+    return false;
+}
+
 static void CL_SendSmartCommand(float x, float y) {
     uint32_t entnum;
     vec2_t minimap_point;
@@ -741,11 +767,13 @@ static void CL_SendSmartCommand(float x, float y) {
     if (CL_MouseOverGameplayUI()) {
         return;
     }
-    if (re.TraceEntity(&cl.viewDef, x, y, &entnum)) {
+    bool const hit_entity = re.TraceEntity &&
+        re.TraceEntity(&cl.viewDef, x, y, &entnum);
+    if (hit_entity && !CL_IsORDRBackgroundTarget(entnum)) {
         /* Preserve the clicked ground point for walkable bridge fallback, but
          * keep entity picking first so repeated model clicks retain the stable
          * pre-bridge input path. */
-        have_point = re.TraceLocation(&cl.viewDef, x, y, &point);
+        have_point = CL_TraceSmartGround(x, y, &point);
         MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
         if (have_point)
             SZ_Printf(&cls.netchan.message, CL_OrderQueueModifierDown()
@@ -753,7 +781,7 @@ static void CL_SendSmartCommand(float x, float y) {
         else
             SZ_Printf(&cls.netchan.message, CL_OrderQueueModifierDown()
                 ? "smart %d queue" : "smart %d", entnum);
-    } else if ((have_point = re.TraceLocation(&cl.viewDef, x, y, &point))) {
+    } else if ((have_point = CL_TraceSmartGround(x, y, &point))) {
         CL_SendSmartPointCommand(point.x, point.y);
     }
 }
@@ -2338,6 +2366,7 @@ TEST(client_input, smart_entity_click_preserves_ground_point) {
     }
     SDL_SetModState(KMOD_NONE);
     SZ_Init(&cls.netchan.message, data, sizeof(data)); re.TraceLocation = CL_TestNoLocation;
+    re.TraceCameraPlane = NULL;
     CL_SendSmartCommand(10, 20);
     T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
     MSG_ReadString(&cls.netchan.message, command);
@@ -2345,6 +2374,69 @@ TEST(client_input, smart_entity_click_preserves_ground_point) {
     cl.selection = old_sel; re = saved; cls.netchan.message = old_msg;
     cls.state = old_state; cls.key_dest = old_dest; input.focus = old_focus;
     cl.playerstate.client_ui_state = old_ui; SDL_SetModState(old_mod);
+}
+
+TEST(client_input, smart_ground_falls_back_to_camera_plane) {
+    uint8_t data[128];
+    sizeBuf_t old_msg = cls.netchan.message;
+    refExport_t saved = re;
+    int old_state = cls.state, old_dest = cls.key_dest, old_ui = cl.playerstate.client_ui_state;
+    bool old_focus = input.focus;
+    char command[128];
+
+    re.TraceMinimap = CL_TestNoMinimap;
+    re.TraceEntity = CL_TestNoEntity;
+    re.TraceLocation = CL_TestNoLocation;
+    re.TraceCameraPlane = CL_TestPlane;
+    re.GetWindowSize = CL_TestWindowSize;
+    cls.state = ca_active; cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME; input.focus = true;
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    CL_SendSmartCommand(10, 20);
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "smartpoint 4 5");
+
+    re = saved; cls.netchan.message = old_msg; cls.state = old_state;
+    cls.key_dest = old_dest; cl.playerstate.client_ui_state = old_ui;
+    input.focus = old_focus;
+}
+
+TEST(client_input, smart_ignores_ordr_background_b100) {
+    uint8_t data[128];
+    sizeBuf_t old_msg = cls.netchan.message;
+    refExport_t saved = re;
+    int old_state = cls.state, old_dest = cls.key_dest, old_ui = cl.playerstate.client_ui_state;
+    bool old_focus = input.focus;
+    uint32_t old_class = cl.ents[42].current.class_id;
+    renderEntity_t *old_entities = cl.viewDef.entities;
+    uint32_t old_count = cl.viewDef.num_entities;
+    cstring_t old_map = Cvar_String("map", "");
+    char saved_map[256], command[128];
+    renderEntity_t prop = { .number = 42 };
+
+    snprintf(saved_map, sizeof(saved_map), "%s", old_map ? old_map : "");
+    Cvar_Set("map", "Maps/ORDR_S2_2.323[C].w3x");
+    cl.ents[42].current.class_id = MAKEFOURCC('B', '1', '0', '0');
+    cl.viewDef.entities = &prop; cl.viewDef.num_entities = 1;
+    re.TraceMinimap = CL_TestNoMinimap;
+    re.TraceEntity = CL_TestSmartEntity;
+    re.TraceLocation = CL_TestSmartLocation;
+    re.GetWindowSize = CL_TestWindowSize;
+    cls.state = ca_active; cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME; input.focus = true;
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    CL_SendSmartCommand(10, 20);
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "smartpoint 123 456");
+
+    Cvar_Set("map", saved_map);
+    cl.ents[42].current.class_id = old_class;
+    cl.viewDef.entities = old_entities; cl.viewDef.num_entities = old_count;
+    re = saved; cls.netchan.message = old_msg; cls.state = old_state;
+    cls.key_dest = old_dest; cl.playerstate.client_ui_state = old_ui;
+    input.focus = old_focus;
 }
 
 TEST(client_input, smart_entity_trace_precedes_ground_trace) {

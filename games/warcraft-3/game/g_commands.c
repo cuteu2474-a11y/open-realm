@@ -1197,6 +1197,37 @@ CLIENTCOMMAND(OrderQueueRelease) {
     }
 }
 
+/* Original ORDR workers e0IX/e0HP both have speed 522 in the map's embedded
+ * UnitBalance.slk. Log a bounded sample of actual move attempts so an iPad
+ * report can distinguish an undelivered touch from selection/ownership,
+ * movement-metadata, and pathing failures without flooding normal JASS logs. */
+static void G_ORDRTraceSmartCommand(gameClient_t *client, cstring_t mode,
+                                   vec2_t const *point, bool issued) {
+    static unsigned trace_count;
+    uint32_t selected_count = 0;
+    edict_t *unit = NULL;
+    char detail[330];
+
+    if (!level.vm || !jass_functionbyname(level.vm, "CUN") ||
+        !client || trace_count >= 24) return;
+    FOR_SELECTED_UNITS(client, selected) {
+        if (!unit) unit = selected;
+        selected_count++;
+    }
+    snprintf(detail, sizeof(detail),
+             "mode=%s point=(%.0f,%.0f) issued=%u selected=%u unit=%u raw=0x%08x owner=%u player=%u controllable=%u speed=%.0f aiflags=0x%x paused=%u",
+             mode, (double)(point ? point->x : 0), (double)(point ? point->y : 0),
+             (unsigned)issued, (unsigned)selected_count,
+             (unsigned)(unit ? unit - globals.edicts : 0),
+             (unsigned)(unit ? unit->class_id : 0),
+             (unsigned)(unit ? unit->s.player : 0), (unsigned)client->ps.number,
+             (unsigned)(unit && G_UnitCanControl(client, unit)),
+             unit && unit->data.UnitBalance ? (double)unit->data.UnitBalance->speed : 0.0,
+             (unsigned)(unit ? unit->aiflags : 0), (unsigned)(unit && unit->paused));
+    jass_ordr_log_event(level.vm, "ORDR_WORLD_SMART_COMMAND", detail);
+    trace_count++;
+}
+
 CLIENTCOMMAND(Smart) {
     gameClient_t *client = clent->client;
     bool issued = false;
@@ -1257,6 +1288,7 @@ CLIENTCOMMAND(Smart) {
         if (rallied) G_PlayUISoundForPlayer(clent, "RallyPointPlace");
         Get_Commands_f(clent);
     }
+    G_ORDRTraceSmartCommand(client, "target", have_click_point ? &click_point : NULL, issued);
 }
 
 CLIENTCOMMAND(SmartPoint) {
@@ -1306,6 +1338,7 @@ CLIENTCOMMAND(SmartPoint) {
         G_SendPointConfirmation(clent, &loc, false);
         G_PlayUISoundForPlayer(clent, "RallyPointPlace");
     }
+    G_ORDRTraceSmartCommand(client, "point", &loc, issued || rally);
 }
 
 CLIENTCOMMAND(Button) {
