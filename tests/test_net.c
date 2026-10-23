@@ -2715,6 +2715,34 @@ TEST(net, initial_model_configstring_defers_registration_until_refresh) {
     T_EQ(test_model_releases, 0);
 }
 
+/* Custom WC3 maps such as ORDR have more than 1,200 distinct UnitUI model
+ * paths. The model registry must preserve late-spawned workers as well as
+ * the models initialized at map start; otherwise a missing model prevents
+ * both rendering and client-side ray/selection fallback. */
+TEST(net, custom_map_model_configstring_roundtrips_above_512) {
+    uint8_t buf[512];
+    sizeBuf_t sb = make_msg_buf(buf, sizeof(buf));
+    uint32_t const model = 1223;
+    cstring_t const path = "Units\\NightElf\\Wisp\\Wisp.mdx";
+
+    T_ASSERT(MAX_MODELS > model);
+    if (MAX_MODELS <= model) return;
+    test_client_stubs_init();
+    test_model_loads = test_model_releases = 0;
+    re.LoadModel = capture_load_model;
+    re.ReleaseModel = capture_release_model;
+    cl.refresh_prepped = false;
+
+    MSG_WriteByte(&sb, svc_configstring);
+    MSG_WriteShort(&sb, CS_MODELS + model);
+    MSG_WriteString(&sb, path);
+    CL_ParseServerMessage(&sb);
+
+    T_STREQ(cl.configstrings[CS_MODELS + model], path);
+    T_NULL(cl.models[model]);
+    T_EQ(test_model_loads, 0);
+}
+
 TEST(net, late_model_configstring_refreshes_world_and_portrait_models_together) {
     uint8_t buf[512];
     sizeBuf_t sb = make_msg_buf(buf, sizeof(buf));

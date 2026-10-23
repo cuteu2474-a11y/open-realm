@@ -649,6 +649,20 @@ TEST(server_net, image_registry_exceeds_legacy_255_slot_limit) {
     T_STREQ(sv.configstrings[CS_IMAGES + image], "UI\\CommandButtons\\BTNTest300.blp");
 }
 
+TEST(server_net, custom_map_model_registry_keeps_late_units_addressable) {
+    char path[64];
+    int model = 0;
+
+    reset_server_state(1);
+    T_ASSERT(MAX_MODELS > 1223);
+    for (int i = 1; i <= 1223; i++) {
+        snprintf(path, sizeof(path), "war3mapImported\\Unique%04d.mdx", i);
+        model = SV_ModelIndex(path);
+        T_EQ(model, i);
+    }
+    T_STREQ(sv.configstrings[CS_MODELS + model], "war3mapImported\\Unique1223.mdx");
+}
+
 TEST(server_net, pending_image_configstring_precedes_dependent_payload) {
     uint8_t copy[MAX_MSGLEN];
     char name[MAX_PATHLEN];
@@ -1067,6 +1081,38 @@ TEST(server_net, snapshot_owner_only_entity_reaches_only_owner) {
     T_EQ(svs.client_entities[frame->first_entity].number, 2);
     SV_BuildClientFrame(other);
     T_EQ(other->frames[0].num_entities, 0);
+    SV_Shutdown();
+}
+
+/* When a custom map's model file is unavailable, a friendly selectable unit
+ * must still reach the client so model-independent touch picking can send the
+ * normal authoritative Select command. Empty scenery has no such contract. */
+TEST(server_net, snapshot_keeps_selectable_owned_unit_without_model) {
+    static struct client_s game_client;
+    client_t *client;
+    clientFrame_t *frame;
+
+    reset_server_state(1);
+    SV_InitGame();
+    client = &svs.clients[0]; frame = &client->frames[0];
+    memset(&game_client, 0, sizeof(game_client));
+    test_edicts[0].client = &game_client; client->edict = &test_edicts[0];
+    game_client.ps.number = 0;
+    test_ge.num_edicts = 4;
+    test_edicts[1].inuse = true;
+    test_edicts[1].s = (entityState_t){ .number = 1, .player = 0, .flags = EF_UNIT };
+    test_edicts[2].inuse = true;
+    test_edicts[2].s = (entityState_t){ .number = 2, .player = 0 };
+    test_edicts[3].inuse = true;
+    test_edicts[3].s = (entityState_t){ .number = 3, .player = 2, .flags = EF_UNIT };
+
+    SV_BuildClientFrame(client);
+    T_EQ(frame->num_entities, 1);
+    if (frame->num_entities == 1) {
+        entityState_t const *state = &svs.client_entities[frame->first_entity];
+        T_EQ(state->number, 1);
+        T_ASSERT(state->flags & EF_UNIT);
+    }
     SV_Shutdown();
 }
 

@@ -164,9 +164,10 @@ static bool CL_TraceSelectionEntity(float x, float y, uint32_t *number) {
 
 /* Touchscreens need a finger-sized target, especially for small imported MDX
  * units whose triangle mesh does not overlap the visible portrait. This is a
- * last resort after the accurate model ray test. It never selects scenery,
- * hidden units, or something outside the real world viewport; the game still
- * validates ownership and selection through its ordinary select command. */
+ * last resort after the accurate model ray test. Even if a custom model fails
+ * to load, its authoritative RF_UNIT snapshot retains a selection target.
+ * Never select scenery, hidden units, or anything outside the world viewport;
+ * the game still validates ownership and its normal selection restrictions. */
 static bool CL_TraceFingerUnit(float x, float y, uint32_t *number) {
     viewDef_t const *view = &cl.viewDef;
     size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
@@ -184,7 +185,7 @@ static bool CL_TraceFingerUnit(float x, float y, uint32_t *number) {
     FOR_LOOP(i, view->num_entities) {
         renderEntity_t const *ent = &view->entities[i];
         if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
-            !ent->model || !(ent->flags & RF_UNIT) ||
+            !(ent->flags & RF_UNIT) ||
             ent->owner != view->player ||
             (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE))) continue;
         vec3_t const projected = Matrix4_multiply_vector3(&view->viewProjectionMatrix, &ent->origin);
@@ -3115,6 +3116,11 @@ TEST(client_input, projected_finger_target_only_picks_visible_friendly_world_uni
         .flags = RF_UNIT | RF_HIDDEN, .origin = { 0, 0, 0 } };
     float const top = (1.0f - 0.22f - 0.76f) * 768.0f;
     float const center_y = top + 0.76f * 768.0f * 0.5f;
+    T_ASSERT(CL_TraceFingerUnit(512, center_y, &hit));
+    T_EQ(hit, 200);
+    /* A server-owned/selectable actor must retain its projected touch
+     * target when an imported custom model cannot be registered or loaded. */
+    units[0].model = NULL;
     T_ASSERT(CL_TraceFingerUnit(512, center_y, &hit));
     T_EQ(hit, 200);
     units[0].flags |= RF_NOT_SELECTABLE;
