@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/ordr-ipad-simulator.yml'
+      - 'tools/ipad/fetch_private_drive_assets.py'
 
 permissions:
   contents: read
