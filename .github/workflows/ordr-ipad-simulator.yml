@@ -36,6 +36,7 @@ jobs:
           # Optional. A private, user-owned zip with War3*.mpq and ORDR_S2_2.323[C].w3x.
           # Never commit or upload these licensed assets.
           ORDR_TEST_ASSETS_URL: ${{ secrets.ORDR_TEST_ASSETS_URL }}
+          ORDR_DRIVE_ACCESS_TOKEN: ${{ secrets.ORDR_DRIVE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           REPORT="build/ipad/simulator-report"
@@ -86,6 +87,14 @@ jobs:
             while IFS= read -r -d '' map; do
               cp "$map" "$DATA_DIR/Documents/Maps/$(basename "$map")"
             done < <(find "$RUNNER_TEMP/ordr-test-assets" -type f -iname 'ORDR_S2_2.323*.w3x' -print0)
+          fi
+
+          # Optional private Drive API download, authenticated with an ephemeral
+          # OAuth token stored only in GitHub's encrypted Actions secrets.
+          if [ -n "$ORDR_DRIVE_ACCESS_TOKEN" ]; then
+            python3 tools/ipad/fetch_private_drive_assets.py \
+              --destination "$DATA_DIR/Documents" \
+              --manifest "$REPORT/verified-private-assets.json"
           fi
 
           MPQ_FOUND=false
