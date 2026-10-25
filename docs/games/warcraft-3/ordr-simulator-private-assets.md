@@ -9,9 +9,7 @@ private Google Drive, and only exports screenshots, status and sanitized logs.
 
 The connected Drive account already contains the five Warcraft III MPQs
 (\`War3.mpq\`, \`War3x.mpq\`, \`War3Local.mpq\`, \`War3xLocal.mpq\`,
-\`War3Patch.mpq\`). Upload an **unaltered** \`ORDR_S2_2.323[C].w3x\` into the
-same Drive account. The map is currently in ChatGPT Library, not Google Drive.
-The downloader checks exact names, sizes and SHA-256 hashes before use.
+\`War3Patch.mpq\`). The original ORDR map was copied from ChatGPT Library into the **private** Drive folder `ORDR_MPQ_분할파일` as eight 16 MiB-or-smaller parts (`ORDR_S2_2.323[C].w3x.part001` through `.part008`). The runner automatically reassembles them in its temporary simulator container and verifies the original map's SHA-256. The downloader checks exact names, sizes and SHA-256 hashes before use.
 
 ## Temporary private authorization (required for each run)
 

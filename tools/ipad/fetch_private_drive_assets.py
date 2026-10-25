@@ -23,6 +23,19 @@ EXPECTED = {
 }
 MAP_NAME = 'ORDR_S2_2.323[C].w3x'
 
+# Map is stored privately in eight 16 MiB parts because the Library to Drive
+# upload bridge cannot transfer the 133 MB original in one request.
+MAP_PARTS = [
+    ('ORDR_S2_2.323[C].w3x.part001', 16777216, '8ea2dbed60a44b9f652b32de572d1845713371367d01ac2d76ca7a8db5b0bc3e'),
+    ('ORDR_S2_2.323[C].w3x.part002', 16777216, 'e97416455673d136726018e513f7be89ed9c24b31328159cd69101628c58afcc'),
+    ('ORDR_S2_2.323[C].w3x.part003', 16777216, '32ff89b629ba4bc37943918d5b319ca1662ee2e4ccda4f82c4b98c95c5e0dba5'),
+    ('ORDR_S2_2.323[C].w3x.part004', 16777216, '6cba4e3785cc84bd35430e3df328082bc5bab4e6fb8e145b1dcf847af9cc3aaa'),
+    ('ORDR_S2_2.323[C].w3x.part005', 16777216, 'a159ad8d818a30051fb31b81cbdd43684134829c2c5e108d995fc13852542e63'),
+    ('ORDR_S2_2.323[C].w3x.part006', 16777216, '9a23003e974d59bacb256e2af76e7bad0f32f800b272f57db4194703911524ea'),
+    ('ORDR_S2_2.323[C].w3x.part007', 16777216, '561f04d78b92d3dc9142a44a2ecd071113fbca0a36368b2583a0dd4512a7f141'),
+    ('ORDR_S2_2.323[C].w3x.part008', 15938669, 'b512e48c2b3a663d72646b5a6be90abcffab94e5d2bdde11d769edc85f8408b9'),
+]
+
 
 def api_json(token, path, query):
     url = 'https://www.googleapis.com/drive/v3/' + path + '?' + urlencode(query)
@@ -87,16 +100,64 @@ def main():
         parser.error('ORDR_DRIVE_ACCESS_TOKEN secret is required')
     results = []
     missing = []
+    # Download the five authorized MPQs without fetching a public URL.
     for name, (sha256, size) in EXPECTED.items():
+        if name == MAP_NAME:
+            continue
         file_id = locate(token, name, size)
         if not file_id:
-            missing.append(name)
-            if name != MAP_NAME:
-                raise RuntimeError('Required MPQ absent from authorized Google Drive: ' + name)
-            continue
-        destination = args.destination / ('Maps' if name == MAP_NAME else '') / name
-        results.append(retrieve(token, file_id, destination, size, sha256))
+            raise RuntimeError('Required MPQ absent from authorized Google Drive: ' + name)
+        results.append(retrieve(token, file_id, args.destination / name, size, sha256))
         print('SHA-256 verified:', name, size, 'bytes', flush=True)
+
+    # Prefer an unsplit map; otherwise reassemble the eight private Drive
+    # chunks into the simulator's Maps directory. None of the parts are
+    # written into the repository or uploaded as an Actions artifact.
+    map_sha, map_size = EXPECTED[MAP_NAME]
+    map_id = locate(token, MAP_NAME, map_size)
+    if map_id:
+        results.append(retrieve(token, map_id,
+                                args.destination / 'Maps' / MAP_NAME,
+                                map_size, map_sha))
+    else:
+        located = []
+        for name, size, sha in MAP_PARTS:
+            file_id = locate(token, name, size)
+            if not file_id:
+                missing.append(MAP_NAME)
+                break
+            located.append((name, size, sha, file_id))
+        if MAP_NAME not in missing:
+            stage = args.destination / 'Maps' / '.private-map-chunks'
+            target = args.destination / 'Maps' / MAP_NAME
+            for name, size, sha, file_id in located:
+                retrieve(token, file_id, stage / name, size, sha)
+                print('Map chunk SHA-256 verified:', name, flush=True)
+            digest = hashlib.sha256()
+            written = 0
+            tmp = target.with_suffix('.w3x.partial')
+            with tmp.open('wb') as merged:
+                for name, _, _, _ in located:
+                    with (stage / name).open('rb') as src:
+                        while True:
+                            chunk = src.read(4 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                            written += len(chunk)
+                            merged.write(chunk)
+            if written != map_size or digest.hexdigest() != map_sha:
+                tmp.unlink(missing_ok=True)
+                raise RuntimeError('Reconstructed ORDR map SHA-256 mismatch')
+            tmp.replace(target)
+            for name, _, _, _ in located:
+                (stage / name).unlink()
+            stage.rmdir()
+            results.append({'file': MAP_NAME, 'size': written,
+                            'sha256': digest.hexdigest(),
+                            'source': 'eight private Google Drive chunks'})
+            print('Reconstructed full ORDR map SHA-256 verified', flush=True)
+
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps({'verified_files': results, 'missing': missing}, indent=2))
     if MAP_NAME in missing:
