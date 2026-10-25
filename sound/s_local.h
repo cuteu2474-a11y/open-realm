@@ -15,6 +15,7 @@
 #define S_MAX_KITS          8192
 #define S_MAX_SFX           512
 #define S_MAX_CHANNELS      24
+#define S_ENV_DELAY_FRAMES 16384
 #define S_HASH_BUCKETS      256
 
 typedef enum {
@@ -112,6 +113,12 @@ typedef struct {
         bool        is_positional;
         bool        active, notified_start;
     } channels[S_MAX_CHANNELS];
+    /* Named NewSoundEnvironment presets drive a bounded stereo delay
+     * network. Defaults bypass DSP and preserve the original PCM. */
+    float environment_wet;
+    uint32_t environment_tap_a, environment_tap_b;
+    uint32_t environment_write;
+    int16_t environment_history[S_ENV_DELAY_FRAMES * 2];
     uint32_t loop_generation;
     uint64_t sound_serial;
     struct { uint32_t end; bool active; } user_cooldown[MAX_GAME_ENTITIES];
@@ -153,6 +160,7 @@ void S_UpdateLoopingSound(uint32_t entity, cstring_t path, vec2_t const *origin,
 void S_EndLoopingSounds(void);
 void S_SetListener(vec2_t const *origin, vec2_t const *right);
 void S_SetUserVolume(float volume);
+void S_SetSoundEnvironment(cstring_t environment);
 void S_StreamStart(sStreamId_t stream);
 uint32_t S_StreamSamples(sStreamId_t stream, int16_t const *samples, uint32_t frames);
 uint32_t S_StreamBufferedFrames(sStreamId_t stream);

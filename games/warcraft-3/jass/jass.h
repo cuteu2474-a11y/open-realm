@@ -103,6 +103,7 @@ bool jass_checkboolean(jass_t *j, int index);
 cstring_t jass_checkstring(jass_t *j, int index);
 jassFunc_t const *jass_checkcode(jass_t *j, int index);
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type);
+bool jass_destroyownedhandle(jass_t *j, int index, cstring_t type);
 bool jass_enumvalue(jass_t *j, int index, uint32_t *value);
 bool jass_toboolean(jass_t *j, int index);
 uint32_t jass_call(jass_t *j, uint32_t args);

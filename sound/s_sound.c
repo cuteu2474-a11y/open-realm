@@ -469,6 +469,53 @@ void S_EndRegistration(void) {
  * Stop all sounds (mirrors Q2 S_StopAllSounds)
  * ========================================================================= */
 
+/* WC3 NewSoundEnvironment is specified by an EAX-style preset label.
+ * Unknown names preserve a neutral dry mix. No per-frame heap allocation. */
+/* Case-insensitive substring without non-portable GNU strcasestr (iOS). */
+static bool S_EnvironmentContains(cstring_t text, cstring_t word) {
+    if (!text || !word) return false;
+    for (; *text; ++text) {
+        cstring_t a = text, b = word;
+        while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b))
+            ++a, ++b;
+        if (!*b) return true;
+    }
+    return false;
+}
+void S_SetSoundEnvironment(cstring_t name) {
+    float wet = 0.0f;
+    uint32_t a = 0, b = 0;
+    if (name && *name && strcasecmp(name, "Default") &&
+        strcasecmp(name, "None") && strcasecmp(name, "Normal")) {
+        if (S_EnvironmentContains(name, "Underwater")) {
+            wet = 0.23f; a = 900; b = 2600;
+        } else if (S_EnvironmentContains(name, "Cave") || S_EnvironmentContains(name, "Sewer") ||
+                   S_EnvironmentContains(name, "Dungeon") || S_EnvironmentContains(name, "Stone")) {
+            wet = 0.32f; a = 5200; b = 11000;
+        } else if (S_EnvironmentContains(name, "Hall") || S_EnvironmentContains(name, "Arena") ||
+                   S_EnvironmentContains(name, "Auditorium") || S_EnvironmentContains(name, "Hangar") ||
+                   S_EnvironmentContains(name, "Palace")) {
+            wet = 0.26f; a = 4200; b = 8700;
+        } else if (S_EnvironmentContains(name, "Room") || S_EnvironmentContains(name, "Bathroom")) {
+            wet = 0.18f; a = 1600; b = 3700;
+        } else if (S_EnvironmentContains(name, "Forest") || S_EnvironmentContains(name, "Mountains") ||
+                   S_EnvironmentContains(name, "Plain")) {
+            wet = 0.08f; a = 5100; b = 10200;
+        } else {
+            wet = 0.15f; a = 3500; b = 8500;
+        }
+    }
+    if (s.environment_wet == wet && s.environment_tap_a == a &&
+        s.environment_tap_b == b) return;
+    S_Lock();
+    s.environment_wet = wet;
+    s.environment_tap_a = a;
+    s.environment_tap_b = b;
+    s.environment_write = 0;
+    memset(s.environment_history, 0, sizeof(s.environment_history));
+    S_Unlock();
+}
+
 void S_StopAllSounds(void) {
     if (!s.initialized) return;
     S_Lock();
@@ -588,6 +635,27 @@ static void SDLCALL S_MixAudio(void *userdata, Uint8 *stream, int len) {
         }
         s.channels[ch].pos = pos;
         if (!s.channels[ch].looping && pos >= sc->length) S_EndChannel(ch);
+    }
+
+    if (s.environment_wet > 0.0f) {
+        /* Mix two early reflections. Store the dry sample, not wet feedback,
+         * so arbitrary map-created sounds cannot generate unstable echoes. */
+        for (int i = 0; i < frames; ++i) {
+            uint32_t const pos = s.environment_write & (S_ENV_DELAY_FRAMES - 1);
+            uint32_t const first = (pos + S_ENV_DELAY_FRAMES -
+                s.environment_tap_a) & (S_ENV_DELAY_FRAMES - 1);
+            uint32_t const second = (pos + S_ENV_DELAY_FRAMES -
+                s.environment_tap_b) & (S_ENV_DELAY_FRAMES - 1);
+            for (int ch = 0; ch < 2; ++ch) {
+                int dry = out[i * 2 + ch];
+                int echo = (int)((s.environment_history[first * 2 + ch] * 0.65f +
+                      s.environment_history[second * 2 + ch] * 0.35f) * s.environment_wet);
+                int mixed = MAX(-32768, MIN(32767, dry + echo));
+                s.environment_history[pos * 2 + ch] = (int16_t)dry;
+                out[i * 2 + ch] = (int16_t)mixed;
+            }
+            s.environment_write++;
+        }
     }
 }
 

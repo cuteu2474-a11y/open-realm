@@ -2033,7 +2033,7 @@ bool jass_enumvalue(jass_t *j, int index, uint32_t *value) {
 
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type) {
     jassVar_t const *var = jass_stackvalue(j, index);
-    if (!var->value) {
+    if (!var->value || (var->ref && var->ref->destroyed)) {
         return NULL;
     }
     /* Skip type check for Galaxy — SC2 types are unregistered (type == NULL). */
@@ -2044,6 +2044,19 @@ handle_t jass_checkhandle(jass_t *j, int index, cstring_t type) {
         }
     }
     return var->value;
+}
+
+/* Retire a VM-owned handle without dereferencing freed shared aliases.
+ * The allocated payload is collected by normal JASS ref lifetime; native
+ * light handles (GetUnitPositionLoc etc.) are never owned by this VM. */
+bool jass_destroyownedhandle(jass_t *j, int index, cstring_t type) {
+    jassVar_t *var = jass_stackvalue(j, index);
+    jassType_t const *expected = find_type(j, type);
+    if (!var || !var->value || !var->ref || !var->ref->size ||
+        var->ref->destroyed || !expected || !var->type ||
+        !is_handle_convertible(var->type, expected)) return false;
+    var->ref->destroyed = true;
+    return true;
 }
 
 bool jass_popboolean(jass_t *j) {
@@ -2816,6 +2829,12 @@ static bool jass_snapshot_writehandle(jass_t *j, jassSnapshot_t *snapshot, jassV
         encoding = JASS_SNAPSHOT_HANDLE_VALUE;
         return jass_snapshot_io(snapshot, &encoding, sizeof(encoding)) &&
             jass_snapshot_io(snapshot, var->value, sizeof(uint32_t));
+    }
+    /* Retired locations remain referenced by JASS globals but have no live
+     * handle payload; serialise them as null rather than resurrecting them. */
+    if (var->ref && var->ref->destroyed) {
+        encoding = JASS_SNAPSHOT_HANDLE_NULL;
+        return jass_snapshot_io(snapshot, &encoding, sizeof(encoding));
     }
     /* VM-owned and function handles must bypass the host: a host miss means stale only for host-owned domains. */
     if (jass_snapshot_ownedhandle(var->type->name) && var->ref && var->ref->size) {

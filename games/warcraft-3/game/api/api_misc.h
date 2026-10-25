@@ -1575,10 +1575,13 @@ uint32_t SetTerrainFogEx(jass_t *j) {
     return 0;
 }
 uint32_t SetWaterBaseColor(jass_t *j) {
-    //int32_t red = jass_checkinteger(j, 1);
-    //int32_t green = jass_checkinteger(j, 2);
-    //int32_t blue = jass_checkinteger(j, 3);
-    //int32_t alpha = jass_checkinteger(j, 4);
+    int red = MAX(0, MIN(255, jass_checkinteger(j, 1)));
+    int green = MAX(0, MIN(255, jass_checkinteger(j, 2)));
+    int blue = MAX(0, MIN(255, jass_checkinteger(j, 3)));
+    int alpha = MAX(0, MIN(255, jass_checkinteger(j, 4)));
+    char value[48];
+    snprintf(value, sizeof(value), "%d %d %d %d", red, green, blue, alpha);
+    if (gi.configstring) gi.configstring(CS_WC3_WATER_RGBA, value);
     return 0;
 }
 uint32_t SetWaterDeforms(jass_t *j) {
@@ -1725,7 +1728,8 @@ uint32_t SetAltMinimapIcon(jass_t *j) {
     return 0;
 }
 uint32_t EnableOcclusion(jass_t *j) {
-    //bool flag = jass_checkboolean(j, 1);
+    bool enabled = jass_checkboolean(j, 1);
+    if (gi.configstring) gi.configstring(CS_WC3_OCCLUSION, enabled ? "1" : "0");
     return 0;
 }
 uint32_t SetIntroShotText(jass_t *j) {
@@ -1937,7 +1941,10 @@ uint32_t ForceCinematicSubtitles(jass_t *j) {
     return 0;
 }
 uint32_t NewSoundEnvironment(jass_t *j) {
-    //cstring_t environmentName = jass_checkstring(j, 1);
+    /* The renderer owns DSP; the game publishes the exact map-authored
+     * environment name and the client selects the corresponding preset. */
+    cstring_t environment = jass_checkstring(j, 1);
+    if (gi.configstring) gi.configstring(CS_WC3_SOUND_ENV, environment ? environment : "");
     return 0;
 }
 uint32_t SetDoodadAnimation(jass_t *j) {

@@ -433,3 +433,17 @@ TEST(sound, uisounds_slk_rows_become_named_kits_without_soundentries_dbc) {
     FS_SLKFreeRows(sound_test_slk_schema, s.slk_rows, s.slk_row_count, sizeof(soundTestSlkRow_t));
     sound_test_reset();
 }
+
+TEST(sound, named_environment_presets_drive_bounded_dsp) {
+    sound_test_reset();
+    S_SetSoundEnvironment("Dungeon");
+    T_ASSERT(s.environment_wet > 0.0f);
+    T_ASSERT(s.environment_tap_a > 0 && s.environment_tap_a < S_ENV_DELAY_FRAMES);
+    T_ASSERT(s.environment_tap_b > s.environment_tap_a);
+    S_SetSoundEnvironment("Underwater");
+    T_ASSERT(s.environment_tap_a < 2000);
+    S_SetSoundEnvironment("Default");
+    T_FEQ(s.environment_wet, 0.0f, 0.0001f);
+    T_EQ(s.environment_tap_a, 0u);
+    sound_test_reset();
+}

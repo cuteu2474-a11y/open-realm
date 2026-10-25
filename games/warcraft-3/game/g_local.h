@@ -3774,6 +3774,7 @@ void jass_runevents(jass_t *);
 
 // g_events.c
 void G_RunEntities(void);
+void G_UpdateUnitLookAt(edict_t *unit);
 void G_RunEvents(void);
 void G_ORDRTryAutoOfflineMode(void);
 /* Host save/restore lifecycle; the basic filename is only visible during these callbacks. */

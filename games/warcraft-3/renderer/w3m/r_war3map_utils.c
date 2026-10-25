@@ -42,6 +42,7 @@ struct color32 MakeColor(float r, float g, float b, float a) {
 /* Water.slk colors interpolate across two depth bands; depth is in tiles below the water surface.
  * Band edges follow HiveWE/Warsmash: shallow from 10/128 to 64/128, deep from 64/128 to 72/128. */
 color32_t R_WaterDepthColor(wc3WaterStyle_t const *style, float depth) {
+    if (style && style->base_override_enabled) return style->base_override;
     float const min_depth = 10.f / 128, deep_level = 64.f / 128, max_depth = 72.f / 128;
     color32_t const *from = &style->shallow_min, *to = &style->shallow_max;
     float t;

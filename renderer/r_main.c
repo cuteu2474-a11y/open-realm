@@ -1159,6 +1159,10 @@ refExport_t R_GetAPI(refImport_t imp) {
         .Init = R_InitRenderer,
         .RegisterMap = R_RegisterMapAssets,
         .SetAssetScope = R_SetMapAssetScope,
+#ifdef WC3
+        .SetWaterBaseColor = R_W3SetWaterBaseColor,
+        .SetOcclusionEnabled = R_W3SetOcclusionEnabled,
+#endif
         .LoadTexture = R_LoadTexture,
         .DrawCinematicFrame = R_DrawCinematicFrame,
         .LoadModel = R_LoadRegisteredModel,

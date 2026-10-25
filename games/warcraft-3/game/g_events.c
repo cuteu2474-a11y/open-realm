@@ -673,6 +673,28 @@ void G_UnitPositionChanged(edict_t *ent, vec2_t const *old_position) {
     ent->old_origin = ent->s.origin2;
 }
 
+/* Bone-only cosmetic aim: compute relative direction using the moving
+ * target's current position, while preserving the gameplay actor heading. */
+void G_UpdateUnitLookAt(edict_t *unit) {
+    if (!unit || !unit->inuse || !unit->look_at_target_number) return;
+    uint32_t const id = unit->look_at_target_number;
+    if (id >= globals.num_edicts) {
+        unit->look_at_target_number = 0; unit->s.look_at_packed = 0;
+        return;
+    }
+    edict_t const *target = &globals.edicts[id];
+    if (!target->inuse || target->spawn_time != unit->look_at_target_generation) {
+        unit->look_at_target_number = 0; unit->s.look_at_packed = 0;
+        return;
+    }
+    float dx = target->s.origin.x + unit->look_at_offset.x - unit->s.origin.x;
+    float dy = target->s.origin.y + unit->look_at_offset.y - unit->s.origin.y;
+    float dz = target->s.origin.z + unit->look_at_offset.z - unit->s.origin.z;
+    float yaw = atan2f(dy, dx) - unit->s.angle;
+    float pitch = atan2f(dz, sqrtf(dx*dx + dy*dy));
+    unit->s.look_at_packed = WC3_LookAtPack(unit->look_at_bone_hash, yaw, pitch);
+}
+
 void G_RunEntities(void) {
     FOR_LOOP(i, globals.num_edicts) {
         edict_t *ent = globals.edicts+i;
@@ -699,6 +721,7 @@ void G_RunEntities(void) {
         edict_t *ent = globals.edicts+i;
         if (!ent->inuse) continue;
         G_RunEntity(ent);
+        if (ent->inuse) G_UpdateUnitLookAt(ent);
     }
     FOR_LOOP(i, globals.num_edicts) {
         edict_t *ent = globals.edicts+i;

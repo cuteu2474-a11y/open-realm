@@ -25,6 +25,18 @@ static float *w3_terrain_offsets;
 static uint8_t *w3_terrain_dirty_segments;
 static uint32_t w3_terrain_offset_count, w3_deform_last_update, w3_terrain_segment_count;
 static bool w3_terrain_rebuild_pending;
+static bool w3_occlusion_enabled = true;
+
+/* Rebuild the actual water vertex colors when JASS replaces their tint. */
+void R_W3InvalidateWaterColor(void) {
+    if (!tr.world || !w3_terrain_dirty_segments) return;
+    memset(w3_terrain_dirty_segments, 1, w3_terrain_segment_count);
+    w3_terrain_rebuild_pending = true;
+}
+
+void R_W3SetOcclusionEnabled(bool enabled) {
+    w3_occlusion_enabled = enabled;
+}
 static int w3_deform_x0, w3_deform_y0, w3_deform_x1, w3_deform_y1;
 static bool w3_deform_bounds_valid;
 static bool w3_warn_deform_unavailable, w3_warn_deform_type, w3_warn_deform_pool;
@@ -939,12 +951,14 @@ void _W3M_DrawAlphaSurfaces(void) {
     R_Call(glDepthMask, GL_TRUE);
     R_Call(glEnable, GL_DEPTH_TEST);
     R_Call(glDepthFunc, GL_LEQUAL);
-    R_Call(glColorMask, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-    R_Call(glDisable, GL_BLEND);
-    R_SetAlphaKeyState(false);
-    FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments)
-        R_DrawTerrainSegment(segment, (1 << MAPLAYERTYPE_WATER));
-    R_Call(glColorMask, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    if (w3_occlusion_enabled) {
+        R_Call(glColorMask, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        R_Call(glDisable, GL_BLEND);
+        R_SetAlphaKeyState(false);
+        FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments)
+            R_DrawTerrainSegment(segment, (1 << MAPLAYERTYPE_WATER));
+        R_Call(glColorMask, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
 
     R_Call(glEnable, GL_BLEND);
     R_Call(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "method": "Current registration audited against api_module.c; needs_review means native has an implementation but WC3 runtime parity is unverified. Classification reflects incremental fixes, not full parity.",
+  "method": "Audit as of 2026-10-25: all six former placeholders have end-to-end implementations or supported visual/audio approximations. needs_review means code exists; retail parity not established until iPad visual/audio comparison.",
   "sources": [
     {
       "name": "war3map.j",
@@ -18,7 +18,7 @@
   "registered": 1295,
   "direct_native_count": 453,
   "referenced_native_count": 514,
-  "placeholder_count": 6,
+  "placeholder_count": 0,
   "missing_declared_natives": [],
   "unresolved_calls": [],
   "natives": [
@@ -784,7 +784,8 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 1702,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "Configstring -> client -> WC3 water depth-occlusion prepass. Full doodad occlusion behavior not yet retail-validated."
     },
     {
       "name": "EnableSelect",
@@ -2586,7 +2587,8 @@
       "direct_calls": 1,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 1914,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "Configstring -> client -> bounded 2-tap stereo DSP with EAX-style named presets. Retail impulse responses not reproduced."
     },
     {
       "name": "OrderId",
@@ -2774,7 +2776,8 @@
       "direct_calls": 383,
       "path": "games/warcraft-3/game/api/api_math.h",
       "line": 170,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "JASS VM-owned location handles are invalidated via shared ref tombstone; alias-safe, snapshots encode destroyed as null."
     },
     {
       "name": "RemoveRegion",
@@ -2846,7 +2849,8 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_unit.h",
       "line": 409,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "Clears target tracking and 32-bit bone aim render state."
     },
     {
       "name": "ResumeTimer",
@@ -3532,7 +3536,8 @@
       "direct_calls": 2,
       "path": "games/warcraft-3/game/api/api_unit.h",
       "line": 400,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "Tracks generation-safe target + offset, quantized bone hash/yaw/pitch; additive MDX bone pose. Bone-hash collisions and model quirks need comparison."
     },
     {
       "name": "SetUnitMoveSpeed",
@@ -3628,7 +3633,8 @@
       "direct_calls": 3,
       "path": "games/warcraft-3/game/api/api_misc.h",
       "line": 1552,
-      "status": "placeholder"
+      "status": "needs_review",
+      "implementation_note": "Configstring -> renderer override -> water segment vertex color rebuild. Water.slk default restored when config cleared."
     },
     {
       "name": "ShowInterface",

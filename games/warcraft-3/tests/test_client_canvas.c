@@ -284,3 +284,38 @@ TEST(client_canvas, policy_change_re_resolves_without_a_window_event) {
     T_STREQ(test_forwarded_command, "ui_canvas 0");
     cls.state = ca_disconnected;
 }
+
+/* Live JASS world overrides must reach the renderer and mixer after the
+ * configstring has been parsed, including explicit reset to map defaults. */
+static color32_t test_wc3_water;
+static bool test_wc3_water_enabled, test_wc3_occlusion;
+static void test_wc3_setwater(color32_t c, bool enabled) {
+    test_wc3_water = c; test_wc3_water_enabled = enabled;
+}
+static void test_wc3_setocclusion(bool enabled) { test_wc3_occlusion = enabled; }
+extern char test_wc3_environment[64];
+TEST(client_canvas, wc3_world_environment_config_reaches_renderer_and_sound) {
+    test_client_stubs_init();
+    re.SetWaterBaseColor = test_wc3_setwater;
+    re.SetOcclusionEnabled = test_wc3_setocclusion;
+    strlcpy(cl.configstrings[CS_WC3_WATER_RGBA], "12 50 250 170",
+            sizeof(cl.configstrings[CS_WC3_WATER_RGBA]));
+    strlcpy(cl.configstrings[CS_WC3_OCCLUSION], "0",
+            sizeof(cl.configstrings[CS_WC3_OCCLUSION]));
+    strlcpy(cl.configstrings[CS_WC3_SOUND_ENV], "Cave",
+            sizeof(cl.configstrings[CS_WC3_SOUND_ENV]));
+    CL_ApplyWorldPresentationConfig();
+    T_ASSERT(test_wc3_water_enabled);
+    T_EQ(test_wc3_water.r, 12);
+    T_EQ(test_wc3_water.g, 50);
+    T_EQ(test_wc3_water.b, 250);
+    T_EQ(test_wc3_water.a, 170);
+    T_ASSERT(!test_wc3_occlusion);
+    T_STREQ(test_wc3_environment, "Cave");
+    cl.configstrings[CS_WC3_WATER_RGBA][0] = 0;
+    strlcpy(cl.configstrings[CS_WC3_OCCLUSION], "1",
+            sizeof(cl.configstrings[CS_WC3_OCCLUSION]));
+    CL_ApplyWorldPresentationConfig();
+    T_ASSERT(!test_wc3_water_enabled);
+    T_ASSERT(test_wc3_occlusion);
+}

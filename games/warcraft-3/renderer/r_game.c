@@ -414,6 +414,21 @@ texture_t const *R_BlightTexture(void) {
 }
 
 static wc3WaterStyle_t g_water_style;
+/* Keep last server-authored value across a map reload; R_LoadWaterStyle
+ * resets the tileset and then reapplies the current override. */
+static color32_t g_water_color_override;
+static bool g_water_color_enabled;
+
+void R_W3SetWaterBaseColor(color32_t color, bool enabled) {
+    if (g_water_color_enabled == enabled &&
+        (!enabled || memcmp(&g_water_color_override, &color, sizeof(color)) == 0))
+        return;
+    g_water_color_override = color;
+    g_water_color_enabled = enabled;
+    g_water_style.base_override = color;
+    g_water_style.base_override_enabled = enabled;
+    R_W3InvalidateWaterColor();
+}
 
 static color32_t R_WaterRowColor(uint32_t const *rgba) {
     return (color32_t){ .r = (uint8_t)MIN(rgba[0], 255), .g = (uint8_t)MIN(rgba[1], 255),
@@ -430,6 +445,8 @@ void R_LoadWaterStyle(uint8_t tileset) {
     uint32_t count;
 
     memset(&g_water_style, 0, sizeof(g_water_style));
+    g_water_style.base_override_enabled = g_water_color_enabled;
+    g_water_style.base_override = g_water_color_override;
     count = ri.LoadSlk("TerrainArt\\Water.slk", water_schema, (void **)&rows, sizeof(w3WaterRow_t));
     FOR_LOOP(i, count) if (rows[i].id == id) { row = &rows[i]; break; }
     if (!row) {

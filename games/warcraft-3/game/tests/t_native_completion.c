@@ -214,4 +214,84 @@ TEST(wc3_native_completion, buff_dispersal_and_decay_suspend_natives) {
     T_ASSERT((unit->aiflags & AI_CORPSE_DECAY_SUSPENDED) == 0);
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
+/* Explicit RemoveLocation must invalidate every JASS alias, including
+ * location globals, without freeing a pointer while another alias owns it. */
+TEST(wc3_native_completion, location_destroy_invalidates_all_aliases) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n location native_loc = null\n location alias_loc = null\nendglobals\n"
+        "function main takes nothing returns nothing\n"
+        " set native_loc = Location(256.0, 128.0)\n"
+        " set alias_loc = native_loc\n"
+        " call BJassAssert(GetLocationX(alias_loc) == 256.0, \"pre-disposal\")\n"
+        " call RemoveLocation(native_loc)\n"
+        " call BJassAssert(GetLocationX(alias_loc) == 0.0, \"disposed location\")\n"
+        " call MoveLocation(alias_loc, 300.0, 200.0)\n"
+        " call BJassAssert(GetLocationY(native_loc) == 0.0, \"aliases remain disposed\")\n"
+        "endfunction\n"));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_native_completion, look_at_targets_bone_without_changing_combat_facing) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n unit looker = null\n unit watched = null\nendglobals\n"
+        "function main takes nothing returns nothing\n"
+        " set looker = CreateUnit(Player(0), 'hfoo', 0.0, 0.0, 0.0)\n"
+        " set watched = CreateUnit(Player(0), 'hfoo', 300.0, 300.0, 0.0)\n"
+        " call SetUnitLookAt(looker, \"Head\", watched, 0.0, 0.0, 25.0)\n"
+        "endfunction\n"
+        "function release takes nothing returns nothing\n"
+        " call ResetUnitLookAt(looker)\n"
+        "endfunction\n"));
+    edict_t *looker = NULL, *watched = NULL;
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t *e = &globals.edicts[i];
+        if (!e->inuse || e->class_id != MAKEFOURCC('h','f','o','o')) continue;
+        if (!looker) looker = e;
+        else {watched = e; break;}
+    }
+    T_NOT_NULL(looker); T_NOT_NULL(watched);
+    if (!looker || !watched) return;
+    T_ASSERT(looker->s.look_at_packed & 0x80000000u);
+    T_EQ((looker->s.look_at_packed >> 24) & 0x7fu, WC3_LookBoneHash("Head"));
+    float heading = looker->s.angle;
+    uint32_t before = looker->s.look_at_packed;
+    watched->s.origin.y += 500.0f;
+    G_UpdateUnitLookAt(looker);
+    T_ASSERT(before != looker->s.look_at_packed);
+    T_FEQ(looker->s.angle, heading, 0.001f);
+    jass_callbyname(level.vm, "release", false);
+    T_EQ(looker->s.look_at_packed, 0u);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Visual/audio configuration natives must publish a server-to-client value
+ * instead of leaving the JASS API silently ignored. */
+static char native_config_water[48], native_config_environment[128], native_config_occlusion[8];
+static void native_completion_config_capture(uint32_t id, cstring_t value) {
+    char *dst = NULL; size_t size = 0;
+    if (id == CS_WC3_WATER_RGBA) {dst = native_config_water; size = sizeof(native_config_water);}
+    else if (id == CS_WC3_OCCLUSION) {dst = native_config_occlusion; size = sizeof(native_config_occlusion);}
+    else if (id == CS_WC3_SOUND_ENV) {dst = native_config_environment; size = sizeof(native_config_environment);}
+    if (dst) snprintf(dst, size, "%s", value ? value : "");
+}
+TEST(wc3_native_completion, occlusion_water_and_sound_environment_publish_config) {
+    setup_test_world();
+    void (*saved)(uint32_t, cstring_t) = gi.configstring;
+    native_config_water[0] = native_config_environment[0] = native_config_occlusion[0] = 0;
+    gi.configstring = native_completion_config_capture;
+    bool ok = run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " call EnableOcclusion(false)\n"
+        " call SetWaterBaseColor(20, 90, 300, 80)\n"
+        " call NewSoundEnvironment(\"Dungeon\")\n"
+        "endfunction\n");
+    gi.configstring = saved;
+    T_ASSERT(ok);
+    T_STREQ(native_config_occlusion, "0");
+    T_STREQ(native_config_water, "20 90 255 80");
+    T_STREQ(native_config_environment, "Dungeon");
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
 #endif

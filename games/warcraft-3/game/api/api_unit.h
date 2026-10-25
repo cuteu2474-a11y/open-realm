@@ -398,16 +398,30 @@ uint32_t AddUnitAnimationProperties(jass_t *j) {
 //{
 //}
 uint32_t SetUnitLookAt(jass_t *j) {
-//    edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-//    cstring_t whichBone = jass_checkstring(j, 2);
-//    handle_t lookAtTarget = jass_checkhandle(j, 3, "unit");
-//    float offsetX = jass_checknumber(j, 4);
-//    float offsetY = jass_checknumber(j, 5);
-//    float offsetZ = jass_checknumber(j, 6);
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    cstring_t bone = jass_checkstring(j, 2);
+    edict_t *target = jass_checkhandle(j, 3, "unit");
+    vec3_t offset = {jass_checknumber(j, 4), jass_checknumber(j, 5), jass_checknumber(j, 6)};
+    if (!unit || !unit->inuse) return 0;
+    if (!target || !target->inuse || !isfinite(offset.x) ||
+        !isfinite(offset.y) || !isfinite(offset.z)) {
+        unit->look_at_target_number = 0;
+        unit->s.look_at_packed = 0;
+        return 0;
+    }
+    unit->look_at_target_number = target->s.number;
+    unit->look_at_target_generation = target->spawn_time;
+    unit->look_at_offset = offset;
+    unit->look_at_bone_hash = WC3_LookBoneHash(bone);
+    G_UpdateUnitLookAt(unit);
     return 0;
 }
 uint32_t ResetUnitLookAt(jass_t *j) {
-    //edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
+    edict_t *unit = jass_checkhandle(j, 1, "unit");
+    if (!unit) return 0;
+    unit->look_at_target_number = 0;
+    unit->look_at_target_generation = 0;
+    unit->s.look_at_packed = 0;
     return 0;
 }
 uint32_t SetUnitRescuable(jass_t *j) {

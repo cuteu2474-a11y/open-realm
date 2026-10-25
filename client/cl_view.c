@@ -272,6 +272,9 @@ static void V_AddClientEntity(centity_t const *ent) {
     /* model is a uint16_t and MAX_MODELS bounds the configstring lookup. */
     re.origin = Vector3_lerp(&ent->prev.origin, &ent->current.origin, cl.viewDef.lerpfrac);
     re.angle = LerpRotation(ent->prev.angle, ent->current.angle, cl.viewDef.lerpfrac);
+#ifndef WOW
+    re.look_at_packed = ent->current.look_at_packed;
+#endif
 #ifdef WOW
     re.rotation = Vector3_lerp(&ent->prev.rotation, &ent->current.rotation, cl.viewDef.lerpfrac);
 #endif
@@ -587,6 +590,7 @@ void CL_PrepRefresh(void) {
             CM_LoadMap(cl.configstrings[CS_WORLD], CL_LoadingFrame);
         }
         re.RegisterMap(cl.configstrings[CS_WORLD]);
+        CL_ApplyWorldPresentationConfig();
         world_loaded = true;
     }
     CL_LoadingStage(0.40f);

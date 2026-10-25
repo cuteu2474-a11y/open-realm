@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <math.h>
 #ifndef __cplusplus
 #include <stdbool.h>
 #endif
@@ -294,6 +295,9 @@ enum {
     /* Generic scene-distance fog: "style start end density r g b".  Style 0 disables;
      * positive styles currently share the renderer's linear start/end path. */
     CS_SCENE_FOG = 13,
+    CS_WC3_WATER_RGBA = 14,
+    CS_WC3_OCCLUSION = 15,
+    CS_WC3_SOUND_ENV = 16,
     CS_MAXCLIENTS = 30,
     CS_MAPCHECKSUM = 31,        // for catching cheater maps
     CS_MODELS = 32,
@@ -731,6 +735,9 @@ typedef struct entityState_s {
         struct { vec2_t origin2; float z; };
     };
     float angle; /* Canonical actor heading, radians. */
+#ifndef WOW
+    uint32_t look_at_packed; /* model-only selected-bone yaw/pitch (WC3); 0 resets */
+#endif
 #ifdef WOW
     vec3_t rotation; /* Raw placement Euler degrees; preserve the wire layout and decode in the game pose hook. */
 #endif
@@ -776,6 +783,34 @@ _Static_assert(ENT_NAME_SLOT_SIZE * ENT_NAMES_PER_CS == MAX_PATHLEN, "packed nam
 _Static_assert(CS_MAX_NAMES / ENT_NAMES_PER_CS <= MAX_GENERAL,       "name pool requires more CS_GENERAL slots than MAX_GENERAL provides");
 _Static_assert(CS_MAX_NAMES <= 65535,                                 "entityState_t.name is uint16_t; packed index is 1-based so max is 65535");
 
+/* One spare WC3 entity delta field carries bone identity and local aim without
+ * rotating the gameplay unit. Bit31 enabled, bits24..30 bone name hash,
+ * bits12..23 local yaw, bits0..11 local pitch. All three are quantized. */
+static inline uint8_t WC3_LookBoneHash(cstring_t bone) {
+    uint32_t hash = 2166136261u;
+    if (!bone) return 0;
+    while (*bone) {
+        unsigned char c = (unsigned char)*bone++;
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        hash = (hash ^ c) * 16777619u;
+    }
+    return (uint8_t)(hash & 0x7fu);
+}
+static inline uint32_t WC3_LookAtPack(uint8_t bone, float yaw, float pitch) {
+    float const pi = 3.14159265358979323846f;
+    if (!isfinite(yaw) || !isfinite(pitch)) return 0;
+    yaw = remainderf(yaw, 2.0f * pi);
+    pitch = MAX(-pi/2.0f, MIN(pi/2.0f, pitch));
+    uint32_t const yaw12 = (uint32_t)lroundf((yaw + pi) * (4095.0f/(2.0f*pi)));
+    uint32_t const pitch12 = (uint32_t)lroundf((pitch + pi/2.0f)*(4095.0f/pi));
+    return 0x80000000u | (((uint32_t)bone & 0x7fu) << 24) |
+           ((yaw12 & 0xfffu) << 12) | (pitch12 & 0xfffu);
+}
+static inline void WC3_LookAtUnpack(uint32_t packed, float *yaw, float *pitch) {
+    float const pi = 3.14159265358979323846f;
+    if (yaw) *yaw = (((packed >> 12) & 0xfffu)*(2.0f*pi/4095.0f)) - pi;
+    if (pitch) *pitch = ((packed & 0xfffu)*(pi/4095.0f)) - pi/2.0f;
+}
 static inline uint32_t EntityPathingPreviewPack(uint32_t ignore_entity, uint8_t prevented, uint8_t required) {
     return (ignore_entity & 0xffffu) | ((uint32_t)prevented << 16) | ((uint32_t)required << 24);
 }

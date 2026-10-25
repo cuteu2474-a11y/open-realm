@@ -914,6 +914,11 @@ void MDX_RenderModel(renderEntity_t const *entity,
         R_Call(glBindTexture, GL_TEXTURE_2D, tr.texture[TEX_WHITE]->texid);
         R_Call(glActiveTexture, GL_TEXTURE0);
     }
+    /* Model lights may recalculate the pose; reapply the selected bone aim
+     * immediately before uploading the geometry palette. */
+    if (entity->look_at_packed)
+        MDLX_BindBoneMatricesLookAt(model, transform, entity->frame,
+                                    entity->oldframe, entity->look_at_packed);
     MDLX_RenderGeosets(entity, model);
 
     if (tr.render_phase == RENDER_PHASE_ALPHA) {
