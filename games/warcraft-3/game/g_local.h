@@ -1873,6 +1873,10 @@ struct edict_s {
     channel_t *channel;
     uint32_t unit_color;   // WC3_UNIT_COLOR_OVERRIDE_FLAG | playercolor; zero uses owner color
     int32_t user_data;     /* SetUnitUserData script scratch; no gameplay consumer reads it yet */
+    /* Cosmetic MDX bone-look tracking; gameplay unit facing remains unchanged. */
+    uint32_t look_at_target_number, look_at_target_generation;
+    vec3_t look_at_offset;
+    uint8_t look_at_bone_hash;
     bool uses_alt_icon; /* UnitSetUsesAltIcon presentation flag; no minimap consumer reads it yet */
     vec2_t old_origin;
     unitOrderQueue_t order_queue;
