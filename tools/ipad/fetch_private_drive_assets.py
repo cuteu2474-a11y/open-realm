@@ -60,8 +60,22 @@ def locate(token, name, size):
         next_page = result.get('nextPageToken')
         if not next_page:
             break
+    # Drive can return several files with an identical name and size.
+    # Prefer the exact original held in this account's My Drive root.
+    # Deduplicate repeated entries first; never pick an arbitrary match.
+    candidates = list({item['id']: item for item in candidates}.values())
     if len(candidates) > 1:
-        raise RuntimeError('Ambiguous file with matching name and size: ' + name)
+        root_id = api_json(token, 'files/root', {'fields': 'id'}).get('id')
+        roots = []
+        for item in candidates:
+            details = api_json(token, 'files/' + quote(item['id'], safe=''),
+                               {'fields': 'id,parents'})
+            if root_id in details.get('parents', []):
+                roots.append(item)
+        if len(roots) == 1:
+            print('Selected unique My Drive root copy:', name, flush=True)
+            return roots[0]['id']
+        raise RuntimeError('Ambiguous file after root-folder check: ' + name)
     return candidates[0]['id'] if candidates else None
 
 
