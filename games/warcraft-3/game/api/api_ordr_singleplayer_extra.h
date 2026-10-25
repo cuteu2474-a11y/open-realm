@@ -510,11 +510,13 @@ void ORDR_DzFrameEvent(edict_t *ent,uint32_t handle,int event) {
  * The game validates it against the currently authored options so clients
  * cannot pick a nonexistent entry or dispatch from a hidden frame. */
 static int ORDR_DzListRowCount(cstring_t text) {
+    char rows[1024];
     int count=0;
     bool in_row=false;
     if(!text)return 0;
-    for(cstring_t p=text;*p;p++) {
-        if(*p=='\n' || *p=='\r') in_row=false;
+    ORDR_NormalizeListBreaks(rows,sizeof(rows),text);
+    for(cstring_t p=rows;*p;p++) {
+        if(*p=='\n')in_row=false;
         else if(!in_row){count++;in_row=true;}
     }
     return count;

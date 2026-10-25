@@ -31,6 +31,40 @@ static void ordr_frame_root_init(void) {
         }
     }
 }
+/* Warcraft's frame text accepts |n, some imported JASS stores a literal
+ * backslash-n, and the lexer also produces real LF/CRLF characters. Listbox
+ * selection is indexed by physical rows in the client, so canonicalize
+ * separators at the frame boundary, not by changing the authored map text. */
+static void ORDR_NormalizeListBreaks(char *out,size_t capacity,cstring_t input) {
+    size_t n=0;
+    if(!out || !capacity)return;
+    if(!input){out[0]='\0';return;}
+    for(cstring_t p=input;*p && n+1<capacity;) {
+        if((p[0]=='|' && (p[1]=='n'||p[1]=='N')) ||
+           (p[0]=='\\' && p[1]=='n')) {
+            out[n++]='\n';p+=2;continue;
+        }
+        if(*p=='\r') {
+            out[n++]='\n';p+=p[1]=='\n'?2:1;continue;
+        }
+        out[n++]=*p++;
+    }
+    out[n]='\0';
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_ordr_ui, list_text_line_separators) {
+    char text[100];
+    ORDR_NormalizeListBreaks(text,sizeof(text),"first|nsecond\\nthird\r\nfourth\nfifth");
+    T_ASSERT(!strcmp(text,"first\nsecond\nthird\nfourth\nfifth"));
+    ORDR_NormalizeListBreaks(text,sizeof(text),"a|Nb\rc");
+    T_ASSERT(!strcmp(text,"a\nb\nc"));
+    ORDR_NormalizeListBreaks(text,3,"abcd");
+    T_ASSERT(!strcmp(text,"ab"));
+}
+#endif
+
 static void ordr_frame_trace(const char *action,int handle,const char *detail) {
     if (ordr_frame_trace_count++ < 200)
         fprintf(stderr,"ORDR-UI: %s handle=%d %s\n",action,handle,detail?detail:"");
@@ -132,7 +166,25 @@ uint32_t DzCreateFrameByTagName(jass_t *j){
 }
 uint32_t DzFrameShow(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f){f->visible=b;if(f->ui)UI_SetHidden(f->ui,!b);if(!b)ORDR_DzLoseFocusInsideFrame((int)(f-ordr_frames));ordr_frames_dirty=true;ordr_frame_trace(b?"show":"hide",(int)(f-ordr_frames),f->name);}return 0;}
 uint32_t DzFrameSetEnable(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));int b=jass_checkboolean(j,2);if(f){f->enabled=b;if(f->ui)UI_SetEnabled(f->ui,b);if(!b)ORDR_DzLoseFocusInsideFrame((int)(f-ordr_frames));ordr_frames_dirty=true;}return 0;}
-uint32_t DzFrameSetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));const char*s=jass_checkstring(j,2);if(f){snprintf(f->text,sizeof(f->text),"%s",s?s:"");if(f->ui)UI_SetText(f->ui,"%s",f->text);ordr_frames_dirty=true;ordr_frame_trace("text",(int)(f-ordr_frames),f->text);}return 0;}
+uint32_t DzFrameSetText(jass_t *j) {
+    ordr_frame_t *f=ordr_frame(jass_checkinteger(j,1));
+    cstring_t s=jass_checkstring(j,2);
+    if(f) {
+        snprintf(f->text,sizeof(f->text),"%s",s?s:"");
+        if(f->ui) {
+            /* Keep the JASS-visible value unchanged. Only listbox row text is
+             * serialized in the client protocol with physical LF separators. */
+            if(f->ui->Type==FT_LISTBOX) {
+                char rows[sizeof(f->text)];
+                ORDR_NormalizeListBreaks(rows,sizeof(rows),f->text);
+                UI_SetText(f->ui,"%s",rows);
+            } else UI_SetText(f->ui,"%s",f->text);
+        }
+        ordr_frames_dirty=true;
+        ordr_frame_trace("text",(int)(f-ordr_frames),f->text);
+    }
+    return 0;
+}
 uint32_t DzFrameGetText(jass_t *j){ordr_frame_t*f=ordr_frame(jass_checkinteger(j,1));return jass_pushstring(j,f?f->text:"");}
 /* Preserve the authored UI art path in the ORDR execution log and update the
  * FDF-backed image/Backdrop payload consumed by the gameplay serializer. */
