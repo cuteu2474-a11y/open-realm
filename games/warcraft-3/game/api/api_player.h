@@ -121,6 +121,8 @@ uint32_t GetPlayerController(jass_t *j) {
     return JassPushMapControlHandle(j, player ? PLAYER_CLIENT(player)->jass.controller : 5);
 }
 uint32_t GetPlayerSlotState(jass_t *j) {
+    /* A human-capable map slot is not an occupied session slot. AI slots
+     * participate without a network client; explicit removal stays LEFT. */
     player_t *whichPlayer = jass_checkhandle(j, 1, "player");
     gameClient_t *client = whichPlayer ? PLAYER_CLIENT(whichPlayer) : NULL;
     int32_t state = 0;
@@ -128,7 +130,7 @@ uint32_t GetPlayerSlotState(jass_t *j) {
     if (client && client->jass.removed) {
         state = 2;
     } else if (client && client->mapplayer &&
-        (client->mapplayer->playerType == kPlayerTypeHuman ||
+        ((client->mapplayer->playerType == kPlayerTypeHuman && client->connected) ||
          client->mapplayer->playerType == kPlayerTypeComputer))
     {
         state = 1;

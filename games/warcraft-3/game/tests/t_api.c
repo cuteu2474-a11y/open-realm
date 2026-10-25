@@ -57,6 +57,36 @@ static player_t *test_player(int idx) {
     return &game.clients[idx].ps;
 }
 
+TEST(wc3_api, slot_state_counts_connected_humans_and_authored_computers) {
+    setup_test_world();
+    mapInfo_t *map = (mapInfo_t *)level.mapinfo;
+    FOR_LOOP(i, 4) {
+        map->players[i].used = true;
+        map->players[i].playerType = i == 3 ? kPlayerTypeComputer : kPlayerTypeHuman;
+        game.clients[i].mapplayer = &map->players[i];
+        game.clients[i].jass.controller = i == 3 ? 1 : 0;
+    }
+    game.clients[1].connected = true;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " local integer i = 0\n local integer humans = 0\n"
+        " loop\n exitwhen i >= 4\n"
+        " if GetPlayerSlotState(Player(i)) == PLAYER_SLOT_STATE_PLAYING and GetPlayerController(Player(i)) == MAP_CONTROL_USER then\n"
+        " set humans = humans + 1\n endif\n set i = i + 1\n endloop\n"
+        " call BJassAssert(humans == 1, \"empty human slots counted as players\")\n"
+        " call BJassAssert(GetPlayerSlotState(Player(0)) == PLAYER_SLOT_STATE_EMPTY, \"empty slot zero\")\n"
+        " call BJassAssert(GetPlayerSlotState(Player(1)) == PLAYER_SLOT_STATE_PLAYING, \"connected human\")\n"
+        " call BJassAssert(GetPlayerSlotState(Player(3)) == PLAYER_SLOT_STATE_PLAYING, \"computer needs no network connection\")\n"
+        "endfunction\n"));
+    game.clients[2].connected = true;
+    game.clients[1].jass.removed = true;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " call BJassAssert(GetPlayerSlotState(Player(1)) == PLAYER_SLOT_STATE_LEFT, \"removed player\")\n"
+        " call BJassAssert(GetPlayerSlotState(Player(2)) == PLAYER_SLOT_STATE_PLAYING, \"second connected human\")\n"
+        "endfunction\n"));
+}
+
 /* DzAPI names and TOC imports must resolve the original FDF template tree;
  * returning a synthetic handle with no child frames left real ORDR UI code inert. */
 static __typeof__(gi.ReadFile) dz_saved_read_file;
@@ -1444,6 +1474,56 @@ TEST(wc3_api, movement_crossing_region_publishes_entering_unit) {
     jass_callbyname(level.vm, "verify", false);
     T_ASSERT(!jass_rterror_pending(level.vm));
     currentplayer = saved_currentplayer;
+}
+
+/* ORDR CRw/CRy both consume the entering wisp before creating the reward.
+ * Use fixture unit rows and a fixed selection, isolating that event/lifecycle
+ * path from ORDR's random tables and imported unit assets. */
+TEST(wc3_api, beacon_enter_consumes_wisp_and_creates_owned_reward) {
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n unit wisp = null\n unit reward = null\n integer grants = 0\n endglobals\n"
+        "function grant takes nothing returns nothing\n"
+        " local unit entering = GetTriggerUnit()\n"
+        " local player owner = GetOwningPlayer(entering)\n"
+        " if GetUnitTypeId(entering) != 'hpea' then\n return\n endif\n"
+        " call BJassAssert(GetEnteringUnit() == entering, \"beacon event subject\")\n"
+        " call ShowUnit(entering, false)\n call KillUnit(entering)\n"
+        " set reward = CreateUnit(owner, 'hfoo', 256.0, 256.0, 270.0)\n"
+        " call IssueImmediateOrder(reward, \"holdposition\")\n"
+        " set grants = grants + 1\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        " local trigger t = CreateTrigger()\n local region r = CreateRegion()\n"
+        " call RegionAddRect(r, Rect(24.0, -16.0, 64.0, 16.0))\n"
+        " call TriggerRegisterEnterRegion(t, r, null)\n call TriggerAddAction(t, function grant)\n"
+        " set wisp = CreateUnit(Player(1), 'hpea', 0.0, 0.0, 0.0)\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        " call BJassAssert(grants == 1, \"beacon must grant once\")\n"
+        " call BJassAssert(GetWidgetLife(wisp) <= 0.405, \"wisp not consumed\")\n"
+        " call BJassAssert(reward != null, \"reward not created\")\n"
+        " call BJassAssert(GetOwningPlayer(reward) == Player(1), \"reward owner changed\")\n"
+        "endfunction\n"));
+    edict_t *mover = find_test_unit(MAKEFOURCC('h','p','e','a'));
+    T_NOT_NULL(mover);
+    mover->svflags |= SVF_MONSTER;
+    mover->movetype = MOVETYPE_STEP;
+    mover->stand = unit_stand; mover->birth = unit_birth; mover->die = unit_die;
+    mover->think = monster_think;
+    mover->collision = 0.0f;
+    mover->health.value = mover->health.max_value = 250.0f;
+    unit_stand(mover);
+    T_ASSERT(unit_issueorder(mover, "move", &MAKE(vec2_t, 80.0f, 0.0f)));
+    G_RunEntities();
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    /* Staying inside the beacon must not mint another reward. */
+    G_RunEntities(); G_RunEvents(); jass_runevents(level.vm);
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
 TEST(wc3_api, nonunit_map_entity_placement_does_not_fire_region_enter) {

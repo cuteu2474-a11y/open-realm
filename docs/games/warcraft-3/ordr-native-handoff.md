@@ -150,7 +150,35 @@ GitHub Actions 실행/취소나 IPA 빌드는 이번 작업에서 하지 않았�
 - 원본 `war3map.j`의 `UnitDamagePointLoc` 199회 직접 호출 및 지연 `.42`, `.7`,
   `ATTACK_TYPE_NORMAL`/`CHAOS`, `DAMAGE_TYPE_NORMAL`/`UNIVERSAL` 근거는 위 1차 분석과 동일하다.
 
+## 2026-10-25 — 빈 인간 슬롯과 누락된 계산 HP 수정
+
+- 원본 맵 `Units/UnitBalance.slk`는 `e0IX`/`e0HP`에 `HP=10`, `u000`에
+  `HP=125`를 저장하지만 `realHP` 셀을 생략한다. 10월 23일 16:15:36
+  iPad 로그는 `e0IX`의 실제 HP가 `0/0`임을 확인한다. 함수 누락만의
+  문제가 아니라 계산 셀 생략을 처리하지 못한 데이터 로딩 결함이다.
+- 누락된 `realHP`만 원본 HP와 기존 힘 보너스 공식으로 계산한다.
+  명시적인 계산 HP(0 포함)는 보존한다. 회귀 테스트는 수정 전 실패했고,
+  누락 셀/힘 보너스/명시적 0/명시적 계산 HP 및 실제 유닛 생성 경로를 검사한다.
+- `GetPlayerSlotState`는 실제 연결된 인간 슬롯만 PLAYING으로 반환한다.
+  맵의 컴퓨터 슬롯은 연결 없이 PLAYING, 제거된 슬롯은 LEFT다.
+  원본 `BJF`/`Bcv`는 이 native와 `GetPlayerController`로 참가자를 판별한다.
+  미접속 슬롯을 세는 회귀를 수정 전 재현했다. 파티 모드 실기 해결은 미확인이다.
+- `wc3_api.beacon_enter_consumes_wisp_and_creates_owned_reward`는 실제 이동
+  → 영역 이벤트 → 위습 숨김/사망 → 소유자 유지 보상 생성 경로를 검증한다.
+  원본 CRw/CRy의 소비 순서를 사용하되 fixture 유닛과 고정 보상으로
+  랜덤 테이블/원본 맵 전체 실행을 대체하지 않는다. 비콘 실기 해결을 주장하지 않는다.
+- 원본은 `SetTerrainFog`/`SetUnitFog`를 호출하지 않는다. 초기 안개는
+  `SetTerrainFogEx(0,4000,30000,0.5,1,1,1)`이고, CUC의 2초 필터는
+  검정 불투명 → 흰색 투명이다. 밝아지는 연출 자체는 원본 동작이며,
+  지형 소실 원인은 아직 확인되지 않았다. 안개를 끄거나 맵을 수정하지 않는다.
+- 남은 범위: 실제 비콘과 모든 보상 rawcode/데이터, 누락 `realM`/`realdef`,
+  실제 iPad 지형·카메라·조명, 피해 유형/면역. 전체 구현 완료로 취급하지 않는다.
+- 검증: 수정 전 전체 `make test -j4` 통과. 새 슬롯/HP 회귀는 수정 전
+  실패를 확인했고, 수정 후 ROC/TFT를 포함한 전체 `make test -j4`가
+  종료 코드 0으로 통과했다. 네트워크/저장 형식 변경은 없다.
+
 ## 다음 채팅에 붙여 넣을 문장
+
 
 > `cuteu2474-a11y/open-realm`의 `feature/ordr-singleplayer-compat`에서 이어서 작업해주세요.
 > 먼저 `docs/games/warcraft-3/ordr-native-handoff.md`와 `ordr-native-audit.json`을 읽고,

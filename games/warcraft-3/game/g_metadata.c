@@ -194,7 +194,7 @@ static slkField_t const balance_schema[] = {
     { "stockRegen",       offsetof(UnitBalance_t, stockRegen),      STB_SLK_INT   },
     { "stockStart",       offsetof(UnitBalance_t, stockStart),      STB_SLK_INT   },
     { "HP",               offsetof(UnitBalance_t, baseHealth),      STB_SLK_INT   },
-    { "realHP",           offsetof(UnitBalance_t, maxHealth),       STB_SLK_FLOAT },
+    { "realHP",           offsetof(UnitBalance_t, maxHealth),       STB_SLK_FLOAT, .default_value = "nan" },
     { "regenHP",          offsetof(UnitBalance_t, healthRegen),     STB_SLK_FLOAT },
     { "regenType",        offsetof(UnitBalance_t, healthRegenType), STB_SLK_STR   },
     { "manaN",            offsetof(UnitBalance_t, baseMana),        STB_SLK_INT   },
@@ -985,6 +985,15 @@ static slkStore_t slk_stores[] = {
 
 static int32_t G_NormalizeArmorType(cstring_t value, int32_t fallback);
 
+/* Optimized map sheets can omit individual computed cells. Distinguish an
+ * absent realHP from an authored zero, then use the same base-Strength HP
+ * contribution as G_RecomputeHeroStats. Never replace an explicit realHP. */
+static void NormalizeBalanceHealth(UnitBalance_t *rows, uint32_t count) {
+    FOR_LOOP(i, count)
+        if (isnan(rows[i].maxHealth))
+            rows[i].maxHealth = rows[i].baseHealth + rows[i].strength * 25.0f;
+}
+
 /* Tests replace a typed table and restore its original parser-owned source. */
 #ifdef BZ_TESTS
 /* Tests assert the documented-optional contract without capturing stderr from InitUnitData. */
@@ -1007,6 +1016,8 @@ slkTestData_t *G_SetSLKRows(cstring_t slk, slkTestData_t *data) {
             }
             FS_SLKFreeIndex(store->idx);
             *store->rows = data->rows; *store->count = data->count;
+            if (!strcmp(store->name, "UnitBalance"))
+                NormalizeBalanceHealth(g_UnitBalance, g_UnitBalanceCount);
             if (!strcmp(store->name, "UnitWeapons"))
                 NormalizeWeaponTargetMasks(g_UnitWeapons, g_UnitWeaponsCount);
             if (!strcmp(store->name, "UnitUI"))
@@ -2537,6 +2548,8 @@ void InitUnitData(void) {
         if (!*store->count)
             *store->count = Stb_SlkLoad(store->path, store->schema, store->rows, store->row_size);
         if (!*store->count && !store->optional) fprintf(stderr, "SLK: failed to load '%s'\n", store->path);
+        if (!strcmp(store->name, "UnitBalance"))
+            NormalizeBalanceHealth(g_UnitBalance, g_UnitBalanceCount);
         if (!strcmp(store->name, "UnitWeapons"))
             NormalizeWeaponTargetMasks(g_UnitWeapons, g_UnitWeaponsCount);
         if (store->idx) FS_SLKBuildIndex(store->idx, *store->rows, *store->count, store->row_size);

@@ -1153,6 +1153,33 @@ TEST(wc3_slk, unit_hp_peasant) {
     T_ASSERT(hp == 220.0f || hp == 250.0f); /* TFT / ROC */
 }
 
+TEST(wc3_slk, sparse_balance_hp_preserves_authored_and_explicit_zero_values) {
+    slkTestData_t *rows = parse_slk_string(
+        "ID;PWXL;N;E\nB;X4;Y6;D0\n"
+        "C;X1;Y1;K\"unitBalanceID\"\nC;X2;K\"HP\"\nC;X3;K\"realHP\"\nC;X4;K\"STR\"\n"
+        "C;X1;Y2;K\"e0IX\"\nC;X2;K10\n"
+        "C;X1;Y3;K\"u000\"\nC;X2;K125\nC;X3;K0\n"
+        "C;X1;Y4;K\"Hpal\"\nC;X2;K100\nC;X4;K7\n"
+        "C;X1;Y5;K\"hfoo\"\nC;X2;K100\nC;X3;K471\n"
+        "C;X1;Y6;K\"hpea\"\nC;X2;K37\nE\n");
+    slkTestData_t *old = G_SetSLKRows("UnitBalance", rows);
+    T_NOT_NULL(old);
+    T_FEQ(G_UnitBalance(MAKEFOURCC('e','0','I','X'))->maxHealth, 10.0f, 0.001f);
+    T_FEQ(G_UnitBalance(MAKEFOURCC('u','0','0','0'))->maxHealth, 0.0f, 0.001f);
+    T_FEQ(G_UnitBalance(MAKEFOURCC('H','p','a','l'))->maxHealth, 275.0f, 0.001f);
+    T_FEQ(G_UnitBalance(MAKEFOURCC('h','f','o','o'))->maxHealth, 471.0f, 0.001f);
+    edict_t *wisp = alloc_test_unit(MAKEFOURCC('e','0','I','X'), 0, 0);
+    T_FEQ(wisp->health.value, 10.0f, 0.001f);
+    T_ASSERT(!M_IsDead(wisp));
+    setup_test_world();
+    edict_t *spawned = unit_create(1, MAKEFOURCC('h','p','e','a'), &MAKE(vec2_t, 80, 80), 0);
+    T_NOT_NULL(spawned);
+    T_FEQ(spawned->health.value, 37.0f, 0.001f);
+    T_FEQ(spawned->health.max_value, 37.0f, 0.001f);
+    G_SetSLKRows("UnitBalance", old);
+    free_slk_rows(rows);
+}
+
 TEST(wc3_slk, unit_hp_footman) {
     T_FEQ(G_UnitBalance(MAKEFOURCC('h','f','o','o'))->maxHealth, 420.0f, 0.01f);
 }
