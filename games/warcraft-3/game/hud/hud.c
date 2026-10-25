@@ -459,6 +459,42 @@ static bool UI_IsSingleLineText(cstring_t text) {
     return strchr(text, '\n') == NULL && strchr(text, '\r') == NULL;
 }
 
+/* Warcraft/FDF text uses |n for a line break. Imported map strings may
+ * also contain literal backslash-n or CRLF. Convert only the outgoing UI
+ * payload; JASS DzFrameGetText and authored FDF data keep their own values.
+ * Return false without truncating if the scratch buffer is insufficient. */
+static bool UI_NormalizeWireLineBreaks(char *out, size_t capacity, cstring_t text) {
+    size_t used=0;
+    bool changed=false;
+    if (!out || !capacity || !text) return false;
+    for (cstring_t p=text; *p;) {
+        char c;
+        if (p[0]=='|' && p[1]=='|') {
+            if (used+2>=capacity) return false;
+            out[used++]='|';
+            out[used++]='|';
+            p+=2;
+            continue;
+        }
+        if ((p[0]=='|' && (p[1]=='n'||p[1]=='N')) ||
+            (p[0]=='\\' && p[1]=='n')) {
+            c='\n';
+            p+=2;
+            changed=true;
+        } else if (p[0]=='\r') {
+            c='\n';
+            p+=p[1]=='\n'?2:1;
+            changed=true;
+        } else {
+            c=*p++;
+        }
+        if (used+1>=capacity) return false;
+        out[used++]=c;
+    }
+    out[used]='\0';
+    return changed;
+}
+
 bool UI_BuildFrameForWrite(frameDef_t const *frame,
                                   uiFrame_t *out,
                                   uint8_t *typedata,
@@ -745,6 +781,7 @@ _Static_assert(sizeof(uiNameTag_t) <= UINT8_MAX, "uiNameTag_t exceeds the one-by
 
 static void UI_WriteBuiltFrame(frameDef_t const *frame, float value, bool override_value, uiSizeToTextParams_t const *fit) {
     char textbuf[4096];
+    char normalized_text[4096], normalized_tooltip[2048];
     uiFrame_t tmp;
     uint8_t typedata[256] = { 0 };
     uiNameTag_t sized;
@@ -772,6 +809,15 @@ static void UI_WriteBuiltFrame(frameDef_t const *frame, float value, bool overri
         tmp.buffer.data = &sized;
         tmp.buffer.size = sizeof(sized);
     }
+    /* This is the last common path for cloned Dz frames, FDF-authored
+     * labels and listbox contents, before both normal and window wire codecs.
+     * Avoid interpreting an edit control's literal text as formatting. */
+    if (frame->Type!=FT_EDITBOX && frame->Type!=FT_GLUEEDITBOX &&
+        frame->Type!=FT_SLASHCHATBOX &&
+        UI_NormalizeWireLineBreaks(normalized_text,sizeof(normalized_text),tmp.text))
+        tmp.text=normalized_text;
+    if (UI_NormalizeWireLineBreaks(normalized_tooltip,sizeof(normalized_tooltip),tmp.tooltip))
+        tmp.tooltip=normalized_tooltip;
     if (ui_window_writing) {
         tmp.text = (cstring_t)(uintptr_t)UI_WindowTextOffset(tmp.text);
         tmp.tooltip = (cstring_t)(uintptr_t)UI_WindowTextOffset(tmp.tooltip);

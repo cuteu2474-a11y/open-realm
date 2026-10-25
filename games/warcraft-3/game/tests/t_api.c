@@ -104,6 +104,7 @@ TEST(wc3_api, dz_toc_and_frame_creation_find_real_template_children) {
 }
 
 static uint32_t dz_written_frames, dz_written_backdrops, dz_written_texts, dz_written_unicasts, dz_textured_backdrops;
+static unsigned dz_wire_multiline_text, dz_wire_multiline_area, dz_wire_multiline_list;
 static bool dz_layout_layer_pending;
 static int32_t dz_layout_layer;
 static char dz_priority_order[8];
@@ -121,6 +122,11 @@ static void dz_test_write(pfWriteType_t type, void const *value) {
     if(type!=PF_UIFRAME || dz_layout_layer!=LAYER_GAME_3)return;
     uiFrame_t const *frame=value;
     dz_written_frames++;
+    if (frame->text && !strcmp(frame->text,"first\nsecond\nthird")) {
+        if (frame->flags.type==FT_TEXT) dz_wire_multiline_text++;
+        if (frame->flags.type==FT_TEXTAREA) dz_wire_multiline_area++;
+        if (frame->flags.type==FT_LISTBOX) dz_wire_multiline_list++;
+    }
     if(frame->flags.type==FT_EDITBOX && frame->onclick && !strcmp(frame->onclick,"#uievent 2 512")){
         dz_edit_wire_focus=frame->value;
         dz_edit_wire_command=true;
@@ -180,6 +186,42 @@ TEST(wc3_api, dz_frames_emit_real_ui_payloads) {
     T_EQ(dz_textured_backdrops,1u);
     T_EQ(dz_written_texts,1u);
     T_ASSERT(dz_written_unicasts>=1);
+}
+
+TEST(wc3_api, dz_linebreaks_render_on_wire_without_changing_jass_text) {
+    __typeof__(gi.Write) old_write=gi.Write;
+    __typeof__(gi.unicast) old_unicast=gi.unicast;
+    setup_test_world();
+    game.clients[0].connected=true;
+    dz_wire_multiline_text=dz_wire_multiline_area=dz_wire_multiline_list=0;
+    dz_layout_layer_pending=false;
+    dz_layout_layer=-1;
+    T_ASSERT(run_test_jass(
+        "native DzGetGameUI takes nothing returns integer\n"
+        "native DzCreateFrameByTagName takes string typ, string name, integer parent, string template, integer id returns integer\n"
+        "native DzFrameSetText takes integer frame, string value returns nothing\n"
+        "native DzFrameGetText takes integer frame returns string\n"
+        "function main takes nothing returns nothing\n"
+        " local integer root = DzGetGameUI()\n"
+        " local integer textFrame = DzCreateFrameByTagName(\"TEXT\", \"multilineText\", root, \"\", 0)\n"
+        " local integer areaFrame = DzCreateFrameByTagName(\"TEXTAREA\", \"multilineArea\", root, \"\", 0)\n"
+        " local integer listFrame = DzCreateFrameByTagName(\"LISTBOX\", \"multilineList\", root, \"\", 0)\n"
+        " call DzFrameSetText(textFrame, \"first|nsecond\\\\nthird\")\n"
+        " call DzFrameSetText(areaFrame, \"first|nsecond\\\\nthird\")\n"
+        " call DzFrameSetText(listFrame, \"first|nsecond\\\\nthird\")\n"
+        " call BJassAssert(DzFrameGetText(textFrame) == \"first|nsecond\\\\nthird\", \"text getter was mutated\")\n"
+        " call BJassAssert(DzFrameGetText(listFrame) == \"first|nsecond\\\\nthird\", \"list getter was mutated\")\n"
+        "endfunction\n"));
+    gi.Write=dz_test_write;
+    gi.unicast=dz_test_unicast;
+    level.started=true;
+    level.scriptsStarted=true;
+    globals.RunFrame();
+    gi.Write=old_write;
+    gi.unicast=old_unicast;
+    T_ASSERT(dz_wire_multiline_text>0);
+    T_ASSERT(dz_wire_multiline_area>0);
+    T_ASSERT(dz_wire_multiline_list>0);
 }
 
 TEST(wc3_api, dz_click_flows_through_actual_client_command_and_respects_visibility) {
