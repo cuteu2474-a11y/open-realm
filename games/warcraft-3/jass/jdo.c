@@ -1361,7 +1361,14 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         jass_pushfunction(tmp_state, cond->expr);
         edict_t *previous_unit = currentunit;
         currentunit = params->unit;
+        bool ordr_cux_condition = cond->expr && jass_functionname(cond->expr) &&
+            !strcmp(jass_functionname(cond->expr), "CUX") &&
+            jass_root(j) == ordr_flow_vm;
+        if (ordr_cux_condition)
+            jass_ordr_log_event(j, "CUX_CONDITION_BEFORE", "evaluating authored trigger condition");
         uint32_t result_count = jass_call(tmp_state, 0);
+        if (ordr_cux_condition)
+            jass_ordr_log_event(j, "CUX_CONDITION_AFTER", "authored trigger condition returned");
         currentunit = previous_unit;
         /* A condition may destroy its own list: do not dereference cond again. */
         if (params->trigger->destroyed) { jass_free(tmp_state); return false; }

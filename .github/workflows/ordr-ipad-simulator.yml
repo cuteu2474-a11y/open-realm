@@ -173,6 +173,47 @@ jobs:
           else
             echo "os_log_query=unavailable" >> "$REPORT/runtime-status.txt"
           fi
+          # Preserve only crash classification metadata, never complete .ips
+          # reports or device logs containing possible personal information.
+          python3 - "$REPORT" "$BUNDLE_ID" <<'PY'
+          import json, pathlib, sys
+          report=pathlib.Path(sys.argv[1])
+          bundle=sys.argv[2]
+          roots=[
+              pathlib.Path.home()/"Library/Logs/DiagnosticReports",
+              pathlib.Path.home()/"Library/Developer/CoreSimulator/Devices",
+          ]
+          candidates=[]
+          for root in roots:
+              if not root.exists():
+                  continue
+              if root.name=="Devices":
+                  pattern="*/data/Library/Logs/CrashReporter/*.ips"
+                  candidates.extend(root.glob(pattern))
+              else:
+                  candidates.extend(root.glob("*.ips"))
+          hits=0
+          classifications={}
+          for f in candidates:
+              # Read only files with a Warcraft title; no raw report is saved.
+              if "warcraft" not in f.name.lower() and "openwarcraft" not in f.name.lower():
+                  continue
+              try:
+                  content=f.read_text(encoding="utf-8",errors="replace")
+              except OSError:
+                  continue
+              if bundle not in content and "Warcraft3" not in content:
+                  continue
+              hits+=1
+              for signature in ("EXC_BAD_ACCESS","EXC_RESOURCE","SIGKILL",
+                                "SIGABRT","EXC_CRASH","Jetsam","watchdog"):
+                  if signature.lower() in content.lower():
+                      classifications[signature]=classifications.get(signature,0)+1
+          (report/"crash-report-status.json").write_text(json.dumps(
+              {"matching_report_count":hits,
+               "signature_counts":classifications,
+               "reports_exported":False},indent=2))
+          PY
           echo "automated_touch_input=false" >> "$REPORT/runtime-status.txt"
           echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
