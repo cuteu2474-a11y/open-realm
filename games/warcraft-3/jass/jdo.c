@@ -1288,7 +1288,9 @@ void jass_runevents(jass_t *j) {
         ordinal++;
         jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_RESUME", co, ordinal);
         bool const previous_probe = ordr_native_probe_active;
-        if (root == ordr_flow_vm && ordinal >= 6 && ordinal <= 32 &&
+        /* BB4 is ordinal 2 in the captured stall: starting at 6 suppressed
+         * native checkpoints for the only resume that failed to return. */
+        if (root == ordr_flow_vm && ordinal >= 2 && ordinal <= 32 &&
             ordr_native_probe_calls < 512)
             ordr_native_probe_active = true;
         jass_resume(root, co);
@@ -1335,10 +1337,21 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
     bool all_true = true;
+    bool after_cux = false;
+    unsigned cond_index = 0, follow_remaining = 0;
     if (!tmp_state) return false;
     if (params->trigger->evaluation_count < UINT32_MAX)
         params->trigger->evaluation_count++;
     FOR_EACH_LIST(gTriggerCondition_t, cond, params->trigger->conditions) {
+        cstring_t cond_name = cond->expr ? jass_functionname(cond->expr) : NULL;
+        bool const cux = jass_root(j) == ordr_flow_vm && cond_name && !strcmp(cond_name, "CUX");
+        bool const trace = cux || follow_remaining > 0;
+        char detail[160];
+        if (trace) {
+            snprintf(detail, sizeof(detail), "index=%u function=%s", cond_index,
+                     cond_name ? cond_name : "(null)");
+            jass_ordr_log_event(j, "CONDITION_ENTER", detail);
+        }
         memcpy(tmp_state, j, sizeof(struct jass_s));
         memset(tmp_state->stack, 0, sizeof(tmp_state->stack));
         tmp_state->num_stack = 0;
@@ -1361,14 +1374,20 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         jass_pushfunction(tmp_state, cond->expr);
         edict_t *previous_unit = currentunit;
         currentunit = params->unit;
-        bool ordr_cux_condition = cond->expr && jass_functionname(cond->expr) &&
-            !strcmp(jass_functionname(cond->expr), "CUX") &&
-            jass_root(j) == ordr_flow_vm;
-        if (ordr_cux_condition)
+        if (cux)
             jass_ordr_log_event(j, "CUX_CONDITION_BEFORE", "evaluating authored trigger condition");
         uint32_t result_count = jass_call(tmp_state, 0);
-        if (ordr_cux_condition)
+        if (cux)
             jass_ordr_log_event(j, "CUX_CONDITION_AFTER", "authored trigger condition returned");
+        if (trace) {
+            snprintf(detail, sizeof(detail), "index=%u function=%s returns=%u stack=%u destroyed=%d",
+                     cond_index, cond_name ? cond_name : "(null)", result_count,
+                     tmp_state->num_stack, (int)params->trigger->destroyed);
+            jass_ordr_log_event(j, "CONDITION_RESULT", detail);
+        }
+        if (cux) { after_cux = true; follow_remaining = 32; }
+        else if (follow_remaining) follow_remaining--;
+        cond_index++;
         currentunit = previous_unit;
         /* A condition may destroy its own list: do not dereference cond again. */
         if (params->trigger->destroyed) { jass_free(tmp_state); return false; }
@@ -1379,13 +1398,16 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
          * continue; an explicit boolean false retains short-circuiting. */
         if (result_count == 0) {
             all_true = false;
+            if (trace) jass_ordr_log_event(j, "CONDITION_ADVANCE", "void condition: advancing");
             continue;
         }
         if (result_count != 1 || !jass_popboolean(tmp_state)) {
             jass_free(tmp_state);
             return false;
         }
+        if (trace) jass_ordr_log_event(j, "CONDITION_ADVANCE", "boolean condition accepted");
     }
+    if (after_cux) jass_ordr_log_event(j, "CONDITION_LIST_DONE", "trigger condition loop completed");
     jass_free(tmp_state);
     return all_true;
 }

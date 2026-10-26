@@ -184,3 +184,44 @@ GitHub Actions 실행/취소나 IPA 빌드는 이번 작업에서 하지 않았�
 > 먼저 `docs/games/warcraft-3/ordr-native-handoff.md`와 `ordr-native-audit.json`을 읽고,
 > 남은 원랜디 네이티브를 실제 동작과 회귀 테스트까지 구현해주세요. 등록/빈 본문을 완료로
 > 세지 말고 원본 선택 이벤트 경로를 유지해주세요. 워크플로를 수정마다 시작하거나 취소하지 마세요.
+
+## 2026-10-26 — iPad 시뮬레이터 로딩 정체 진단
+
+대상 실행: [40295825289](https://github.com/cuteu2474-a11y/open-realm/actions/runs/40295825289),
+엔진 커밋 `8e09b0a`. 이 실행의 `ORDR-iPad-simulator-smoke` 아티팩트를 실제 확인했다.
+
+- `ordr-renderer.log`: 맵 등록 완료 (`R_REGISTER_MAP_COMPLETE`), 등록 시간 27,081ms.
+- `ordr-client.log`: `CLIENT_ACTIVATED_LOADING_CLEARED` 기록. 실제 화면은 240초에도
+  로딩 이미지이며, 관측된 한 번의 `CL_FRAME_BEFORE_DRAW` → `AFTER_DRAW`는 20,867ms.
+- `ordr-server.log`: `SERVER_FRAME_COMPLETE`는 8번째 게임 프레임(800ms)까지 기록.
+- `ordr-jass.log`: 2,000ms의 `BB4` 코루틴 ordinal 2가 `CUX_CONDITION_AFTER`까지
+  도달하지만, 해당 `EVENT_AFTER_RESUME`/`FLOW_RETURN`/서버 프레임 완료는 기록되지 않음.
+- 360·480초 스크린샷은 iPad 홈 화면. 이전 `crash-report-status.json`은 앱 관련
+  보고서를 한 개 찾았으나 종료 종류를 분류하지 못했다. **JASS 무한 루프·메모리 부족·
+  렌더러 크래시 중 어느 원인인지 아직 확정할 수 없다.**
+
+당시 네이티브 호출 샘플러는 6~32번째 코루틴에만 활성화되었다. 실제 문제 코루틴은
+두 번째이므로 `CUX` 직후 호출을 전혀 포착하지 못했다. 이를 2번째부터 활성화했고,
+조건 평가기에 `CONDITION_ENTER` → `CONDITION_RESULT` → `CONDITION_ADVANCE`와
+`CONDITION_LIST_DONE`의 제한된 추적을 추가했다. `CUX` 이후 최대 32개 조건만 추적하며
+원본 JASS 실행 순서나 게임 동작은 변경하지 않는다.
+
+시뮬레이터의 진단은 다음 명령으로 로컬에서도 재분석할 수 있다.
+
+```bash
+python3 tools/ordr/check_simulator_runtime.py /path/to/ORDR-iPad-simulator-smoke
+python3 -m unittest discover -s tests -p 'test_ordr_simulator_runtime.py'
+python3 -m unittest discover -s tools/ipad/tests -p 'test_crash_report_summary.py'
+```
+
+이 도구는 클라이언트 활성화·렌더러 등록과 `BB4` 코루틴의 반환 여부를 별개로
+보고하고, 실제 게임 진행 검증은 항상 `false`로 유지한다. 시뮬레이터 실행 워크플로는
+또한 **현재 앱 실행 이후**의 `.ips` 보고서에서 예외명·종료 네임스페이스·보고서 유형만
+집계한다. 원시 크래시 보고서와 개인 로그는 아티팩트에 추가하지 않는다.
+
+다음 로그 판독 순서: (1) `CONDITION_RESULT`가 없다면 CUX 반환 직후 검사 경로,
+(2) `CONDITION_ADVANCE`가 있고 다음 `CONDITION_ENTER`가 없다면 리스트 이동,
+(3) 다음 조건에 진입했으나 반환하지 않으면 그 함수의 `NATIVE_*` 및 콜체인,
+(4) `CONDITION_LIST_DONE`이면 `BB4` 나머지 동기 호출과 코루틴 반환 경로.
+별도로 `crash-report-status.json`의 종류와 클라이언트 프레임 소요 시간을 대조한다.
+실제 난이도 화면 표시나 플레이 성공은 이 진단 패치만으로 주장하지 않는다.

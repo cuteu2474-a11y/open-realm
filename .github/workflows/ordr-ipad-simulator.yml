@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/workflows/ordr-ipad-simulator.yml'
       - 'tools/ipad/fetch_private_drive_assets.py'
+      - 'tools/ipad/crash_report_summary.py'
+      - 'tools/ordr/check_simulator_runtime.py'
+      - 'games/warcraft-3/jass/**'
+      - 'games/warcraft-3/game/**'
 
 permissions:
   contents: read
@@ -29,7 +33,9 @@ jobs:
           xcrun simctl list devices available
 
       - name: Unit-test private Drive OAuth refresh (no credentials or internet)
-        run: python3 -m unittest discover -s tools/ipad/tests -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s tools/ipad/tests -p 'test_*.py'
+          python3 -m unittest discover -s tests -p 'test_ordr_simulator_runtime.py'
 
       - name: Build iPad simulator app
         run: make ipad-simulator
@@ -112,6 +118,7 @@ jobs:
 
           # This is an app-launch smoke test, NOT a UI gameplay/touch test.
           # Only attempt direct map loading when BOTH licensed inputs exist.
+          LAUNCH_EPOCH="$(date +%s)"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
             MAP_NAME="$(find "$DATA_DIR/Documents/Maps" -maxdepth 1 -iname 'ORDR_S2_2.323*.w3x' -print -quit | xargs basename)"
             echo "launch_mode=ordr_map" | tee "$REPORT/launch-mode.txt"
@@ -165,6 +172,7 @@ jobs:
           else
             echo "jass_log_found=false" > "$REPORT/runtime-status.txt"
           fi
+          python3 tools/ordr/check_simulator_runtime.py "$REPORT" > "$REPORT/engine-stage-summary.json"
 
           # Retain only aggregated OS diagnostic counters, not raw system logs.
           if xcrun simctl spawn "$UDID" log show --last 6m --style compact \
@@ -185,47 +193,10 @@ jobs:
           else
             echo "os_log_query=unavailable" >> "$REPORT/runtime-status.txt"
           fi
-          # Preserve only crash classification metadata, never complete .ips
-          # reports or device logs containing possible personal information.
-          python3 - "$REPORT" "$BUNDLE_ID" <<'PY'
-          import json, pathlib, sys
-          report=pathlib.Path(sys.argv[1])
-          bundle=sys.argv[2]
-          roots=[
-              pathlib.Path.home()/"Library/Logs/DiagnosticReports",
-              pathlib.Path.home()/"Library/Developer/CoreSimulator/Devices",
-          ]
-          candidates=[]
-          for root in roots:
-              if not root.exists():
-                  continue
-              if root.name=="Devices":
-                  pattern="*/data/Library/Logs/CrashReporter/*.ips"
-                  candidates.extend(root.glob(pattern))
-              else:
-                  candidates.extend(root.glob("*.ips"))
-          hits=0
-          classifications={}
-          for f in candidates:
-              # Read only files with a Warcraft title; no raw report is saved.
-              if "warcraft" not in f.name.lower() and "openwarcraft" not in f.name.lower():
-                  continue
-              try:
-                  content=f.read_text(encoding="utf-8",errors="replace")
-              except OSError:
-                  continue
-              if bundle not in content and "Warcraft3" not in content:
-                  continue
-              hits+=1
-              for signature in ("EXC_BAD_ACCESS","EXC_RESOURCE","SIGKILL",
-                                "SIGABRT","EXC_CRASH","Jetsam","watchdog"):
-                  if signature.lower() in content.lower():
-                      classifications[signature]=classifications.get(signature,0)+1
-          (report/"crash-report-status.json").write_text(json.dumps(
-              {"matching_report_count":hits,
-               "signature_counts":classifications,
-               "reports_exported":False},indent=2))
-          PY
+          # Restrict reports to this launch and export only allowlisted fields.
+          # No .ips content or personal device log is uploaded.
+          python3 tools/ipad/crash_report_summary.py --bundle-id "$BUNDLE_ID" \
+            --launched-at "$LAUNCH_EPOCH" > "$REPORT/crash-report-status.json"
           echo "automated_touch_input=false" >> "$REPORT/runtime-status.txt"
           echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
@@ -245,10 +216,17 @@ jobs:
             echo "- ORDR map supplied: $MAP_FOUND"
             echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, and 480 seconds (workflow artifact)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
+            echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
             echo "- Automated taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
               echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '```json'
+            cat "$REPORT/engine-stage-summary.json"
+            cat "$REPORT/crash-report-status.json"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload simulator diagnostics (never include game assets)
