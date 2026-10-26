@@ -123,13 +123,52 @@ jobs:
               > "$REPORT/launch.txt"
           fi
 
-          sleep 8
-          xcrun simctl io "$UDID" screenshot "$REPORT/after-8s.png"
-          sleep 8
-          xcrun simctl io "$UDID" screenshot "$REPORT/after-16s.png"
+          # Observe the map for four minutes; a successful simctl launch alone
+          # only proves launch request acceptance, not working gameplay.
+          OBSERVE_STARTED=$SECONDS
+          printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
+          for target in 8 16 45 90 150 240; do
+            elapsed=$((SECONDS - OBSERVE_STARTED))
+            if [ "$elapsed" -lt "$target" ]; then
+              sleep "$((target - elapsed))"
+            fi
+            output="$REPORT/after-$target""s.png"
+            xcrun simctl io "$UDID" screenshot "$output"
+            elapsed=$((SECONDS - OBSERVE_STARTED))
+            checksum="$(shasum -a 256 "$output" | cut -d ' ' -f 1)"
+            printf "%s\t%s\t%s\t%s\n" "$target" "$elapsed" "$checksum" "$(basename "$output")" >> "$REPORT/screenshot-index.tsv"
+            echo "Simulated iPad observation: $elapsed seconds, screenshot=$(basename "$output")"
+          done
+
+          # Capture an engine JASS log if it exists, never any MPQ/w3x.
           if [ -f "$DATA_DIR/Documents/ordr-jass.log" ]; then
             cp "$DATA_DIR/Documents/ordr-jass.log" "$REPORT/ordr-jass.log"
+            echo "jass_log_found=true" > "$REPORT/runtime-status.txt"
+          else
+            echo "jass_log_found=false" > "$REPORT/runtime-status.txt"
           fi
+
+          # Retain only aggregated OS diagnostic counters, not raw system logs.
+          if xcrun simctl spawn "$UDID" log show --last 6m --style compact \
+               --predicate 'process == "warcraft3"' > "$RUNNER_TEMP/ordr-private-oslog.txt" 2>/dev/null; then
+            python3 - "$RUNNER_TEMP/ordr-private-oslog.txt" "$REPORT/runtime-status.txt" <<'PY'
+          import sys
+          from pathlib import Path
+          contents = Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          lines = contents.splitlines()
+          keywords = ("unimplemented native", "segmentation fault", "fatal error",
+                      "exited due to signal", "uncaught exception", "signal sig")
+          hits = sum(any(k in line.lower() for k in keywords) for line in lines)
+          with Path(sys.argv[2]).open("a") as report:
+              report.write("os_log_query=ok\n")
+              report.write("os_log_line_count=%d\n" % len(lines))
+              report.write("os_log_error_signature_lines=%d\n" % hits)
+          PY
+          else
+            echo "os_log_query=unavailable" >> "$REPORT/runtime-status.txt"
+          fi
+          echo "automated_touch_input=false" >> "$REPORT/runtime-status.txt"
+          echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
             echo "map_start_attempted=true" >> "$REPORT/asset-status.txt"
             echo "gameplay_verified=false" >> "$REPORT/asset-status.txt"
@@ -145,7 +184,8 @@ jobs:
             echo "- App install and launch command: complete"
             echo "- Retail War3.mpq supplied: $MPQ_FOUND"
             echo "- ORDR map supplied: $MAP_FOUND"
-            echo "- Screenshots: after 8 and 16 seconds (workflow artifact)"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, and 240 seconds (workflow artifact)"
+            echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Automated taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
               echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."
