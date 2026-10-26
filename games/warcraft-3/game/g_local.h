@@ -2737,6 +2737,7 @@ bool WriteGame(cstring_t filename);
 bool ReadGame(cstring_t filename);
 edict_t *G_Spawn(void);
 void SP_CallSpawn(edict_t *);
+void G_RestoreORDRChoiceBackdropAfterScript(void);
 void G_BindEntityData(edict_t *);
 void G_BindEntityRuntime(edict_t *);
 void G_FillMapPlacedUnitMana(edict_t *);

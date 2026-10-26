@@ -230,6 +230,15 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertTrue(report["choice_background_original_asset_missing"])
         self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
 
+    def test_recovered_backdrop_is_seen_by_original_menu_audit(self):
+        report = json.loads(self.inspect(
+            "5000 ms [CHOICE_BACKGROUND_RECOVERED] entity=2139 B100 model=319 original_import=war3mapImported\\Background.mdx\n"
+            "5000 ms [CHOICE_BACKGROUND_AUDIT] B100_instances=1 visible=1 model_indices=1\n",
+            "", "", ""))
+        self.assertTrue(report["choice_background_original_asset_recovered"])
+        self.assertEqual(report["choice_background_model_count"], 1)
+        self.assertFalse(report["choice_background_original_asset_missing"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

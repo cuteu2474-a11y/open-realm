@@ -1496,6 +1496,10 @@ static void G_ORDRShowFlowStatus(void) {
         !jass_functionbyname(level.vm, "CUW") ||
         !jass_functionbyname(level.vm, "CUN")) return;
     mask = jass_ordr_flow_mask(level.vm);
+    /* Recover the original B100 model only after verifying this is ORDR;
+     * the map cvar may not exist at the initial object spawn. */
+    if (level.time >= 5000 && level.time <= 10000)
+        G_RestoreORDRChoiceBackdropAfterScript();
     /* CUN creates six difficulty picks (u000-u005) and six supporting
      * selection-scene units (u006-u009, u00A-u00C). Confirm they're
      * still live after the JASS handler returns. */
