@@ -1630,6 +1630,46 @@ static void G_ORDRShowFlowStatus(void) {
     }
 }
 
+/* ORDR renders the original B100 Background.mdx as a world destructable.
+ * Once the authored start trigger moves the camera from the choice stage,
+ * its oversize silhouette must not cover the playable battlefield. Keep the
+ * original edict/model intact and update only presentation visibility,
+ * following the authoritative camera. This also restores it if the game
+ * legitimately returns to the original selection camera. */
+static void G_ORDRUpdateChoiceBackdropVisibility(void) {
+    gameClient_t *viewer;
+    bool choice_stage;
+    if (!level.vm || level.time < 4000 ||
+        !jass_functionbyname(level.vm, "CUO") ||
+        !jass_functionbyname(level.vm, "CUW") ||
+        !jass_functionbyname(level.vm, "CUN")) return;
+    viewer = G_SinglePlayerLocalClient();
+    if (!viewer || !viewer->connected) return;
+    choice_stage = fabsf(viewer->camera.state.position.x + 6000.0f) < 1800.0f &&
+                   fabsf(viewer->camera.state.position.y + 8864.0f) < 1800.0f;
+
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t *ent = &g_edicts[i];
+        bool hidden, next_hidden;
+        char audit[160];
+        if (!ent->inuse || !ent->s.model ||
+            (ent->class_id != MAKEFOURCC('B','1','0','0') &&
+             ent->class_id != 0x42313030u)) continue;
+        hidden = (ent->s.renderfx & RF_HIDDEN) != 0;
+        next_hidden = !choice_stage;
+        if (hidden == next_hidden) continue;
+        if (next_hidden) ent->s.renderfx |= RF_HIDDEN;
+        else ent->s.renderfx &= ~RF_HIDDEN;
+        snprintf(audit, sizeof(audit),
+                 "entity=%u B100 hidden=%u choice_stage=%u camera=(%.0f,%.0f)",
+                 (unsigned)ent->s.number, (unsigned)next_hidden,
+                 (unsigned)choice_stage,
+                 (double)viewer->camera.state.position.x,
+                 (double)viewer->camera.state.position.y);
+        jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_VISIBILITY", audit);
+    }
+}
+
 /* One complete server-frame simulation step.
  * Skipped until the first map has been started; on the very first frame after
  * a map loads, the JASS "main" function is invoked to run map initialization
@@ -1673,6 +1713,7 @@ static void G_RunFrame(void) {
      * main() has registered player chat handlers. Never bypass JASS. */
     G_ORDRTryAutoOfflineMode();
     if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_OFFLINE", ordr_frame_detail);
+    G_ORDRUpdateChoiceBackdropVisibility();
     G_ORDRShowFlowStatus();
     if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_FLOW", ordr_frame_detail);
     G_UpdateTimerDialogs();

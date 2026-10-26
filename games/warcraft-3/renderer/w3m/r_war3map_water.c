@@ -1,9 +1,87 @@
 #include "r_war3map.h"
 
-static vertex_t water_vertex_buffer[(SEGMENT_SIZE+1)*(SEGMENT_SIZE+1)*6];
+/* Each original water triangle may become two triangles after clipping to
+ * the actual ground surface; six vertices per tile is no longer sufficient. */
+static vertex_t water_vertex_buffer[(SEGMENT_SIZE+1)*(SEGMENT_SIZE+1)*12];
 static vertex_t *water_current_vertex = NULL;
 
 // FUNCTIONS
+
+/* Warcraft W3E can flag a corner as wet even where its authored ground is
+ * higher than the interpolated water surface. A full six-vertex water quad
+ * on those cells places opaque water over dry terrain (ORDR scene flood).
+ * Clip the actual triangles at the ground/water intersection instead of
+ * disabling water or altering W3E map data. */
+typedef struct {
+    vertex_t vertex;
+    float submerged_depth;
+} waterClipPoint_t;
+
+static waterClipPoint_t R_WaterClipIntersection(waterClipPoint_t const *a,
+                                               waterClipPoint_t const *b) {
+    float denominator = a->submerged_depth - b->submerged_depth;
+    float t = fabsf(denominator) > 1e-6f
+        ? MAX(0.0f, MIN(1.0f, a->submerged_depth / denominator)) : 0.0f;
+    waterClipPoint_t out = *a;
+    out.submerged_depth = 0.0f;
+    out.vertex.position.x = LerpNumber(a->vertex.position.x, b->vertex.position.x, t);
+    out.vertex.position.y = LerpNumber(a->vertex.position.y, b->vertex.position.y, t);
+    out.vertex.position.z = LerpNumber(a->vertex.position.z, b->vertex.position.z, t);
+    out.vertex.texcoord.x = LerpNumber(a->vertex.texcoord.x, b->vertex.texcoord.x, t);
+    out.vertex.texcoord.y = LerpNumber(a->vertex.texcoord.y, b->vertex.texcoord.y, t);
+    out.vertex.color.r = (uint8_t)lroundf(LerpNumber(a->vertex.color.r, b->vertex.color.r, t));
+    out.vertex.color.g = (uint8_t)lroundf(LerpNumber(a->vertex.color.g, b->vertex.color.g, t));
+    out.vertex.color.b = (uint8_t)lroundf(LerpNumber(a->vertex.color.b, b->vertex.color.b, t));
+    out.vertex.color.a = (uint8_t)lroundf(LerpNumber(a->vertex.color.a, b->vertex.color.a, t));
+    return out;
+}
+
+/* Sutherland-Hodgman clipping against the signed submerged-depth plane.
+ * A triangle becomes 0, 3, or 4 vertices; output can be triangulated into
+ * at most two triangles while preserving its authored water texture. */
+static uint32_t R_ClipWaterTriangle(waterClipPoint_t const tri[3],
+                                    waterClipPoint_t out[4]) {
+    uint32_t count = 0;
+    FOR_LOOP(i, 3) {
+        waterClipPoint_t const *a = tri + i, *b = tri + (i + 1) % 3;
+        bool a_inside = a->submerged_depth > 0.0f;
+        bool b_inside = b->submerged_depth > 0.0f;
+        if (a_inside) out[count++] = *a;
+        if (a_inside != b_inside)
+            out[count++] = R_WaterClipIntersection(a, b);
+    }
+    return count;
+}
+
+static void R_EmitClippedWaterTriangle(waterClipPoint_t const tri[3]) {
+    waterClipPoint_t polygon[4];
+    uint32_t count = R_ClipWaterTriangle(tri, polygon);
+    for (uint32_t i = 1; i + 1 < count; i++) {
+        if (water_current_vertex + 3 >
+            water_vertex_buffer + sizeof(water_vertex_buffer) / sizeof(water_vertex_buffer[0]))
+            return;
+        *water_current_vertex++ = polygon[0].vertex;
+        *water_current_vertex++ = polygon[i].vertex;
+        *water_current_vertex++ = polygon[i + 1].vertex;
+    }
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_water, submerged_water_triangles_clip_at_terrain_instead_of_flooding_land) {
+    waterClipPoint_t tri[3] = {0}, out[4];
+    tri[0].submerged_depth = -5.0f;
+    tri[1].submerged_depth = -3.0f;
+    tri[2].submerged_depth = -1.0f;
+    T_EQ(R_ClipWaterTriangle(tri, out), 0u);
+    tri[0].submerged_depth = 3.0f;
+    T_EQ(R_ClipWaterTriangle(tri, out), 3u);
+    tri[1].submerged_depth = 3.0f;
+    T_EQ(R_ClipWaterTriangle(tri, out), 4u);
+    tri[2].submerged_depth = 3.0f;
+    T_EQ(R_ClipWaterTriangle(tri, out), 3u);
+}
+#endif
 
 static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
     struct War3MapVertex tile[4];
@@ -89,8 +167,23 @@ static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
         },
     };
 
-    memcpy(water_current_vertex, geom, sizeof(geom));
-    water_current_vertex += sizeof(geom) / sizeof(vertex_t);
+    /* A water bit means this region may contain water, not that all its
+     * vertices are below the water surface. Compare to the same deformed
+     * ground heights used to draw the underlying W3E terrain. */
+    float const depth[] = {
+        waterlevel[0] - height[0] - R_W3TerrainOffsetAtPoint(pos[0].x, pos[0].y) - 0.25f,
+        waterlevel[1] - height[1] - R_W3TerrainOffsetAtPoint(pos[1].x, pos[1].y) - 0.25f,
+        waterlevel[2] - height[2] - R_W3TerrainOffsetAtPoint(pos[2].x, pos[2].y) - 0.25f,
+        waterlevel[3] - height[3] - R_W3TerrainOffsetAtPoint(pos[3].x, pos[3].y) - 0.25f,
+    };
+    waterClipPoint_t const triangle_a[3] = {
+        { geom[0], depth[0] }, { geom[1], depth[1] }, { geom[2], depth[2] },
+    };
+    waterClipPoint_t const triangle_b[3] = {
+        { geom[3], depth[0] }, { geom[4], depth[2] }, { geom[5], depth[3] },
+    };
+    R_EmitClippedWaterTriangle(triangle_a);
+    R_EmitClippedWaterTriangle(triangle_b);
 }
 
 maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {

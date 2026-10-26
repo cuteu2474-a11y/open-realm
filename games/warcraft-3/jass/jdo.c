@@ -2309,6 +2309,28 @@ uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
             }
             args++;
         }
+        /* CV5's authored 360 / (vP * EK) aborts because a calculated
+         * operand is zero. Its values must be captured at the MUL AST, while
+         * the caller's expression stack still holds them; looking for these
+         * locals after entering the DIV native loses their scope. This is
+         * diagnostic only: never clamp the result or alter the map rule. */
+        if (jass_root(j) == ordr_flow_vm && !strcmp(token->primary, "__mul") &&
+            args == 2 && token->args && token->args->next &&
+            token->args->type == TT_IDENTIFIER &&
+            token->args->next->type == TT_IDENTIFIER &&
+            !strcmp(token->args->primary, "vP") &&
+            !strcmp(token->args->next->primary, "EK") &&
+            j->num_stack == stacksize + 3) {
+            char detail[240];
+            int left_type = (int)jass_gettype(j, -2);
+            int right_type = (int)jass_gettype(j, -1);
+            double left = (double)jass_checknumber(j, -2);
+            double right = (double)jass_checknumber(j, -1);
+            snprintf(detail, sizeof(detail),
+                     "vP=%.9g type=%d EK=%.9g type=%d product=%.9g",
+                     left, left_type, right, right_type, left * right);
+            jass_ordr_log_event(j, "DIVISOR_OPERANDS", detail);
+        }
         /* Only report the failing ORDR division, after evaluating both operands.
          * The AST signatures identify a zero-producing native/global without
          * exporting the private map source or changing arithmetic semantics. */

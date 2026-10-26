@@ -239,6 +239,27 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertEqual(report["choice_background_model_count"], 1)
         self.assertFalse(report["choice_background_original_asset_missing"])
 
+    def test_post_start_backdrop_hidden_and_culprit_operand_recorded(self):
+        report = json.loads(self.inspect(
+            "2000 ms [DIVISOR_OPERANDS] vP=0 type=1 EK=25 type=1 product=0\n"
+            "2000 ms [RUNTIME_ERROR] integer division by zero\n"
+            "4000 ms [CHOICE_BACKGROUND_RECOVERED] entity=2139 B100 model=392 original_import=war3mapImported\\Background.mdx\n"
+            "16100 ms [CHOICE_BACKGROUND_VISIBILITY] entity=2139 B100 hidden=1 choice_stage=0 camera=(-3456,-9696)\n",
+            "", "", ""))
+        self.assertEqual(report["recent_divisor_operands"],
+                         ["vP=0 type=1 EK=25 type=1 product=0"])
+        self.assertTrue(report["choice_background_hidden_in_gameplay"])
+        self.assertEqual(len(report["choice_background_visibility_changes"]), 1)
+        self.assertEqual(report["last_jass_runtime_error"], "integer division by zero")
+        self.assertFalse(report["gameplay_verified"])
+
+    def test_menu_backdrop_visibility_without_exit_not_called_gameplay(self):
+        report = json.loads(self.inspect(
+            "5000 ms [CHOICE_BACKGROUND_VISIBILITY] entity=1 B100 hidden=0 choice_stage=1 camera=(-6000,-8864)\n",
+            "", "", ""))
+        self.assertFalse(report["choice_background_hidden_in_gameplay"])
+        self.assertEqual(len(report["choice_background_visibility_changes"]), 1)
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

@@ -327,19 +327,24 @@ static vec2_t process_text(drawText_t const *arg, bool draw) {
         memset(batch, 0, sizeof(*batch));
     }
     for (cstring_t p = arg->text; *p;) {
-        if (*p == '\n') {
-            cursor.x = pos.x;
-            cursor.y += line_advance;
-            max_cursor_y = MAX(max_cursor_y, cursor.y);
-            p++;
-            continue;
+        /* In addition to real LF and Warcraft |n, some map/object-text
+         * serializers leave the two literal characters \n (occasionally
+         * double escaped as \\n). Interpret both as the same line break in
+         * measuring AND drawing. This fixes the ORDR text/tooltip overlay
+         * without rewriting the map or changing font size and color tags. */
+        size_t escaped_break = 0;
+        if (*p == '\\') {
+            if (p[1] == 'n' || p[1] == 'N')
+                escaped_break = 2;
+            else if (p[1] == '\\' && (p[2] == 'n' || p[2] == 'N'))
+                escaped_break = 3;
         }
-        if (!strncmp(p, "|n", 2) || !strncmp(p, "|N", 2)) {
-        // next_line:
+        if (*p == '\n' || escaped_break ||
+            !strncmp(p, "|n", 2) || !strncmp(p, "|N", 2)) {
             cursor.x = pos.x;
             cursor.y += line_advance;
             max_cursor_y = MAX(max_cursor_y, cursor.y);
-            p += 2;
+            p += escaped_break ? escaped_break : *p == '\n' ? 1 : 2;
             continue;
         }
         if (*p == '<') {

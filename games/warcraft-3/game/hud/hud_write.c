@@ -255,9 +255,15 @@ cstring_t UI_FormatMessageText(cstring_t text) {
         /* Some ORDR scripts store the two literal bytes \n in a JASS
          * message, whereas Warcraft layout text expects |n. Normalize
          * on the presentation side without rewriting saved map strings. */
-        if (p[0] == '\\' && p[1] == 'n') {
+        /* Some compiled map strings arrive double-escaped as \\n, so
+         * normalizing only the final \n still leaves a stray backslash
+         * visible between Korean lines. Accept either JASS spelling;
+         * preserve unrelated backslashes and all original script strings. */
+        if (p[0] == '\\' &&
+            ((p[1] == 'n' || p[1] == 'N') ||
+             (p[1] == '\\' && (p[2] == 'n' || p[2] == 'N')))) {
             UI_AppendMessageText(temp, sizeof(temp), "|n");
-            p += 2;
+            p += p[1] == '\\' ? 3 : 2;
             continue;
         }
         if (quest_message && p[0] == ' ' && p[1] == '-' && p[2] == ' ') {

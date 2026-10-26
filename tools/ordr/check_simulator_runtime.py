@@ -41,6 +41,9 @@ def inspect(report):
     division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
     divisor_globals = re.findall(r"\[DIVISOR_GLOBAL\s*\]\s+([^\r\n]+)", jass)
     divisor_values = re.findall(r"\[DIVISOR_VALUE\s*\]\s+([^\r\n]+)", jass)
+    divisor_operands = re.findall(r"\[DIVISOR_OPERANDS\s*\]\s+([^\r\n]+)", jass)
+    background_stage_changes = re.findall(
+        r"\[CHOICE_BACKGROUND_VISIBILITY\s*\]\s+([^\r\n]+)", jass)
     probe_requests = re.findall(
         r"stage=SIM_CHOICE_SELECT_QUEUED unit=(\d+) raw=(u00[0-9A-C]) step=(\d+)",
         client)
@@ -84,6 +87,11 @@ def inspect(report):
         "last_division_source": division_sources[-1][:360] if division_sources else None,
         "recent_divisor_global_states": [entry[:160] for entry in divisor_globals[-4:]],
         "recent_divisor_values": [entry[:160] for entry in divisor_values[-4:]],
+        "recent_divisor_operands": [entry[:160] for entry in divisor_operands[-4:]],
+        "choice_background_visibility_changes":
+            [entry[:180] for entry in background_stage_changes[-6:]],
+        "choice_background_hidden_in_gameplay":
+            any("hidden=1 choice_stage=0" in entry for entry in background_stage_changes),
         "last_completed_game_frame": max(frames) if frames else None,
         "last_observed_jass_ms": max(jass_times) if jass_times else None,
         "choice_units_created": len(choice_creates),
