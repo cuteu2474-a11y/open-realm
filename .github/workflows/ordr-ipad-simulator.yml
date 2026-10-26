@@ -127,7 +127,7 @@ jobs:
           # only proves launch request acceptance, not working gameplay.
           OBSERVE_STARTED=$SECONDS
           printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
-          for target in 8 16 45 90 150 240; do
+          for target in 8 16 45 90 150 240 360 480; do
             elapsed=$((SECONDS - OBSERVE_STARTED))
             if [ "$elapsed" -lt "$target" ]; then
               sleep "$((target - elapsed))"
@@ -243,7 +243,7 @@ jobs:
             echo "- App install and launch command: complete"
             echo "- Retail War3.mpq supplied: $MPQ_FOUND"
             echo "- ORDR map supplied: $MAP_FOUND"
-            echo "- Screenshots: after 8, 16, 45, 90, 150, and 240 seconds (workflow artifact)"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, and 480 seconds (workflow artifact)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Automated taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then

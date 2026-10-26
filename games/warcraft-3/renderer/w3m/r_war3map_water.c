@@ -106,6 +106,12 @@ maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t s
         }
     }
     mapLayer->num_vertices = (uint32_t)(water_current_vertex - water_vertex_buffer);
+    /* Dry terrain contributes no water geometry. Avoid a zero-vertex buffer
+     * upload for each empty segment without changing rendered water. */
+    if (!mapLayer->num_vertices) {
+        ri.MemFree(mapLayer);
+        return NULL;
+    }
     mapLayer->buffer = R_MakeVertexArrayObject(water_vertex_buffer, mapLayer->num_vertices);
     return mapLayer;
 }

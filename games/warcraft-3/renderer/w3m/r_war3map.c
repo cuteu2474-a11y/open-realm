@@ -674,9 +674,29 @@ static vec3_t R_GetMapVertexPoint(war3map_t const *map, uint32_t x, uint32_t y) 
     };
 }
 
+/* Small bounded progress markers for diagnosing expensive original W3E geometry.
+ * No map contents or unit data are written into this device-only log. */
+static void R_ORDRSegmentProgress(cstring_t phase, uint32_t x, uint32_t y,
+                                  uint32_t done, uint32_t total) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    char stage[116];
+    snprintf(stage, sizeof(stage), "SEGMENT_%s x=%u y=%u done=%u total=%u",
+             phase, (unsigned)x, (unsigned)y, (unsigned)done, (unsigned)total);
+    R_ORDRMapTrace(stage);
+#else
+    (void)phase; (void)x; (void)y; (void)done; (void)total;
+#endif
+}
+
 static void R_LoadMapSegments(war3map_t const *map) {
-    FOR_LOOP(fx, (map->width - 1) / SEGMENT_SIZE) {
-        FOR_LOOP(fy, (map->height - 1) / SEGMENT_SIZE) {
+    uint32_t const columns = (map->width - 1) / SEGMENT_SIZE;
+    uint32_t const rows = (map->height - 1) / SEGMENT_SIZE;
+    uint32_t completed = 0;
+    R_ORDRSegmentProgress("START", 0, 0, 0, columns * rows);
+    FOR_LOOP(fx, columns) {
+        FOR_LOOP(fy, rows) {
+            if ((completed % 16) == 0)
+                R_ORDRSegmentProgress("BEFORE", fx, fy, completed, columns * rows);
             mapsegment_t *segment = R_BuildMapSegment(map, fx, fy);
             ADD_TO_LIST(segment, g_mapSegments);
             FOR_LOOP(sx, SEGMENT_SIZE+1) FOR_LOOP(sy, SEGMENT_SIZE+1) {
@@ -689,6 +709,9 @@ static void R_LoadMapSegments(war3map_t const *map) {
                 segment->bbox.max.y = MAX(segment->bbox.max.y, v.y);
                 segment->bbox.max.z = MAX(segment->bbox.max.z, v.z);
             }
+            completed++;
+            if ((completed % 16) == 0 || completed == columns * rows)
+                R_ORDRSegmentProgress("AFTER", fx, fy, completed, columns * rows);
         }
     }
 }
