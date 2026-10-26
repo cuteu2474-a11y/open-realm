@@ -2174,6 +2174,23 @@ uint32_t VM_EvalBoolean(jass_t *j, token_t const *token) {
     return jass_pushboolean(j, jass_atob(token->primary));
 }
 
+/* JASS lexical scope: a function-local/argument shadows a global of
+ * the same name. Several converted maps reuse terse identifiers such as
+ * EK and vP; looking up globals first silently substituted an unrelated
+ * zero-valued global and could abort a coroutine on division by zero. */
+static jassVar_t *jass_find_visible_variable(jass_t *j, cstring_t name,
+                                              bool *is_local) {
+    jassVar_t *var = NULL;
+    if (is_local) *is_local = false;
+    if (j->stack_pointer && j->num_stack > 0)
+        var = find_dict(jass_stackvalue(j, 0)->env.locals, name);
+    if (var) {
+        if (is_local) *is_local = true;
+        return var;
+    }
+    return find_global(j, name);
+}
+
 uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassVar_t const *v = NULL;
@@ -2183,9 +2200,29 @@ uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
         } else {
             return jass_pushnull(j);
         }
-    } else if ((v = find_global(j, token->primary))) {
-        return jass_pushvalue(j, v);
-    } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary))) {
+    } else if ((v = jass_find_visible_variable(j, token->primary, NULL))) {
+        /* Diagnose the real scoped CV5 divisor at the point of evaluation.
+         * A post-abort lookup sees no locals and reported EK 'missing',
+         * obscuring whether EK was an unset local or a global shadow. */
+        if (jass_root(j) == ordr_flow_vm && token->primary &&
+            (!strcmp(token->primary, "EK") || !strcmp(token->primary, "vP"))) {
+            static unsigned logged;
+            if (logged++ < 32) {
+                bool local = false;
+                (void)jass_find_visible_variable(j, token->primary, &local);
+                char detail[208];
+                int value = v->value && jass_getvarbasetype(v) == jasstype_integer
+                    ? *(int32_t *)v->value : 0;
+                snprintf(detail, sizeof(detail),
+                         "name=%s scope=%s value=%d local_present=%u global_present=%u function=%.32s",
+                         token->primary, local ? "local" : "global", value,
+                         (unsigned)(j->stack_pointer && j->num_stack &&
+                             find_dict(jass_stackvalue(j, 0)->env.locals, token->primary) != NULL),
+                         (unsigned)(find_global(j, token->primary) != NULL),
+                         jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "?");
+                jass_ordr_log_event(j, "JASS_SCOPED_OPERAND", detail);
+            }
+        }
         return jass_pushvalue(j, v);
     } else {
         return jass_pushnull(j);
@@ -2208,8 +2245,7 @@ uint32_t VM_EvalArrayAccess(jass_t *j, token_t const *token) {
     uint32_t count = jass_dotoken(j, token->index);
     if (count != 1) { jass_pushnull(j); }
     uint32_t index_val = jass_popinteger(j);
-    jassVar_t *var = find_global(j, token->primary);
-    if (!var) var = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary);
+    jassVar_t *var = jass_find_visible_variable(j, token->primary, NULL);
     if (!var) return jass_pushnull(j);
     jassVar_t null_value = { .type = var->type };
     jassVar_t const *item = find_array_value(var, index_val);
@@ -2479,18 +2515,14 @@ TOKENFUNC(IF) {
 }
 
 TOKENFUNC(SET) {
-    jassVar_t *v = NULL;
-    if ((v = find_global(j, token->secondary))) {
+    bool is_local = false;
+    jassVar_t *v = jass_find_visible_variable(j, token->secondary, &is_local);
+    if (v) {
         if (token->index) {
             return jass_set_array_value(j, v, token, token->init);
         } else {
-            return jass_set_value(j, v, token->init, token->secondary);
-        }
-    } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->secondary))) {
-        if (token->index) {
-            return jass_set_array_value(j, v, token, token->init);
-        } else {
-            return jass_set_value(j, v, token->init, NULL);
+            return jass_set_value(j, v, token->init,
+                                  is_local ? NULL : token->secondary);
         }
     } else {
         fprintf(stderr, "Can't find variable %s\n",

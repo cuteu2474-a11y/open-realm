@@ -116,9 +116,35 @@ uint32_t GetPlayerSelectable(jass_t *j) {
     player_t *player = jass_checkhandle(j, 1, "player");
     return jass_pushboolean(j, player && PLAYER_CLIENT(player)->jass.race_selectable);
 }
+/* W3I's human-capable slot is not an occupied game session. ORDR's
+ * player-count JASS uses GetPlayerController as well as slot state, so a
+ * vacant human lobby slot must report NONE after the local player connects.
+ * Only the verified ORDR solo session uses this compatibility mapping. */
+static uint32_t WC3_ORDRActiveSlotController(uint32_t controller,
+                                             bool is_ordr_solo,
+                                             bool connected) {
+    return is_ordr_solo && controller == 0 && !connected ? 5 : controller;
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_player, ordr_vacant_human_slots_are_not_party_players) {
+    T_EQ(WC3_ORDRActiveSlotController(0, true, true), 0u);
+    T_EQ(WC3_ORDRActiveSlotController(0, true, false), 5u);
+    T_EQ(WC3_ORDRActiveSlotController(1, true, false), 1u);
+    T_EQ(WC3_ORDRActiveSlotController(0, false, false), 0u);
+}
+#endif
+
 uint32_t GetPlayerController(jass_t *j) {
     player_t *player = jass_checkhandle(j, 1, "player");
-    return JassPushMapControlHandle(j, player ? PLAYER_CLIENT(player)->jass.controller : 5);
+    gameClient_t *client = player ? PLAYER_CLIENT(player) : NULL;
+    uint32_t controller = client ? client->jass.controller : 5;
+    bool const ordr_solo = level.map_path[0] &&
+        strstr(level.map_path, "ORDR_S2_") != NULL &&
+        G_SinglePlayerLocalClient() != NULL;
+    controller = WC3_ORDRActiveSlotController(
+        controller, ordr_solo, client && client->connected);
+    return JassPushMapControlHandle(j, controller);
 }
 uint32_t GetPlayerSlotState(jass_t *j) {
     /* A human-capable map slot is not an occupied session slot. AI slots

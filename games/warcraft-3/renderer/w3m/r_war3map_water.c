@@ -83,6 +83,24 @@ TEST(wc3_water, submerged_water_triangles_clip_at_terrain_instead_of_flooding_la
 }
 #endif
 
+/* Only authored wet W3E corners contribute to a water polygon.
+ * A dry vertex with a high authored waterlevel is NOT itself flooded; an
+ * old any-corner water test incorrectly drew a full sea quad over land. */
+static float R_WaterCornerDepth(float surface_z, float ground_z, bool authored_wet) {
+    float const signed_depth = surface_z - ground_z - 0.25f;
+    if (!authored_wet)
+        return -MAX(TILE_SIZE * 0.5f, fabsf(signed_depth));
+    return signed_depth;
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_water, original_w3e_dry_corner_never_floods) {
+    T_ASSERT(R_WaterCornerDepth(250, 0, false) < 0);
+    T_ASSERT(R_WaterCornerDepth(250, 0, true) > 0);
+    T_ASSERT(R_WaterCornerDepth(0, 250, true) < 0);
+}
+#endif
+
 static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
     struct War3MapVertex tile[4];
     GetTileVertices(x, y, tr.world, tile);
@@ -104,11 +122,18 @@ static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
         GetWar3MapVertexWaterLevel(&tile[1]),
     };
 
+    /* Compare water to the EXACT terrain mesh vertex height, including
+     * cliff ramp offsets and runtime deformations. This matches the ground
+     * triangles rendered in r_war3map_ground.c. */
     float const height[] = {
-        GetWar3MapVertexHeight(&tile[3]),
-        GetWar3MapVertexHeight(&tile[2]),
-        GetWar3MapVertexHeight(&tile[0]),
-        GetWar3MapVertexHeight(&tile[1]),
+        R_GetVertexPosition(map, x,     y,     true).z,
+        R_GetVertexPosition(map, x + 1, y,     true).z,
+        R_GetVertexPosition(map, x + 1, y + 1, true).z,
+        R_GetVertexPosition(map, x,     y + 1, true).z,
+    };
+    bool const authored_wet[] = {
+        tile[3].water != 0, tile[2].water != 0,
+        tile[0].water != 0, tile[1].water != 0,
     };
 
     wc3WaterStyle_t const *style = R_WaterStyle();
@@ -171,10 +196,10 @@ static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
      * vertices are below the water surface. Compare to the same deformed
      * ground heights used to draw the underlying W3E terrain. */
     float const depth[] = {
-        waterlevel[0] - height[0] - R_W3TerrainOffsetAtPoint(pos[0].x, pos[0].y) - 0.25f,
-        waterlevel[1] - height[1] - R_W3TerrainOffsetAtPoint(pos[1].x, pos[1].y) - 0.25f,
-        waterlevel[2] - height[2] - R_W3TerrainOffsetAtPoint(pos[2].x, pos[2].y) - 0.25f,
-        waterlevel[3] - height[3] - R_W3TerrainOffsetAtPoint(pos[3].x, pos[3].y) - 0.25f,
+        R_WaterCornerDepth(waterlevel[0], height[0], authored_wet[0]),
+        R_WaterCornerDepth(waterlevel[1], height[1], authored_wet[1]),
+        R_WaterCornerDepth(waterlevel[2], height[2], authored_wet[2]),
+        R_WaterCornerDepth(waterlevel[3], height[3], authored_wet[3]),
     };
     waterClipPoint_t const triangle_a[3] = {
         { geom[0], depth[0] }, { geom[1], depth[1] }, { geom[2], depth[2] },

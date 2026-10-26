@@ -964,9 +964,57 @@ uint32_t IsPointBlighted(jass_t *j) {
     vec2_t point = { jass_checknumber(j, 1), jass_checknumber(j, 2) };
     return jass_pushboolean(j, G_IsPointBlighted(&point));
 }
+/* JASS pathingtype is an enum, NOT the raw byte mask stored by the WPM.
+ * Warcraft WPM bits: 0x02 unwalkable, 0x04 unflyable, 0x08 unbuildable,
+ * 0x10 unharvestable, 0x20 blighted, 0x40 unswimmable.
+ * Avoid returning 'true' on impassable cells; it wrongly enables move
+ * decisions and spawn/build placement in authored map triggers. */
+static bool WC3_TerrainPathTypeAllows(uint32_t type, uint8_t flags) {
+    switch (type) {
+        case 0: return !(flags & (0x02u | 0x04u | 0x08u | 0x40u)); /* ANY */
+        case 1: return !(flags & CM_PATHING_UNWALKABLE);             /* WALKABILITY */
+        case 2: return !(flags & CM_PATHING_UNFLYABLE);               /* FLYABILITY */
+        case 3: return !(flags & 0x08u);                              /* BUILDABILITY */
+        case 4: return !(flags & 0x10u);                              /* PEONHARVESTPATHING */
+        case 5: return (flags & 0x20u) != 0;                          /* BLIGHTPATHING */
+        case 6: return !(flags & CM_PATHING_UNSWIMMABLE);             /* FLOATABILITY */
+        case 7: return !(flags & (CM_PATHING_UNWALKABLE |
+                                 CM_PATHING_UNSWIMMABLE));           /* AMPHIBIOUSPATHING */
+        default: return false;
+    }
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_terrain, original_wpm_pathability_uses_enum_not_mask_index) {
+    T_ASSERT(WC3_TerrainPathTypeAllows(1, 0));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(1, CM_PATHING_UNWALKABLE));
+    T_ASSERT(WC3_TerrainPathTypeAllows(2, CM_PATHING_UNWALKABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(2, CM_PATHING_UNFLYABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(3, 0x08u));
+    T_ASSERT(WC3_TerrainPathTypeAllows(5, WC3_PATH_BLIGHTED));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(6, CM_PATHING_UNSWIMMABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(0, CM_PATHING_UNWALKABLE));
+}
+#endif
+
 uint32_t IsTerrainPathable(jass_t *j) {
-    (void)jass_checknumber(j, 1); (void)jass_checknumber(j, 2); (void)jass_checkhandle(j, 3, "pathingtype");
-    return jass_pushboolean(j, true);
+    vec2_t point = { jass_checknumber(j, 1), jass_checknumber(j, 2) };
+    uint32_t const *pathingtype = jass_checkhandle(j, 3, "pathingtype");
+    uint8_t flags = 0;
+    bool allowed;
+    if (!pathingtype) return jass_pushboolean(j, false);
+    if (CM_GetPathingFlagsAt(&point, &flags))
+        allowed = WC3_TerrainPathTypeAllows(*pathingtype, flags);
+    else {
+        /* Fall back to geometric terrain sampling only when no original WPM
+         * byte grid is mounted. Do not fabricate build/harvest/blight flags. */
+        switch (*pathingtype) {
+            case 1: allowed = CM_TerrainPointIsWalkable(&point); break;
+            case 6: allowed = CM_TerrainPointIsSwimmable(&point); break;
+            default: allowed = false; break;
+        }
+    }
+    return jass_pushboolean(j, allowed);
 }
 uint32_t SetTerrainPathable(jass_t *j) {
     (void)jass_checknumber(j, 1); (void)jass_checknumber(j, 2); (void)jass_checkhandle(j, 3, "pathingtype");
