@@ -71,8 +71,8 @@ void CL_ORDRTrace(cstring_t stage) {
     }
     if (!file || lines++ >= 500) return;
     fprintf(file,
-            "client_ms=%u stage=%s state=%d ui=%u ready=%d precache=%d loading_layout=%d world_cs=%d plaque=%d progress=%.2f\n",
-            (unsigned)cl_realtime, stage ? stage : "(none)", (int)cls.state,
+            "wall_ms=%u client_ms=%u stage=%s state=%d ui=%u ready=%d precache=%d loading_layout=%d world_cs=%d plaque=%d progress=%.2f\n",
+            (unsigned)SDL_GetTicks(), (unsigned)cl_realtime, stage ? stage : "(none)", (int)cls.state,
             (unsigned)cl.playerstate.client_ui_state, (int)cl.refresh_prepped,
             (int)cl.precache_ready, cl.layout[LAYER_LOADING] != NULL,
             cl.configstrings[CS_WORLD][0] != '\0', cls.disable_screen != 0,

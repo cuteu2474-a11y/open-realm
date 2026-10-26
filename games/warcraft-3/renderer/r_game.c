@@ -1260,14 +1260,18 @@ void R_DrawMinimap(rect_t const *screen, cstring_t map) {
  * this log. This recording never changes rendering or JASS gameplay. */
 static bool r_ordr_trace_enabled;
 static FILE *r_ordr_trace_file;
+static uint32_t r_ordr_trace_started_ms;
 void R_ORDRMapTrace(cstring_t stage) {
     if (!r_ordr_trace_enabled || !r_ordr_trace_file) return;
-    fprintf(r_ordr_trace_file, "%s\n", stage ? stage : "(null)");
+    fprintf(r_ordr_trace_file, "wall_since_start_ms=%u stage=%s\n",
+            (unsigned)(SDL_GetTicks() - r_ordr_trace_started_ms),
+            stage ? stage : "(null)");
     fflush(r_ordr_trace_file);
 }
 static void R_ORDRMapTraceBegin(cstring_t map) {
     r_ordr_trace_enabled = map && strstr(map, "ORDR_S2_2.323") != NULL;
     if (!r_ordr_trace_enabled) return;
+    r_ordr_trace_started_ms = SDL_GetTicks();
     if (!r_ordr_trace_file) {
         char path[1024];
         cstring_t home = getenv("HOME");
