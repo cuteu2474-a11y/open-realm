@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fetch user-owned Warcraft III test data from private Google Drive.
 
-The only credential is a short-lived Google OAuth access token supplied as
-a GitHub Actions secret. Never commit or upload downloaded game assets.
+An OAuth refresh token allows the runner to obtain fresh Drive access tokens.
+Secrets stay in GitHub Actions; licensed game files never enter Git.
 """
 import argparse
 import hashlib
@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 # SHA-256 hashes confirmed against this user's files on 2026-10-26.
 EXPECTED = {
@@ -37,15 +38,85 @@ MAP_PARTS = [
 ]
 
 
-def api_json(token, path, query):
+class DriveAuth:
+    """Refresh OAuth access tokens at runtime without persisting credentials."""
+
+    def __init__(self):
+        self.refresh_token = os.environ.get('ORDR_DRIVE_REFRESH_TOKEN', '')
+        self.client_id = os.environ.get('ORDR_DRIVE_CLIENT_ID', '')
+        self.client_secret = os.environ.get('ORDR_DRIVE_CLIENT_SECRET', '')
+        self.token = ''
+        if self.refresh_token:
+            if not self.client_id or not self.client_secret:
+                raise RuntimeError(
+                    'ORDR_DRIVE_REFRESH_TOKEN requires ORDR_DRIVE_CLIENT_ID '
+                    'and ORDR_DRIVE_CLIENT_SECRET in GitHub Actions Secrets')
+            self.token = self.refresh()
+        elif self.client_id or self.client_secret:
+            raise RuntimeError(
+                'Incomplete OAuth settings: supply ORDR_DRIVE_REFRESH_TOKEN '
+                'with the matching OAuth client ID and secret')
+        else:
+            self.token = os.environ.get('ORDR_DRIVE_ACCESS_TOKEN', '')
+            if not self.token:
+                raise RuntimeError(
+                    'Missing Google Drive credentials. Configure three '
+                    'ORDR_DRIVE_REFRESH_TOKEN / CLIENT_ID / CLIENT_SECRET '
+                    'secrets or a temporary ORDR_DRIVE_ACCESS_TOKEN')
+
+    def refresh(self):
+        data = urlencode({
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'refresh_token': self.refresh_token,
+            'grant_type': 'refresh_token',
+        }).encode('utf-8')
+        request = Request(
+            'https://oauth2.googleapis.com/token',
+            data=data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            method='POST')
+        try:
+            with urlopen(request, timeout=45) as response:
+                payload = json.load(response)
+        except HTTPError as error:
+            # Intentionally never display the OAuth response body or tokens.
+            raise RuntimeError(
+                'Google OAuth refresh rejected (HTTP %d). Check the '
+                'refresh token and its matching OAuth client credentials.'
+                % error.code) from None
+        token = payload.get('access_token')
+        if not token or payload.get('token_type', 'Bearer').lower() != 'bearer':
+            raise RuntimeError('OAuth refresh returned no Bearer access token')
+        if os.environ.get('GITHUB_ACTIONS', '').lower() == 'true':
+            print('::add-mask::' + token, flush=True)
+        self.token = token
+        return token
+
+    def open(self, url, timeout):
+        def issue():
+            return urlopen(Request(url, headers={
+                'Authorization': 'Bearer ' + self.token}), timeout=timeout)
+        try:
+            return issue()
+        except HTTPError as error:
+            if error.code == 401 and self.refresh_token:
+                self.refresh()
+                return issue()
+            if error.code == 401:
+                raise RuntimeError(
+                    'Google Drive API HTTP 401: expired legacy access token. '
+                    'Set up refresh-token credentials.') from None
+            raise
+
+
+def api_json(auth, path, query):
     url = 'https://www.googleapis.com/drive/v3/' + path + '?' + urlencode(query)
-    request = Request(url, headers={'Authorization': 'Bearer ' + token,
-                                    'Accept': 'application/json'})
-    with urlopen(request, timeout=120) as response:
+    with auth.open(url, timeout=120) as response:
         return json.load(response)
 
 
-def locate(token, name, size):
+def locate(auth, name, size):
     q = "name = '" + name.replace("'", "\\'") + "' and trashed = false"
     next_page = None
     candidates = []
@@ -54,7 +125,7 @@ def locate(token, name, size):
                   'pageSize': 100, 'spaces': 'drive'}
         if next_page:
             params['pageToken'] = next_page
-        result = api_json(token, 'files', params)
+        result = api_json(auth, 'files', params)
         candidates.extend(f for f in result.get('files', [])
                           if f.get('name') == name and int(f.get('size', -1)) == size)
         next_page = result.get('nextPageToken')
@@ -65,10 +136,10 @@ def locate(token, name, size):
     # Deduplicate repeated entries first; never pick an arbitrary match.
     candidates = list({item['id']: item for item in candidates}.values())
     if len(candidates) > 1:
-        root_id = api_json(token, 'files/root', {'fields': 'id'}).get('id')
+        root_id = api_json(auth, 'files/root', {'fields': 'id'}).get('id')
         roots = []
         for item in candidates:
-            details = api_json(token, 'files/' + quote(item['id'], safe=''),
+            details = api_json(auth, 'files/' + quote(item['id'], safe=''),
                                {'fields': 'id,parents'})
             if root_id in details.get('parents', []):
                 roots.append(item)
@@ -79,15 +150,15 @@ def locate(token, name, size):
     return candidates[0]['id'] if candidates else None
 
 
-def retrieve(token, file_id, target, expected_size, expected_sha256):
+def retrieve(auth, file_id, target, expected_size, expected_sha256):
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + '.partial')
     digest = hashlib.sha256()
     count = 0
-    request = Request('https://www.googleapis.com/drive/v3/files/' + quote(file_id, safe='') + '?alt=media',
-                      headers={'Authorization': 'Bearer ' + token})
+    url = ('https://www.googleapis.com/drive/v3/files/'
+           + quote(file_id, safe='') + '?alt=media')
     try:
-        with urlopen(request, timeout=180) as response, tmp.open('wb') as output:
+        with auth.open(url, timeout=180) as response, tmp.open('wb') as output:
             while True:
                 chunk = response.read(4 * 1024 * 1024)
                 if not chunk:
@@ -109,34 +180,32 @@ def main():
     parser.add_argument('--destination', type=Path, required=True)
     parser.add_argument('--manifest', type=Path, required=True)
     args = parser.parse_args()
-    token = os.environ.get('ORDR_DRIVE_ACCESS_TOKEN', '')
-    if not token:
-        parser.error('ORDR_DRIVE_ACCESS_TOKEN secret is required')
+    auth = DriveAuth()
     results = []
     missing = []
     # Download the five authorized MPQs without fetching a public URL.
     for name, (sha256, size) in EXPECTED.items():
         if name == MAP_NAME:
             continue
-        file_id = locate(token, name, size)
+        file_id = locate(auth, name, size)
         if not file_id:
             raise RuntimeError('Required MPQ absent from authorized Google Drive: ' + name)
-        results.append(retrieve(token, file_id, args.destination / name, size, sha256))
+        results.append(retrieve(auth, file_id, args.destination / name, size, sha256))
         print('SHA-256 verified:', name, size, 'bytes', flush=True)
 
     # Prefer an unsplit map; otherwise reassemble the eight private Drive
     # chunks into the simulator's Maps directory. None of the parts are
     # written into the repository or uploaded as an Actions artifact.
     map_sha, map_size = EXPECTED[MAP_NAME]
-    map_id = locate(token, MAP_NAME, map_size)
+    map_id = locate(auth, MAP_NAME, map_size)
     if map_id:
-        results.append(retrieve(token, map_id,
+        results.append(retrieve(auth, map_id,
                                 args.destination / 'Maps' / MAP_NAME,
                                 map_size, map_sha))
     else:
         located = []
         for name, size, sha in MAP_PARTS:
-            file_id = locate(token, name, size)
+            file_id = locate(auth, name, size)
             if not file_id:
                 missing.append(MAP_NAME)
                 break
@@ -145,7 +214,7 @@ def main():
             stage = args.destination / 'Maps' / '.private-map-chunks'
             target = args.destination / 'Maps' / MAP_NAME
             for name, size, sha, file_id in located:
-                retrieve(token, file_id, stage / name, size, sha)
+                retrieve(auth, file_id, stage / name, size, sha)
                 print('Map chunk SHA-256 verified:', name, flush=True)
             digest = hashlib.sha256()
             written = 0

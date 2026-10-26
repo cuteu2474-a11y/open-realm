@@ -28,6 +28,9 @@ jobs:
           xcrun simctl list runtimes
           xcrun simctl list devices available
 
+      - name: Unit-test private Drive OAuth refresh (no credentials or internet)
+        run: python3 -m unittest discover -s tools/ipad/tests -p 'test_*.py'
+
       - name: Build iPad simulator app
         run: make ipad-simulator
 
@@ -38,6 +41,9 @@ jobs:
           # Never commit or upload these licensed assets.
           ORDR_TEST_ASSETS_URL: ${{ secrets.ORDR_TEST_ASSETS_URL }}
           ORDR_DRIVE_ACCESS_TOKEN: ${{ secrets.ORDR_DRIVE_ACCESS_TOKEN }}
+          ORDR_DRIVE_REFRESH_TOKEN: ${{ secrets.ORDR_DRIVE_REFRESH_TOKEN }}
+          ORDR_DRIVE_CLIENT_ID: ${{ secrets.ORDR_DRIVE_CLIENT_ID }}
+          ORDR_DRIVE_CLIENT_SECRET: ${{ secrets.ORDR_DRIVE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           REPORT="build/ipad/simulator-report"
@@ -90,9 +96,8 @@ jobs:
             done < <(find "$RUNNER_TEMP/ordr-test-assets" -type f -iname 'ORDR_S2_2.323*.w3x' -print0)
           fi
 
-          # Optional private Drive API download, authenticated with an ephemeral
-          # OAuth token stored only in GitHub's encrypted Actions secrets.
-          if [ -n "$ORDR_DRIVE_ACCESS_TOKEN" ]; then
+          # Prefer refresh credentials. Keep old access token as migration fallback.
+          if [ -n "$ORDR_DRIVE_REFRESH_TOKEN$ORDR_DRIVE_CLIENT_ID$ORDR_DRIVE_CLIENT_SECRET$ORDR_DRIVE_ACCESS_TOKEN" ]; then
             python3 tools/ipad/fetch_private_drive_assets.py \
               --destination "$DATA_DIR/Documents" \
               --manifest "$REPORT/verified-private-assets.json"
