@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Distinguish a loaded renderer/client from a completed ORDR startup."""
+import json
 import pathlib
 import subprocess
 import sys
@@ -50,6 +51,21 @@ class SimulatorRuntimeTests(unittest.TestCase):
         output = self.inspect("2000 ms [CUX_CONDITION_AFTER] returned\n", "", "", "")
         self.assertIn('"jass_status": "insufficient_evidence"', output)
         self.assertIn('"last_completed_game_frame": null', output)
+
+    def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
+        output = self.inspect(
+            "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"
+            "2000 ms [CONDITION_ENTER ] index=2 function=CUl\n"
+            "2000 ms [CONDITION_RESULT] index=2 function=CUl returns=0\n"
+            "2000 ms [CONDITION_ENTER ] index=3 function=CV5\n"
+            "2000 ms [ARITHMETIC_ERROR] left=18 right=0\n"
+            "2000 ms [RUNTIME_ERROR] integer division by zero\n",
+            "game_ms=800 frame=8 stage=SERVER_FRAME_COMPLETE\n", "", "")
+        report = json.loads(output)
+        self.assertEqual(report["last_condition_entered"], "CV5")
+        self.assertEqual(report["last_condition_completed"], "CUl")
+        self.assertEqual(report["last_jass_runtime_error"], "integer division by zero")
+        self.assertFalse(report["gameplay_verified"])
 
 
 if __name__ == "__main__":

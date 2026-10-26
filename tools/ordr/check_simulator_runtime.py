@@ -35,6 +35,9 @@ def inspect(report):
         map_elapsed = map_times["R_REGISTER_MAP_COMPLETE"] - map_times["R_REGISTER_MAP_ENTER"]
     entered = re.search(r"\[EVENT_BEFORE_RESUME\].*ordinal=\d+.*function=BB4", jass)
     finished = re.search(r"\[EVENT_AFTER_RESUME\].*ordinal=\d+.*function=BB4", jass)
+    condition_entered = re.findall(r"\[CONDITION_ENTER\s*\]\s+index=\d+\s+function=(\S+)", jass)
+    condition_completed = re.findall(r"\[CONDITION_RESULT\s*\]\s+index=\d+\s+function=(\S+)", jass)
+    runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
     if entered and not finished and "CUX_CONDITION_AFTER" in jass:
         status = "bb4_resume_unfinished"
     elif entered and finished:
@@ -43,6 +46,9 @@ def inspect(report):
         status = "insufficient_evidence"
     return {
         "jass_status": status,
+        "last_condition_entered": condition_entered[-1] if condition_entered else None,
+        "last_condition_completed": condition_completed[-1] if condition_completed else None,
+        "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
         "last_completed_game_frame": max(frames) if frames else None,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,

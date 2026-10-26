@@ -298,6 +298,36 @@ TEST(wc3_jass_map, bjassassert_error_message_must_match) {
     , "assertion failed: different failure"));
 }
 
+/* A JASS arithmetic error must be reported by the VM, not terminate the
+ * iPad process with SIGFPE while executing a map's trigger condition. */
+TEST(wc3_jass_map, integer_divide_by_zero_is_jass_runtime_error) {
+    T_ASSERT(run_test_jass_error(
+        "function main takes nothing returns nothing\n"
+        "  local integer divisor = 0\n"
+        "  local integer value = 18 / divisor\n"
+        "endfunction\n"
+    , "integer division by zero"));
+}
+
+TEST(wc3_jass_map, integer_division_signed_overflow_is_jass_runtime_error) {
+    T_ASSERT(run_test_jass_error(
+        "function main takes nothing returns nothing\n"
+        "  local integer smallest = -2147483647 - 1\n"
+        "  local integer value = smallest / -1\n"
+        "endfunction\n"
+    , "integer division overflow"));
+}
+
+TEST(wc3_jass_map, integer_division_valid_operands_preserve_original_arithmetic) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(7 / 2 == 3, \"positive integer division truncates\")\n"
+        "  call BJassAssert(-7 / 2 == -3, \"negative integer division truncates\")\n"
+        "  call BJassAssert(7.0 / 2.0 == 3.5, \"real division remains fractional\")\n"
+        "endfunction\n"
+    ));
+}
+
 TEST(wc3_jass_map, array_assignment_and_access_evaluate_expressions) {
     T_ASSERT(run_test_jass(
         "globals\n"

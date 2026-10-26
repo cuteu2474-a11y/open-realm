@@ -222,7 +222,23 @@ uint32_t __unm(jass_t *j) {
 
 JASS_NUMOP(__sub, -);
 JASS_NUMOP(__mul, *);
-JASS_NUMOP(__div, /);
+/* C integer division raises SIGFPE for zero divisors and INT_MIN / -1.
+ * A map arithmetic error must unwind through the JASS runtime boundary,
+ * not kill the host app before the offending trigger can be diagnosed. */
+uint32_t __div(jass_t *j) {
+    if (jass_gettype(j, 1) == jasstype_integer && jass_gettype(j, 2) == jasstype_integer) {
+        int32_t left = jass_checkinteger(j, 1), right = jass_checkinteger(j, 2);
+        if (!right || (left == INT32_MIN && right == -1)) {
+            char detail[96];
+            snprintf(detail, sizeof(detail), "left=%d right=%d", left, right);
+            jass_ordr_log_event(j, "ARITHMETIC_ERROR", detail);
+            jass_rterror(j, !right ? "integer division by zero" : "integer division overflow");
+            return 0;
+        }
+        return jass_pushinteger(j, left / right);
+    }
+    return jass_pushnumber(j, jass_checknumber(j, 1) / jass_checknumber(j, 2));
+}
 JASS_CMPOP(__le, <=);
 JASS_CMPOP(__ge, >=);
 JASS_CMPOP(__gt, >);

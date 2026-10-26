@@ -225,3 +225,34 @@ python3 -m unittest discover -s tools/ipad/tests -p 'test_crash_report_summary.p
 (4) `CONDITION_LIST_DONE`이면 `BB4` 나머지 동기 호출과 코루틴 반환 경로.
 별도로 `crash-report-status.json`의 종류와 클라이언트 프레임 소요 시간을 대조한다.
 실제 난이도 화면 표시나 플레이 성공은 이 진단 패치만으로 주장하지 않는다.
+
+## 2026-10-26 — `CV5` 진입 직후 산술 예외와 JASS 나눗셈 보호
+
+이전 패치의 시뮬레이터 실행 [40315353749](https://github.com/cuteu2474-a11y/open-realm/actions/runs/40315353749)
+아티팩트를 내려받아 로그·화면·종료 진단을 대조했다.
+
+- 2,000ms의 `BB4` 이벤트 안에서 조건 `CUX`는 `TimerStart(CUW, 2000ms)` 이후
+  `returns=0`으로 돌아왔고, 다음 조건 `CUl`도 반환했다. 세 번째 조건 `CV5`의
+  `CONDITION_ENTER` 이후 `CONDITION_RESULT`와 `EVENT_AFTER_RESUME`가 없다.
+- 종료 진단의 일치하는 보고서는 1개이고 `EXC_ARITHMETIC`, `SIGFPE`, `SIGNAL`
+  유형이다. `CV5` 안의 정확한 표현식은 아직 확인하지 못했다.
+- JASS 엔진의 정수 `__div`가 C의 `/` 연산자를 검사 없이 호출하는 문제를 찾았다.
+  0으로 나눗셈 및 `INT32_MIN / -1`을 최소 JASS 프로그램으로 실행하면 수정 전
+  두 경우 모두 Linux에서 종료 코드 136 (`SIGFPE`)로 재현됐다. 따라서 이 코드가
+  iPad 종료 원인이라는 설명은 **강한 추정**이지만, `CV5`의 실제 피연산자와
+  호출 지점은 수정 후 시뮬레이터 로그로 확정해야 한다.
+- 두 가지 오류 입력을 JASS 런타임 오류로 보고해 현재 코루틴의 오류 경계에서
+  중단하도록 바꿨다. `ARITHMETIC_ERROR`에 피연산자를 남기며, 임의로 0을 반환해
+  원본 게임 규칙을 바꾸지 않는다. 유효 정수/실수 나눗셈은 이전대로 수행한다.
+- 직접 만든 최소 JASS 실행기는 수정 후 두 경우 모두 종료 코드 0으로 실행됐고,
+  각각 `integer division by zero`, `integer division overflow`를 정상 보고했다.
+  JASS 맵 회귀 테스트 3종도 추가했으나 로컬에는 SDL2/EGL/GL 개발 라이브러리가
+  없어 `make test-wc3-engine` 실행은 불가능했다. CI 결과와 다음 시뮬레이터의
+  실제 진행은 별도로 확인해야 한다.
+- 화면은 240초에도 로딩 중이고 360초에는 홈 화면이다. 렌더러 맵 등록은
+  27,337ms, 관찰된 최장 클라이언트 draw 호출은 23,552ms였다. 게임 프레임은
+  여전히 8번째(800ms)까지만 완료되었다. 렌더링 병목은 별도 과제로 남는다.
+
+다음 확인: 새 로그에 `ARITHMETIC_ERROR`의 좌·우 피연산자와 `RUNTIME_ERROR`가
+기록되는지 살피고, 해당 값이 원작 데이터·선행 네이티브 결과 중 어디에서 왔는지
+추적한다. `BB4`와 난이도 선택 흐름이 완료되기 전에는 게임 동작 성공을 주장하지 않는다.
