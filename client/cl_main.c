@@ -26,6 +26,9 @@
 #include "sound/s_local.h"
 #include "common/server_api.h"
 #include "common/online.h"
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
 #ifdef BZ_TESTS
 #include "shared/test.h"
 #endif
@@ -1570,6 +1573,45 @@ static void CL_SendSoundEvents(void) {
     }
 }
 
+
+/* Simulator-only network selection probe. Unlike a mocked JASS callback, it
+ * sends the same clc_stringcmd emitted by the finger-selection pipeline and
+ * lets the real server validate and publish unit-selection events.
+ *
+ * This is NOT a touchscreen test. It is never compiled into device builds,
+ * and the simulator must opt in explicitly with its smoke-test cvar. */
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+static void CL_ORDRSimulatorProbeChoice(void) {
+    static bool sent;
+    viewDef_t const *view = &cl.viewDef;
+    cstring_t map = Cvar_String("map", "");
+    if (sent || cls.state != ca_active ||
+        !Cvar_Integer("ordr_simulator_choice_probe", 0) ||
+        !map || !strstr(map, "ORDR_S2_2.323") ||
+        SDL_GetTicks() < 620000u ||
+        !view->entities ||
+        fabsf(view->target.x + 6000.0f) >= 1800.0f ||
+        fabsf(view->target.y + 8864.0f) >= 1800.0f ||
+        cls.netchan.message.cursize + 64 >= cls.netchan.message.maxsize)
+        return;
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+            ent->owner != 15u ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+            cl.ents[ent->number].current.class_id != MAKEFOURCC('u','0','0','0'))
+            continue;
+        MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
+        SZ_Printf(&cls.netchan.message, "select %u", (unsigned)ent->number);
+        sent = true;
+        CL_ORDRTrace("SIM_CHOICE_SELECT_QUEUED");
+        return;
+    }
+}
+#else
+static void CL_ORDRSimulatorProbeChoice(void) {}
+#endif
+
 void CL_Frame(uint32_t msec) {
     static uint32_t ordr_next_trace;
     bool trace_tick;
@@ -1608,6 +1650,7 @@ void CL_Frame(uint32_t msec) {
         ? Cvar_Value("s_volume", 1.0f) : 0.0f);
     CL_SendSoundEvents();
     CL_CheckTimeout();
+    CL_ORDRSimulatorProbeChoice();
     CL_SendCommand();
     if (cls.state == ca_connected && !cl.refresh_prepped) {
         CL_PrepRefresh();

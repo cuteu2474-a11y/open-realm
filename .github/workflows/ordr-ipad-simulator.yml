@@ -123,7 +123,7 @@ jobs:
             MAP_NAME="$(find "$DATA_DIR/Documents/Maps" -maxdepth 1 -iname 'ORDR_S2_2.323*.w3x' -print -quit | xargs basename)"
             echo "launch_mode=ordr_map" | tee "$REPORT/launch-mode.txt"
             xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
-              -tft +map "Maps\\$MAP_NAME" > "$REPORT/launch.txt"
+              -tft +map "Maps\\$MAP_NAME" +ordr_simulator_choice_probe 1 > "$REPORT/launch.txt"
           else
             echo "launch_mode=menu_only_missing_licensed_assets" | tee "$REPORT/launch-mode.txt"
             xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
@@ -197,6 +197,7 @@ jobs:
           # No .ips content or personal device log is uploaded.
           python3 tools/ipad/crash_report_summary.py --bundle-id "$BUNDLE_ID" \
             --launched-at "$LAUNCH_EPOCH" > "$REPORT/crash-report-status.json"
+          echo "simulator_scripted_network_selection_probe=enabled" >> "$REPORT/runtime-status.txt"
           echo "automated_touch_input=false" >> "$REPORT/runtime-status.txt"
           echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
@@ -217,7 +218,8 @@ jobs:
             echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, and 720 seconds (workflow artifact)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
-            echo "- Automated taps and full ORDR gameplay: **not implemented / not verified**"
+            echo "- Simulator-only scripted select network round-trip: attempted after menu appears; verdict in engine-stage-summary.json"
+            echo "- Physical taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
               echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."
             fi

@@ -70,6 +70,14 @@ def inspect(report):
         "choice_render_audit_present": bool(choice_render),
         "choice_scene_setup_logged": bool(choice_creates and choice_camera and choice_render),
         "offline_map_flag_confirmed": "ORDR_OFFLINE_CONFIRMED" in jass,
+        "simulator_choice_probe_queued": "SIM_CHOICE_SELECT_QUEUED" in client,
+        "choice_select_command_seen": "CHOICE_SELECT_COMMAND" in jass,
+        "choice_user_selection_event_seen": "CHOICE_USER_SELECTION" in jass,
+        "simulator_choice_network_roundtrip_verified":
+            "SIM_CHOICE_SELECT_QUEUED" in client and
+            "CHOICE_SELECT_COMMAND" in jass and
+            "CHOICE_USER_SELECTION" in jass,
+        "physical_touch_verified": False,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,
         "map_registration_ms": map_elapsed,

@@ -97,6 +97,33 @@ class SimulatorRuntimeTests(unittest.TestCase):
         ])
         self.assertFalse(report["gameplay_verified"])
 
+    def test_simulated_network_choice_needs_both_server_traces(self):
+        report = json.loads(self.inspect(
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143 raw=0x75303030 player=0\n"
+            "5500 ms [CHOICE_USER_SELECTION] unit=2143\n",
+            "game_ms=5500 frame=55 stage=SERVER_FRAME_COMPLETE\n",
+            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED\n", ""))
+        self.assertTrue(report["simulator_choice_probe_queued"])
+        self.assertTrue(report["choice_select_command_seen"])
+        self.assertTrue(report["choice_user_selection_event_seen"])
+        self.assertTrue(report["simulator_choice_network_roundtrip_verified"])
+        self.assertFalse(report["physical_touch_verified"])
+        self.assertFalse(report["gameplay_verified"])
+
+    def test_probe_does_not_pass_without_server_selection_event(self):
+        report = json.loads(self.inspect(
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143\n", "",
+            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED\n", ""))
+        self.assertTrue(report["simulator_choice_probe_queued"])
+        self.assertFalse(report["choice_user_selection_event_seen"])
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
+    def test_no_probe_does_not_pass_with_unrelated_human_selection(self):
+        report = json.loads(self.inspect(
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143\n"
+            "5500 ms [CHOICE_USER_SELECTION] unit=2143\n", "", "", ""))
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"
