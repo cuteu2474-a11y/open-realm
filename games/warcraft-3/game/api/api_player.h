@@ -127,6 +127,7 @@ static uint32_t WC3_ORDRActiveSlotController(uint32_t controller,
 }
 
 #ifdef BZ_TESTS
+#include "shared/test.h"
 TEST(wc3_player, ordr_vacant_human_slots_are_not_party_players) {
     T_EQ(WC3_ORDRActiveSlotController(0, true, true), 0u);
     T_EQ(WC3_ORDRActiveSlotController(0, true, false), 5u);

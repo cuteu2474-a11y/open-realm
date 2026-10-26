@@ -985,6 +985,7 @@ static bool WC3_TerrainPathTypeAllows(uint32_t type, uint8_t flags) {
 }
 
 #ifdef BZ_TESTS
+#include "shared/test.h"
 TEST(wc3_terrain, original_wpm_pathability_uses_enum_not_mask_index) {
     T_ASSERT(WC3_TerrainPathTypeAllows(1, 0));
     T_ASSERT(!WC3_TerrainPathTypeAllows(1, CM_PATHING_UNWALKABLE));

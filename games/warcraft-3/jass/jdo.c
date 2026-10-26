@@ -2191,6 +2191,32 @@ static jassVar_t *jass_find_visible_variable(jass_t *j, cstring_t name,
     return find_global(j, name);
 }
 
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(jass, local_variables_shadow_global_variables) {
+    jass_t *state = calloc(1, sizeof(*state));
+    jassdict_t local = {0}, global = {0};
+    bool is_local = false;
+    T_ASSERT(state != NULL);
+    if (!state) return;
+    state->num_stack = 1;
+    state->stack_pointer = state->stack;
+    state->stack[0].env.locals = &local;
+    local.key = "EK";
+    global.key = "EK";
+    state->global_hash[jass_hash("EK")] = &global;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &local.value);
+    T_ASSERT(is_local);
+    state->stack[0].env.locals = NULL;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &global.value);
+    T_ASSERT(!is_local);
+    state->num_stack = 0;
+    state->stack_pointer = NULL;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &global.value);
+    free(state);
+}
+#endif
+
 uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassVar_t const *v = NULL;
