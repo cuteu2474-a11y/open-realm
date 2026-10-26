@@ -439,7 +439,7 @@ void ORDR_DzRenderFrames(void) {
         edict_t *ent=G_GetPlayerEntityByNumber(client->ps.number);
         if(!ent || !ent->client)continue;
         UI_SetCurrentClient(ent->client);
-        UI_WriteStart(LAYER_GAME_3);
+        UI_WriteStart(WC3_LAYER_DZ);
         ordr_write_frame_tree(1);
         UI_WriteEnd(ent);
         UI_SetCurrentClient(NULL);

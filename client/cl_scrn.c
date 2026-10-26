@@ -1238,11 +1238,11 @@ void SCR_LayoutDrawCommandButton(uiFrame_t const *frame, rect_t const *screen) {
 void layout_text(uiFrame_t const *frame, rect_t const *screen, cstring_t text) {
     drawText_t dt = SCR_GetDrawText(frame, screen->w, text, frame->buffer.data);
     dt.rect = *screen;
-    /* WC3's game-3 overlay owns its authored multiboard cells. Treat
+    /* WC3's game-4 overlay owns its authored multiboard cells. Treat
      * each cell as one line: wrapping a long Korean value into the next
      * row caused the score, player and unit-count columns to overlap.
      * Clip only within this layout layer; ordinary dialogues keep wrap. */
-    if (!layout_current_window && layout_current_layer == LAYER_GAME_3) {
+    if (!layout_current_window && layout_current_layer == LAYER_GAME_4) {
         dt.flags &= ~DRAW_WORD_WRAP;
         dt.flags |= DRAW_CLIP;
         dt.clip = *screen;

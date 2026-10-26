@@ -1056,7 +1056,8 @@ typedef struct {
 #define MAX_GAMECACHE_STRING 256 // chars; shared string cap for gamecache and hashtable string slots
 #define WC3_LAYER_TIMERDIALOG LAYER_GAME_0
 #define WC3_LAYER_LEADERBOARD LAYER_GAME_1
-#define WC3_LAYER_MULTIBOARD LAYER_GAME_3 // custom multiboard / Team Resources; LAYER_GAME_2 belongs to WC3_LAYER_COMMAND_ERROR
+#define WC3_LAYER_DZ LAYER_GAME_3 // original ORDR FDF/DzAPI overlay
+#define WC3_LAYER_MULTIBOARD LAYER_GAME_4 // custom multiboard; LAYER_GAME_2 command errors
 #define MAX_EVENTS 16384 // ORDR startup registers >1024 player-unit events; retain stable handle slots
 #define MAX_QUESTS 256 // quests; fixed quest slots preserve stable pointers across removal
 #define MAX_QUESTITEMS 16 // items per quest; matches the practical quest objective display capacity

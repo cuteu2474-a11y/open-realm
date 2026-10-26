@@ -7,7 +7,7 @@
 #include "stb/stb_truetype.h"
 #undef STB_TRUETYPE_IMPLEMENTATION
 
-#define MAX_GLYPHSET 256
+#define MAX_GLYPHSET 0x1100 /* high-byte pages across Unicode U+0000..U+10FFFF */
 #define MAX_CACHED_FONTS 64
 #define FONT_SCALE 2
 #define INV_SCALE_X(x) ((x) / (FONT_SCALE * UI_FONT_COORD_SCALE))
@@ -102,7 +102,11 @@ retry:
 
 
 static glyphSet_t* R_GetGlyphSet(font_t *font, int codepoint) {
-    int idx = (codepoint >> 8) % MAX_GLYPHSET;
+    /* Modulo 256 aliased every non-BMP emoji to unrelated BMP glyph pages.
+     * Keep the full Unicode plane index so imported ORDR labels that use
+     * emoji/private glyphs never render a different cached character. */
+    uint32_t const page = (uint32_t)codepoint >> 8;
+    int const idx = page < MAX_GLYPHSET ? (int)page : 0; /* invalid Unicode -> replacement page */
     if (!font->sets[idx]) {
         font->sets[idx] = R_LoadGlyphSet(font, idx);
     }

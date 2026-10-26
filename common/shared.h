@@ -517,6 +517,7 @@ typedef enum {
     LAYER_GAME_1,
     LAYER_GAME_2,
     LAYER_GAME_3,
+    LAYER_GAME_4, /* dedicated WC3 multiboard; ORDR DzAPI owns LAYER_GAME_3 */
 } UILAYOUTLAYER;
 
 typedef enum {
@@ -529,8 +530,8 @@ typedef enum {
 #define UI_WINDOW_UNIQUE  (1u << 2) // flag bit; keeps one instance per class; used by singleton inventory and journal windows
 #define UI_WINDOW_NO_PAUSE (1u << 3) // flag bit; modal input capture without acquiring the client-owned simulation pause
 #define UI_WINDOW_NO_ESCAPE (1u << 4) // flag bit; Escape is consumed without dismissing the window; used by mandatory result/decision windows
-#define MAX_LAYOUT_LAYERS 17
-_Static_assert(LAYER_GAME_3 < MAX_LAYOUT_LAYERS, "every UILAYOUTLAYER needs a client layout slot");
+#define MAX_LAYOUT_LAYERS 18
+_Static_assert(LAYER_GAME_4 < MAX_LAYOUT_LAYERS, "every UILAYOUTLAYER needs a client layout slot");
 #define UI_WINDOW_CLOSE_ACTION "close_window" // client action; closes the owning window without a server command
 #define UI_WINDOW_CLOSE_NOTIFY_ACTION "close_window_notify" // client action; closes locally and notifies server of modal release
 #define UI_WINDOW_CLOSE_COMMAND_PREFIX "close_window_command " // client action prefix; forwards suffix then closes the owning window

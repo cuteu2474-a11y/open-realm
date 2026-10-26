@@ -256,3 +256,37 @@ prove iOS rendering or that gameplay after difficulty selection is stable.
   iPad screenshot to pin down the unrelated UI layout offset. Do not claim
   the invisible background or layout has been fixed until a device screenshot
   and the new trace confirm them.
+
+
+## 2026-10-27 — 엔진 오류 일괄 수정 / iPad 시뮬레이터 자동 실행 중단
+
+원본 \`ORDR_S2_2.323[C].w3x\` / \`war3map.j\`는 수정하지 않는다.
+사용자 지시에 따라 원랜디에 드러난 오류들을 먼저 한 번에 수정하고,
+시뮬레이터 및 IPA 워크플로는 **수동 실행(workflow_dispatch)**으로 유지한다.
+일반 브랜치 커밋, PR 갱신만으로 iPad 시뮬을 실행하지 않는다.
+
+이번 엔진 변경 사항 (런타임 결과 검증 **전**):
+- **DzAPI 아이콘과 점수판 레이어 충돌:** 기존 \`LAYER_GAME_3\`을
+  Dz/FDF에만 사용하고, 점수판/팀 자원 UI를 새 \`LAYER_GAME_4\`로 분리.
+  별도 레이어의 점수판 셀 텍스트만 한 줄/클리핑 처리한다.
+- **Unicode emoji 잘못된 글리프 캐시:** 폰트 캐시에서
+  \`(codepoint >> 8) % 256\` 때문에 보충 평면이 BMP 페이지와 충돌하던
+  문제를 제거. 글꼴 자체에 해당 emoji 글리프가 없으면 여전히 표시되지
+  않을 수 있으며 별도 폰트 지원이 필요하다.
+- **게임 시작 이후 B100 선택 장면 배경:** 전장 카메라와 난이도 장면
+  카메라를 구분하여 배경 표시 상태만 바꾼다.
+- **물/지면 표시:** 물이 있는 타일 안에서도 수면 위로 솟은 지면을
+  삼각형 단위로 가린다. W3E 지형/텍스처 파일은 그대로 유지한다.
+- **줄바꿈과 점수판:** \`\\n\`, \`|n\`, 실제 LF 표기와 점수판 셀
+  클리핑을 클라이언트 렌더링에서 수정한다.
+- **JASS 0 나누기:** \`CV5\`의 \`360 / (vP * EK)\` 피연산자를
+  기록하지만 원본 수치나 계산식은 임의로 대체하지 않는다.
+  JASS의 divide-by-zero는 원래 스레드 중단을 일으키므로, 원인
+  값을 고치기 전에는 해결 상태로 표시하지 않는다.
+
+**여전히 미해결 / 실기기 또는 엔진 이벤트 검증 필요**:
+\`CV5\` 영(0) 피연산자의 실제 출처, 위습 선택/이동,
+\`e0IX\`의 \`CH\` 비콘 진입과 \`CRy\` 유닛 생성,
+적 유닛의 경로 명령/이동, 플레이어 수에 따른 파티 모드 판정,
+폰트에 없는 이모티콘 및 성능 문제.
+실제 iPad 자동 터치/비콘/전투를 검증한 것으로 보고하지 않는다.
