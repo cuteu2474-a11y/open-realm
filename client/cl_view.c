@@ -19,9 +19,11 @@ static bool begin_sent = false;
 #if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
 extern void CL_ORDRTrace(cstring_t stage);
 #else
-/* Unit-test binaries compile the parser/refresh without the platform client.
- * Keep iOS-only tracing out of those linked test targets. */
-static void CL_ORDRTrace(cstring_t stage) { (void)stage; }
+/* The SC2/Warcraft unity test includes both parsers in one translation unit.
+ * Use a no-op macro so no duplicate static or missing linked trace symbol. */
+#ifndef CL_ORDRTrace
+#define CL_ORDRTrace(stage) ((void)(stage))
+#endif
 #endif
 static unsigned ordr_prep_seen;
 static void CL_ORDRPrepTrace(unsigned bit, cstring_t stage) {
