@@ -723,32 +723,18 @@ static void R_LoadMapMinimap(handle_t hMpq, cstring_t mapFilename) {
     }
 }
 
-static bool R_ReadWar3MapVertex(handle_t file, war3mapVertex_t *vert) {
+/* W3E has one 7-byte packed terrain record per vertex. Reading its five
+ * fields with separate SFileReadFile calls caused hundreds of thousands of
+ * tiny compressed MPQ reads during ORDR's loading screen on the iPad.
+ * Decode the same authored bytes from one checked bulk read instead. */
+static void R_DecodeWar3MapVertex(uint8_t const *bytes, war3mapVertex_t *vert) {
     uint16_t water_and_edge;
-    uint8_t flags;
-    uint8_t variation;
-    uint8_t cliff_and_layer;
-
-    if (!file || !vert) {
-        return false;
-    }
     memset(vert, 0, sizeof(*vert));
-    if (!SFileReadFile(file, &vert->accurate_height, sizeof(vert->accurate_height), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &water_and_edge, sizeof(water_and_edge), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &flags, sizeof(flags), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &variation, sizeof(variation), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &cliff_and_layer, sizeof(cliff_and_layer), NULL, NULL)) {
-        return false;
-    }
-
+    memcpy(&vert->accurate_height, bytes, sizeof(vert->accurate_height));
+    memcpy(&water_and_edge, bytes + 2, sizeof(water_and_edge));
+    uint8_t const flags = bytes[4];
+    uint8_t const variation = bytes[5];
+    uint8_t const cliff_and_layer = bytes[6];
     vert->waterlevel = water_and_edge & 0x3FFF;
     vert->mapedge = (water_and_edge & 0x4000) != 0;
     vert->ground = flags & 0x0F;
@@ -760,7 +746,6 @@ static bool R_ReadWar3MapVertex(handle_t file, war3mapVertex_t *vert) {
     vert->groundVariation = variation & 0x1F;
     vert->cliff = (cliff_and_layer >> 4) & 0x0F;
     vert->level = cliff_and_layer & 0x0F;
-    return true;
 }
 
 war3map_t *FileReadWar3Map(handle_t archive) {
@@ -776,15 +761,36 @@ war3map_t *FileReadWar3Map(handle_t archive) {
     SFileReadFile(file, &map->width, 4, NULL, NULL);
     SFileReadFile(file, &map->height, 4, NULL, NULL);
     SFileReadFile(file, &map->center, 8, NULL, NULL);
-    uint32_t const num_vertices = map->width * map->height;
-    int const vertexblocksize = sizeof(war3mapVertex_t) * num_vertices;
-    map->vertices = ri.MemAlloc(vertexblocksize);
-    R_AllocateFogOfWar(map);
-    FOR_LOOP(i, num_vertices) {
-        if (!R_ReadWar3MapVertex(file, (war3mapVertex_t *)map->vertices + i)) {
-            break;
-        }
+    uint64_t const vertex_count64 = (uint64_t)map->width * map->height;
+    if (vertex_count64 == 0 || vertex_count64 > UINT32_MAX / MAP_VERTEX_FILE_SIZE ||
+        vertex_count64 > SIZE_MAX / sizeof(war3mapVertex_t)) {
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: invalid W3E vertex dimensions\n");
+        return NULL;
     }
+    uint32_t const num_vertices = (uint32_t)vertex_count64;
+    uint32_t const packed_size = num_vertices * MAP_VERTEX_FILE_SIZE;
+    uint8_t *packed = ri.MemAlloc(packed_size);
+    uint32_t read_size = 0;
+    if (!packed || !SFileReadFile(file, packed, packed_size, &read_size, NULL) ||
+        read_size != packed_size) {
+        if (packed) ri.MemFree(packed);
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: truncated W3E terrain vertex data\n");
+        return NULL;
+    }
+    map->vertices = ri.MemAlloc(sizeof(war3mapVertex_t) * (size_t)num_vertices);
+    if (!map->vertices) {
+        ri.MemFree(packed);
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: failed to allocate W3E terrain vertices\n");
+        return NULL;
+    }
+    FOR_LOOP(i, num_vertices)
+        R_DecodeWar3MapVertex(packed + (size_t)i * MAP_VERTEX_FILE_SIZE,
+                             (war3mapVertex_t *)map->vertices + i);
+    ri.MemFree(packed);
+    R_AllocateFogOfWar(map);
     SFileCloseFile(file);
     FOR_LOOP(y, map->height) {
 //        printf("%04x  ", y);
