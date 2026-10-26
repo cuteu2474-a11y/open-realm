@@ -72,7 +72,7 @@ void CL_ORDRTrace(cstring_t stage) {
             file = fopen(filename, "w");
         if (file) setvbuf(file, NULL, _IOLBF, 0);
     }
-    if (!file || lines++ >= 500) return;
+    if (!file || lines++ >= 2400) return;
     fprintf(file,
             "wall_ms=%u client_ms=%u stage=%s state=%d ui=%u ready=%d precache=%d loading_layout=%d world_cs=%d plaque=%d progress=%.2f\n",
             (unsigned)SDL_GetTicks(), (unsigned)cl_realtime, stage ? stage : "(none)", (int)cls.state,
@@ -1574,12 +1574,13 @@ static void CL_SendSoundEvents(void) {
 }
 
 
-/* Sim-only authorized network roundtrip. Select the original nightmare
- * difficulty (u005), then the original Isekai mode (u00C). These are the
- * authored neutral-passive models, not synthetic difficulty settings.
- * This does not simulate a physical finger and cannot run on a real iPad.
- * Separate stages leave room for JASS selection callbacks to execute. */
+/* Simulator-only UI probe. It invokes the same SDL finger handling that
+ * a normal iPad tap invokes (in cl_input.c), rather than bypassing UI input
+ * by inserting a network select command directly. The map still decides
+ * which selection, mode and game-start actions are valid. */
 #if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+bool CL_ORDRSimulatorTapChoice(uint32_t number);
+
 static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
     if (actual == wanted) return true;
     return (((actual & 0xffu) << 24) | ((actual & 0xff00u) << 8) |
@@ -1587,42 +1588,56 @@ static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
 }
 
 static void CL_ORDRSimulatorProbeChoice(void) {
+    /* Initial screenshots at 600 s capture the untouched menu. Allow each
+     * authored selection enough client+server frames before the next tap. */
     static uint32_t next_step;
-    static uint32_t const codes[2] = {
-        MAKEFOURCC('u','0','0','5'), MAKEFOURCC('u','0','0','C')
+    static uint32_t next_miss_log;
+    static uint32_t const codes[3] = {
+        MAKEFOURCC('u','0','0','5'), /* nightmare difficulty */
+        MAKEFOURCC('u','0','0','C'), /* Isekai mode */
+        MAKEFOURCC('u','0','0','6'), /* authored Start Game card */
     };
-    static uint32_t const earliest_ms[2] = { 540000u, 630000u };
-    static cstring_t const stage_name[2] = { "u005", "u00C" };
+    static uint32_t const earliest_ms[3] = { 615000u, 710000u, 805000u };
+    static cstring_t const stage_name[3] = { "u005", "u00C", "u006" };
     viewDef_t const *view = &cl.viewDef;
     cstring_t map = Cvar_String("map", "");
-    if (next_step >= 2 || cls.state != ca_active ||
+    uint32_t now = SDL_GetTicks();
+    if (next_step >= 3 || cls.state != ca_active ||
         !Cvar_Integer("ordr_simulator_choice_probe", 0) ||
         !map || !strstr(map, "ORDR_S2_2.323") ||
-        SDL_GetTicks() < earliest_ms[next_step] ||
+        now < earliest_ms[next_step] ||
         !view->entities ||
-        fabsf(view->target.x + 6000.0f) >= 1800.0f ||
-        fabsf(view->target.y + 8864.0f) >= 1800.0f ||
         cls.netchan.message.cursize + 64 >= cls.netchan.message.maxsize)
         return;
 
-    FOR_LOOP(i, view->num_entities) {
-        renderEntity_t const *ent = &view->entities[i];
-        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
-            !ent->model || ent->owner != 15u ||
-            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
-            !CL_ORDRSimulatorRawMatch(cl.ents[ent->number].current.class_id,
-                                      codes[next_step]))
-            continue;
-        MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
-        SZ_Printf(&cls.netchan.message, "select %u", (unsigned)ent->number);
-        char stage[128];
-        snprintf(stage, sizeof(stage),
-                 "SIM_CHOICE_SELECT_QUEUED unit=%u raw=%s step=%u",
-                 (unsigned)ent->number, stage_name[next_step],
-                 (unsigned)(next_step + 1));
-        next_step++;
-        CL_ORDRTrace(stage);
-        return;
+    if (fabsf(view->target.x + 6000.0f) < 1800.0f &&
+        fabsf(view->target.y + 8864.0f) < 1800.0f) {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+                !ent->model || ent->owner != 15u ||
+                (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+                !CL_ORDRSimulatorRawMatch(cl.ents[ent->number].current.class_id,
+                                          codes[next_step]))
+                continue;
+            if (!CL_ORDRSimulatorTapChoice(ent->number)) break;
+            char trace[128];
+            snprintf(trace, sizeof(trace),
+                     "SIM_CHOICE_SELECT_QUEUED unit=%u raw=%s step=%u input=finger",
+                     (unsigned)ent->number, stage_name[next_step],
+                     (unsigned)(next_step + 1));
+            CL_ORDRTrace(trace);
+            next_step++;
+            return;
+        }
+    }
+    if (now >= next_miss_log) {
+        char trace[112];
+        snprintf(trace, sizeof(trace),
+                 "SIM_CHOICE_TAP_BLOCKED raw=%s step=%u",
+                 stage_name[next_step], (unsigned)(next_step + 1));
+        CL_ORDRTrace(trace);
+        next_miss_log = now + 15000u;
     }
 }
 #else

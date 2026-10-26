@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <ctype.h>
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
 
 mouseEvent_t mouse;
 static keyCode_t mouse_button_keys[8];
@@ -703,6 +706,71 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
             break;
     }
 }
+
+/* iPad Simulator-only UI automation. Project the original imported ORDR
+ * model onto the same window coordinates that a physical finger uses, then
+ * deliver SDL FINGERDOWN/FINGERUP to the existing touch handler. Unlike
+ * writing "select N" directly, this exercises the choice hit rectangle,
+ * window/UI arbitration and touch-to-command pipeline end to end.
+ *
+ * This is NOT a real hardware finger. Real iPad builds exclude the helper. */
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+static bool CL_ORDRSimulatedDirectTouch(SDL_TouchID id) {
+    (void)id;
+    return true;
+}
+
+bool CL_ORDRSimulatorTapChoice(uint32_t number) {
+    viewDef_t const *view = &cl.viewDef;
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    rect_t viewport = view->viewport;
+    vec2_t point;
+    uint32_t nearest;
+    if (!number || number >= MAX_CLIENT_ENTITIES ||
+        !CL_GameplayInputReady() || cls.key_dest != key_game ||
+        !view->entities || !win.width || !win.height ||
+        viewport.w <= 0.0f || viewport.h <= 0.0f)
+        return false;
+
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (ent->number != number || !ent->model ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)))
+            continue;
+        vec3_t const ndc = Matrix4_multiply_vector3(
+            &view->viewProjectionMatrix, &ent->origin);
+        if (!isfinite(ndc.x) || !isfinite(ndc.y) ||
+            ndc.x < -1.0f || ndc.x > 1.0f ||
+            ndc.y < -1.0f || ndc.y > 1.0f)
+            return false;
+        point = (vec2_t){
+            (viewport.x + (ndc.x + 1.0f) * viewport.w * 0.5f) * win.width,
+            (1.0f - viewport.y - (ndc.y + 1.0f) * viewport.h * 0.5f) * win.height
+        };
+        if (!CL_TraceORDRChoiceCard(point.x, point.y, &nearest) ||
+            nearest != number) return false;
+
+        uint32_t const before = cls.netchan.message.cursize;
+        bool (*saved_direct)(SDL_TouchID) = touch_is_direct;
+        SDL_TouchFingerEvent event = {
+            .type = SDL_FINGERDOWN,
+            .timestamp = SDL_GetTicks(),
+            .touchId = (SDL_TouchID)-9100,
+            .fingerId = (SDL_FingerID)-9100,
+            .x = point.x / win.width,
+            .y = point.y / win.height,
+        };
+        touch_is_direct = CL_ORDRSimulatedDirectTouch;
+        CL_TouchFingerEvent(&event);
+        event.type = SDL_FINGERUP;
+        event.timestamp += 32;
+        CL_TouchFingerEvent(&event);
+        touch_is_direct = saved_direct;
+        return cls.netchan.message.cursize > before;
+    }
+    return false;
+}
+#endif
 
 /* A native direct finger is the sole owner of the contact on iOS. SDL emits
  * both FINGER* and synthetic SDL_TOUCH_MOUSEID edges, and its release can

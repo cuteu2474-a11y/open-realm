@@ -130,17 +130,22 @@ jobs:
               > "$REPORT/launch.txt"
           fi
 
-          # Observe beyond the late choice screen; a successful simctl launch alone
+          # Observe the original choice UI, scripted taps, and post-start state; simctl launch alone
           # only proves launch request acceptance, not working gameplay.
           OBSERVE_STARTED=$SECONDS
           printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
-          for target in 8 16 45 90 150 240 360 480 600 720; do
+          for target in 8 16 45 90 150 240 360 480 600 720 840 960; do
             elapsed=$((SECONDS - OBSERVE_STARTED))
             if [ "$elapsed" -lt "$target" ]; then
               sleep "$((target - elapsed))"
             fi
             output="$REPORT/after-$target""s.png"
             xcrun simctl io "$UDID" screenshot "$output"
+            # Simulator may report a portrait PNG while presenting a landscape
+            # app; retain the untouched source and a review-ready rotated copy.
+            if [ "$target" -ge 600 ]; then
+              sips -r 270 "$output" --out "${output%.png}-landscape.png" >/dev/null
+            fi
             elapsed=$((SECONDS - OBSERVE_STARTED))
             checksum="$(shasum -a 256 "$output" | cut -d ' ' -f 1)"
             printf "%s\t%s\t%s\t%s\n" "$target" "$elapsed" "$checksum" "$(basename "$output")" >> "$REPORT/screenshot-index.tsv"
@@ -197,7 +202,7 @@ jobs:
           # No .ips content or personal device log is uploaded.
           python3 tools/ipad/crash_report_summary.py --bundle-id "$BUNDLE_ID" \
             --launched-at "$LAUNCH_EPOCH" > "$REPORT/crash-report-status.json"
-          echo "simulator_scripted_network_selection_probe=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_scripted_finger_selection_probe=enabled" >> "$REPORT/runtime-status.txt"
           echo "automated_touch_input=false" >> "$REPORT/runtime-status.txt"
           echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
@@ -215,10 +220,10 @@ jobs:
             echo "- App install and launch command: complete"
             echo "- Retail War3.mpq supplied: $MPQ_FOUND"
             echo "- ORDR map supplied: $MAP_FOUND"
-            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, and 720 seconds (workflow artifact)"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, 720, 840 and 960 seconds (landscape review copies for >=600)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
-            echo "- Simulator-only scripted select network round-trip: attempted after menu appears; verdict in engine-stage-summary.json"
+            echo "- Simulator-only scripted SDL finger taps on nightmare, Isekai and Start: verdict in engine-stage-summary.json"
             echo "- Physical taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
               echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."

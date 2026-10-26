@@ -1508,6 +1508,39 @@ static void G_ORDRShowFlowStatus(void) {
             (ent->class_id >= 0x75303041u && ent->class_id <= 0x75303043u))
             choice_screen_units++;
     }
+    /* Original ORDR's backdrop is authored as the B100 Background.mdl
+     * destructable, not an engine-generated static image. Count the actual
+     * map instances at difficulty selection so missing artwork can be
+     * attributed to absent instances, hidden flags or renderer assets.
+     * Never toggle visibility or insert replacement art here. */
+    if (level.time >= 5000 && level.time <= 10000) {
+        unsigned seen = 0, visible = 0, modeled = 0;
+        FOR_LOOP(i, globals.num_edicts) {
+            edict_t const *ent = &g_edicts[i];
+            if (!ent->inuse ||
+                (ent->class_id != MAKEFOURCC('B','1','0','0') &&
+                 ent->class_id != 0x42313030u)) continue;
+            seen++;
+            if (!(ent->s.renderfx & RF_HIDDEN)) visible++;
+            if (ent->s.model) modeled++;
+            if (seen <= 4) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "entity=%u model=%u hidden=%u class=0x%08x position=(%.0f,%.0f,%.0f) scale=%.2f",
+                         (unsigned)ent->s.number, (unsigned)ent->s.model,
+                         (unsigned)((ent->s.renderfx & RF_HIDDEN) != 0),
+                         (unsigned)ent->class_id, (double)ent->s.origin.x,
+                         (double)ent->s.origin.y, (double)ent->s.origin.z,
+                         (double)ent->s.scale);
+                jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_INSTANCE", detail);
+            }
+        }
+        char overview[128];
+        snprintf(overview, sizeof(overview),
+                 "B100_instances=%u visible=%u model_indices=%u",
+                 seen, visible, modeled);
+        jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_AUDIT", overview);
+    }
     snprintf(message, sizeof(message),
              "ORDR DEBUG: main=%u init=%u timerReg=%u timerFire=%u choice=%u picks=%u/6 scene=%u/12 worldEnt=%u",
              (unsigned)((mask & (1u << 0)) != 0),

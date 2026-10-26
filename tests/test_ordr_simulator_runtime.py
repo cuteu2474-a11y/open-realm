@@ -156,6 +156,56 @@ class SimulatorRuntimeTests(unittest.TestCase):
         ])
         self.assertFalse(report["gameplay_verified"])
 
+    def test_three_simulated_finger_taps_require_matching_server_events(self):
+        report = json.loads(self.inspect(
+            "5100 ms [CHOICE_SELECT_COMMAND] unit=2148 raw=0x75303035\n"
+            "5100 ms [CHOICE_USER_SELECTION] player=0 unit=2148 queued=1\n"
+            "6100 ms [CHOICE_SELECT_COMMAND] unit=2150 raw=0x75303043\n"
+            "6100 ms [CHOICE_USER_SELECTION] player=0 unit=2150 queued=1\n"
+            "7100 ms [CHOICE_SELECT_COMMAND] unit=2151 raw=0x75303036\n"
+            "7100 ms [CHOICE_USER_SELECTION] player=0 unit=2151 queued=1\n"
+            "7100 ms [FLOW_ENTER] function=CUK via=synchronous hit=1\n"
+            "7100 ms [FLOW_ENTER] function=CUL via=synchronous hit=1\n"
+            "7100 ms [FLOW_ENTER] function=CUM via=synchronous hit=1\n",
+            "",
+            "wall_ms=620000 stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1 input=finger\n"
+            "wall_ms=710000 stage=SIM_CHOICE_SELECT_QUEUED unit=2150 raw=u00C step=2 input=finger\n"
+            "wall_ms=810000 stage=SIM_CHOICE_SELECT_QUEUED unit=2151 raw=u006 step=3 input=finger\n",
+            ""))
+        self.assertTrue(report["simulator_choice_full_three_tap_roundtrip_verified"])
+        self.assertTrue(report["simulator_choice_network_roundtrip_verified"])
+        self.assertEqual(report["simulator_choice_requested"], ["u005", "u00C", "u006"])
+        self.assertEqual(report["simulator_choice_verified"], ["u005", "u00C", "u006"])
+        self.assertEqual(report["simulator_choice_input_type"], "synthetic_sdl_finger")
+        self.assertTrue(report["game_start_jass_called"])
+        self.assertFalse(report["physical_touch_verified"])
+        self.assertFalse(report["gameplay_verified"])
+
+    def test_three_tap_check_fails_if_final_start_is_not_acknowledged(self):
+        report = json.loads(self.inspect(
+            "5100 ms [CHOICE_SELECT_COMMAND] unit=2148\n"
+            "5100 ms [CHOICE_USER_SELECTION] unit=2148 queued=1\n"
+            "6100 ms [CHOICE_SELECT_COMMAND] unit=2150\n"
+            "6100 ms [CHOICE_USER_SELECTION] unit=2150 queued=1\n",
+            "",
+            "stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1 input=finger\n"
+            "stage=SIM_CHOICE_SELECT_QUEUED unit=2150 raw=u00C step=2 input=finger\n"
+            "stage=SIM_CHOICE_SELECT_QUEUED unit=2151 raw=u006 step=3 input=finger\n",
+            ""))
+        self.assertFalse(report["simulator_choice_full_three_tap_roundtrip_verified"])
+        self.assertFalse(report["game_start_jass_called"])
+        self.assertEqual(report["simulator_choice_verified"], ["u005", "u00C"])
+
+    def test_missing_original_background_is_reported_without_fake_art(self):
+        report = json.loads(self.inspect(
+            "5000 ms [CHOICE_BACKGROUND_AUDIT] B100_instances=0 visible=0 model_indices=0\n",
+            "", "stage=SIM_CHOICE_TAP_BLOCKED raw=u005 step=1\n", ""))
+        self.assertEqual(report["choice_background_instance_count"], 0)
+        self.assertEqual(report["choice_background_visible_count"], 0)
+        self.assertEqual(report["choice_background_model_count"], 0)
+        self.assertEqual(report["simulator_choice_tap_blocked"], ["u005"])
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

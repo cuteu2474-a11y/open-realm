@@ -51,6 +51,14 @@ def inspect(report):
         jass))
     verified_requests = [item for item in probe_requests
                          if item[0] in command_ids and item[0] in accepted_ids]
+    choice_actions = re.findall(
+        r"\[FLOW_ENTER\s*\]\s+function=(CUK|CUL|CUM)\b", jass)
+    blocked_taps = re.findall(
+        r"stage=SIM_CHOICE_TAP_BLOCKED raw=(u00[0-9A-C]) step=(\d+)",
+        client)
+    background_audits = re.findall(
+        r"\[CHOICE_BACKGROUND_AUDIT\s*\]\s+B100_instances=(\d+) visible=(\d+) model_indices=(\d+)",
+        jass)
     # The first few server-frame checkpoints are a diagnostic sample, not proof
     # that the server stopped running after that frame.
     jass_times = [int(n) for n in re.findall(r"^(\d+) ms\s+\[", jass, re.M)]
@@ -86,9 +94,22 @@ def inspect(report):
         "choice_select_command_seen": "CHOICE_SELECT_COMMAND" in jass,
         "choice_user_selection_event_seen": "CHOICE_USER_SELECTION" in jass,
         "simulator_choice_requested": [item[1] for item in probe_requests],
+        "simulator_choice_input_type": "synthetic_sdl_finger",
+        "simulator_choice_tap_blocked": [item[0] for item in blocked_taps[-12:]],
+        "simulator_choice_script_functions": sorted(set(choice_actions)),
+        "choice_background_instance_count":
+            int(background_audits[-1][0]) if background_audits else None,
+        "choice_background_visible_count":
+            int(background_audits[-1][1]) if background_audits else None,
+        "choice_background_model_count":
+            int(background_audits[-1][2]) if background_audits else None,
         "simulator_choice_verified": [item[1] for item in verified_requests],
         "simulator_choice_network_roundtrip_verified":
             bool(probe_requests) and len(verified_requests) == len(probe_requests),
+        "simulator_choice_full_three_tap_roundtrip_verified":
+            len(probe_requests) == 3 and len(verified_requests) == 3 and
+            [request[1] for request in probe_requests] == ["u005", "u00C", "u006"],
+        "game_start_jass_called": "CUM" in choice_actions,
         "physical_touch_verified": False,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,
