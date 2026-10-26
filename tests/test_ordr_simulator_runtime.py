@@ -53,6 +53,37 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertIn('"jass_status": "insufficient_evidence"', output)
         self.assertIn('"last_completed_game_frame": null', output)
 
+    def test_late_choice_scene_is_distinct_from_early_server_frame_sample(self):
+        output = self.inspect(
+            "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"
+            "2000 ms [RUNTIME_ERROR] integer division by zero\n"
+            "2000 ms [EVENT_AFTER_RESUME] ordinal=2 function=BB4\n"
+            "2200 ms [ORDR_OFFLINE_CONFIRMED] map offline flag set\n"
+            "4000 ms [CHOICE_CREATE] type=u000 created=1\n"
+            "4000 ms [CHOICE_CREATE] type=u001 created=1\n"
+            "4100 ms [CHOICE_CAMERA_APPLIED] camera_player=0\n"
+            "5000 ms [CHOICE_MODEL_AUDIT] unit=u000 visible=1 selectable=1\n"
+            "5000 ms [CHOICE_RENDER_AUDIT] buttons=2 modeled=2 visible=2\n"
+            "6800 ms [EVENT_DRAIN_EXIT] visited=1\n",
+            "game_ms=800 frame=8 stage=SERVER_FRAME_COMPLETE\n", "", "")
+        report = json.loads(output)
+        self.assertEqual(report["last_completed_game_frame"], 8)
+        self.assertEqual(report["last_observed_jass_ms"], 6800)
+        self.assertEqual(report["choice_units_created"], 2)
+        self.assertEqual(report["choice_selectable_models"], 1)
+        self.assertTrue(report["choice_scene_setup_logged"])
+        self.assertTrue(report["offline_map_flag_confirmed"])
+        self.assertEqual(report["jass_status"], "bb4_resume_aborted_runtime_error")
+        self.assertFalse(report["gameplay_verified"])
+
+    def test_choice_creation_without_camera_and_render_is_not_full_setup(self):
+        report = json.loads(self.inspect(
+            "4000 ms [CHOICE_CREATE] type=u000 created=1\n",
+            "game_ms=800 frame=8 stage=SERVER_FRAME_COMPLETE\n", "", ""))
+        self.assertEqual(report["choice_units_created"], 1)
+        self.assertFalse(report["choice_scene_setup_logged"])
+        self.assertFalse(report["offline_map_flag_confirmed"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

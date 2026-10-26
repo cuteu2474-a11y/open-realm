@@ -39,6 +39,13 @@ def inspect(report):
     condition_completed = re.findall(r"\[CONDITION_RESULT\s*\]\s+index=\d+\s+function=(\S+)", jass)
     runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
     division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
+    # The first few server-frame checkpoints are a diagnostic sample, not proof
+    # that the server stopped running after that frame.
+    jass_times = [int(n) for n in re.findall(r"^(\d+) ms\s+\[", jass, re.M)]
+    choice_creates = re.findall(r"\[CHOICE_CREATE\s*\][^\r\n]*\bcreated=1\b", jass)
+    choice_selectables = re.findall(r"\[CHOICE_MODEL_AUDIT\s*\][^\r\n]*\bselectable=1\b", jass)
+    choice_render = re.findall(r"\[CHOICE_RENDER_AUDIT\s*\][^\r\n]*", jass)
+    choice_camera = "CHOICE_CAMERA_APPLIED" in jass
     if entered and not finished and "CUX_CONDITION_AFTER" in jass:
         status = "bb4_resume_unfinished"
     elif entered and finished:
@@ -54,6 +61,13 @@ def inspect(report):
         "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
         "last_division_source": division_sources[-1][:360] if division_sources else None,
         "last_completed_game_frame": max(frames) if frames else None,
+        "last_observed_jass_ms": max(jass_times) if jass_times else None,
+        "choice_units_created": len(choice_creates),
+        "choice_selectable_models": len(choice_selectables),
+        "choice_camera_applied": choice_camera,
+        "choice_render_audit_present": bool(choice_render),
+        "choice_scene_setup_logged": bool(choice_creates and choice_camera and choice_render),
+        "offline_map_flag_confirmed": "ORDR_OFFLINE_CONFIRMED" in jass,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,
         "map_registration_ms": map_elapsed,

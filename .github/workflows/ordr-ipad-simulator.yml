@@ -130,11 +130,11 @@ jobs:
               > "$REPORT/launch.txt"
           fi
 
-          # Observe the map for four minutes; a successful simctl launch alone
+          # Observe beyond the late choice screen; a successful simctl launch alone
           # only proves launch request acceptance, not working gameplay.
           OBSERVE_STARTED=$SECONDS
           printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
-          for target in 8 16 45 90 150 240 360 480; do
+          for target in 8 16 45 90 150 240 360 480 600 720; do
             elapsed=$((SECONDS - OBSERVE_STARTED))
             if [ "$elapsed" -lt "$target" ]; then
               sleep "$((target - elapsed))"
@@ -214,7 +214,7 @@ jobs:
             echo "- App install and launch command: complete"
             echo "- Retail War3.mpq supplied: $MPQ_FOUND"
             echo "- ORDR map supplied: $MAP_FOUND"
-            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, and 480 seconds (workflow artifact)"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, and 720 seconds (workflow artifact)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
             echo "- Automated taps and full ORDR gameplay: **not implemented / not verified**"
