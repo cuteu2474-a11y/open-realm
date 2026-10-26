@@ -427,7 +427,13 @@ static bool CL_ParseTerrainMaskChunk(sizeBuf_t *msg) {
 
 /* Handle the svc_frame header and its game-owned datagram, then snapshot entity
  * states into "prev" so the renderer can interpolate the current scene. */
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
 extern void CL_ORDRTrace(cstring_t stage);
+#else
+/* Unit-test binaries compile the parser/refresh without the platform client.
+ * Keep iOS-only tracing out of those linked test targets. */
+static void CL_ORDRTrace(cstring_t stage) { (void)stage; }
+#endif
 void CL_ParseFrame(sizeBuf_t *msg) {
     static unsigned ordr_frame_trace_count;
     if (ordr_frame_trace_count++ < 8) CL_ORDRTrace("SERVER_FRAME_RECEIVED");

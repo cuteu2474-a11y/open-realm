@@ -16,7 +16,13 @@ static struct {
 static bool world_loaded = false;
 static bool begin_sent = false;
 
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
 extern void CL_ORDRTrace(cstring_t stage);
+#else
+/* Unit-test binaries compile the parser/refresh without the platform client.
+ * Keep iOS-only tracing out of those linked test targets. */
+static void CL_ORDRTrace(cstring_t stage) { (void)stage; }
+#endif
 static unsigned ordr_prep_seen;
 static void CL_ORDRPrepTrace(unsigned bit, cstring_t stage) {
     if (!(ordr_prep_seen & (1u << bit))) {
