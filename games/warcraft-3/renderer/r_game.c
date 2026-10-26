@@ -898,13 +898,9 @@ void R_LoadAssets(void) {
     R_W3ClearCameraEventStates();
     R_W3ClearEventSplats();
     R_W3ClearEventWarnings();
-    R_ORDRMapTrace("R_BEFORE_SPAWN_DATA");
     R_W3LoadSpawnData();
-    R_ORDRMapTrace("R_AFTER_SPAWN_DATA");
     R_W3LoadSplatData();
-    R_ORDRMapTrace("R_AFTER_SPLAT_DATA");
     R_W3LoadUberSplatData();
-    R_ORDRMapTrace("R_AFTER_UBER_SPLATS");
     memset(event_state, 0, sizeof(event_state));
 
     FOR_LOOP(i, NUM_SELECTION_CIRCLES) {
@@ -1297,9 +1293,13 @@ void R_RegisterMap(cstring_t mapFileName) {
     R_W3ClearCameraEventStates();
     R_W3ClearEventSplats();
     R_W3ClearEventWarnings();
+    R_ORDRMapTrace("R_BEFORE_SPAWN_DATA");
     R_W3LoadSpawnData();
+    R_ORDRMapTrace("R_AFTER_SPAWN_DATA");
     R_W3LoadSplatData();
+    R_ORDRMapTrace("R_AFTER_SPLAT_DATA");
     R_W3LoadUberSplatData();
+    R_ORDRMapTrace("R_AFTER_UBER_SPLATS");
     memset(event_state, 0, sizeof(event_state));
     memset(&model_texture_cache, 0, sizeof(model_texture_cache));
     R_ClearMinimapSpecialAssets();
