@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import unittest
 from unittest import mock
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 path = Path(__file__).resolve().parents[1] / 'fetch_private_drive_assets.py'
 spec = importlib.util.spec_from_file_location('drive_fetch', path)
@@ -34,6 +34,49 @@ class DriveAuthTests(unittest.TestCase):
         self.assertEqual(params['client_id'], ['client-id'])
         self.assertEqual(params['client_secret'], ['client-secret'])
         self.assertEqual(params['refresh_token'], ['refresh-private'])
+
+    def test_oauth_refresh_recovers_from_temporary_dns_failure(self):
+        env = {'ORDR_DRIVE_REFRESH_TOKEN': 'secret-refresh',
+               'ORDR_DRIVE_CLIENT_ID': 'id',
+               'ORDR_DRIVE_CLIENT_SECRET': 'secret-client'}
+        reply = io.BytesIO(b'{"access_token":"good","token_type":"Bearer"}')
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(drive, 'urlopen',
+                 side_effect=[URLError('temporary name resolution failure'), reply]) as opened, \
+             mock.patch.object(drive.time, 'sleep') as sleeping:
+            auth = drive.DriveAuth()
+        self.assertEqual(auth.token, 'good')
+        self.assertEqual(opened.call_count, 2)
+        sleeping.assert_called_once_with(drive.RETRY_DELAYS_SECONDS[0])
+
+    def test_drive_read_recovers_from_temporary_dns_failure(self):
+        with mock.patch.dict(os.environ, {
+            'ORDR_DRIVE_ACCESS_TOKEN':'legacy'
+        }, clear=True):
+            auth = drive.DriveAuth()
+        with mock.patch.object(drive, 'urlopen', side_effect=[
+                URLError('temporary name resolution failure'),
+                io.BytesIO(b'{"files":[]}')]) as opened, \
+             mock.patch.object(drive.time, 'sleep') as sleeping:
+            result = drive.api_json(auth, 'files', {'q':'a'})
+        self.assertEqual(result, {'files':[]})
+        self.assertEqual(opened.call_count, 2)
+        sleeping.assert_called_once()
+
+    def test_exhausted_dns_retries_never_expose_credentials(self):
+        env = {'ORDR_DRIVE_REFRESH_TOKEN':'secret-refresh',
+               'ORDR_DRIVE_CLIENT_ID':'id',
+               'ORDR_DRIVE_CLIENT_SECRET':'secret-client'}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(drive, 'urlopen',
+                 side_effect=URLError('dns failure')), \
+             mock.patch.object(drive.time, 'sleep') as sleeping:
+            with self.assertRaises(RuntimeError) as exc:
+                drive.DriveAuth()
+        self.assertIn('Google OAuth unavailable', str(exc.exception))
+        self.assertNotIn('secret-refresh', str(exc.exception))
+        self.assertNotIn('secret-client', str(exc.exception))
+        self.assertEqual(sleeping.call_count, len(drive.RETRY_DELAYS_SECONDS))
 
     def test_legacy_access_token_supported(self):
         with mock.patch.dict(os.environ,

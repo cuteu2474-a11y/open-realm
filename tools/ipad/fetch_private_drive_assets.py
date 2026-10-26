@@ -8,10 +8,11 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 # SHA-256 hashes confirmed against this user's files on 2026-10-26.
 EXPECTED = {
@@ -36,6 +37,32 @@ MAP_PARTS = [
     ('ORDR_S2_2.323[C].w3x.part007', 16777216, '561f04d78b92d3dc9142a44a2ecd071113fbca0a36368b2583a0dd4512a7f141'),
     ('ORDR_S2_2.323[C].w3x.part008', 15938669, 'b512e48c2b3a663d72646b5a6be90abcffab94e5d2bdde11d769edc85f8408b9'),
 ]
+
+
+# DNS resolution, OAuth and Drive occasionally fail transiently on hosted
+# macOS runners. Retry only transient network errors, not revoked credentials.
+# Never print the request body, Authorization header or token response.
+RETRY_DELAYS_SECONDS = (5, 10, 20, 30, 45)
+
+
+def _open_with_retry(request, timeout, endpoint):
+    for retry in range(len(RETRY_DELAYS_SECONDS) + 1):
+        try:
+            return urlopen(request, timeout=timeout)
+        except HTTPError as error:
+            if error.code not in (408, 429, 500, 502, 503, 504):
+                raise
+        except (URLError, TimeoutError, OSError):
+            pass
+        if retry == len(RETRY_DELAYS_SECONDS):
+            raise RuntimeError(
+                '%s unavailable after transient network retries; check '
+                'Google availability and GitHub runner network/DNS.' % endpoint
+            ) from None
+        # Do not log retry URLs or secret-bearing Request objects.
+        print('%s transient network error; retry %d/%d' % (
+            endpoint, retry + 1, len(RETRY_DELAYS_SECONDS)), flush=True)
+        time.sleep(RETRY_DELAYS_SECONDS[retry])
 
 
 class DriveAuth:
@@ -77,7 +104,7 @@ class DriveAuth:
             headers={'Content-Type': 'application/x-www-form-urlencoded'},
             method='POST')
         try:
-            with urlopen(request, timeout=45) as response:
+            with _open_with_retry(request, timeout=45, endpoint='Google OAuth') as response:
                 payload = json.load(response)
         except HTTPError as error:
             # Intentionally never display the OAuth response body or tokens.
@@ -95,8 +122,9 @@ class DriveAuth:
 
     def open(self, url, timeout):
         def issue():
-            return urlopen(Request(url, headers={
-                'Authorization': 'Bearer ' + self.token}), timeout=timeout)
+            return _open_with_retry(Request(url, headers={
+                'Authorization': 'Bearer ' + self.token}), timeout=timeout,
+                endpoint='Google Drive')
         try:
             return issue()
         except HTTPError as error:
