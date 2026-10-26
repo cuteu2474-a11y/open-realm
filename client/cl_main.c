@@ -1574,37 +1574,54 @@ static void CL_SendSoundEvents(void) {
 }
 
 
-/* Simulator-only network selection probe. Unlike a mocked JASS callback, it
- * sends the same clc_stringcmd emitted by the finger-selection pipeline and
- * lets the real server validate and publish unit-selection events.
- *
- * This is NOT a touchscreen test. It is never compiled into device builds,
- * and the simulator must opt in explicitly with its smoke-test cvar. */
+/* Sim-only authorized network roundtrip. Select the original nightmare
+ * difficulty (u005), then the original Isekai mode (u00C). These are the
+ * authored neutral-passive models, not synthetic difficulty settings.
+ * This does not simulate a physical finger and cannot run on a real iPad.
+ * Separate stages leave room for JASS selection callbacks to execute. */
 #if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
+    if (actual == wanted) return true;
+    return (((actual & 0xffu) << 24) | ((actual & 0xff00u) << 8) |
+            ((actual & 0xff0000u) >> 8) | (actual >> 24)) == wanted;
+}
+
 static void CL_ORDRSimulatorProbeChoice(void) {
-    static bool sent;
+    static uint32_t next_step;
+    static uint32_t const codes[2] = {
+        MAKEFOURCC('u','0','0','5'), MAKEFOURCC('u','0','0','C')
+    };
+    static uint32_t const earliest_ms[2] = { 540000u, 630000u };
+    static cstring_t const stage_name[2] = { "u005", "u00C" };
     viewDef_t const *view = &cl.viewDef;
     cstring_t map = Cvar_String("map", "");
-    if (sent || cls.state != ca_active ||
+    if (next_step >= 2 || cls.state != ca_active ||
         !Cvar_Integer("ordr_simulator_choice_probe", 0) ||
         !map || !strstr(map, "ORDR_S2_2.323") ||
-        SDL_GetTicks() < 620000u ||
+        SDL_GetTicks() < earliest_ms[next_step] ||
         !view->entities ||
         fabsf(view->target.x + 6000.0f) >= 1800.0f ||
         fabsf(view->target.y + 8864.0f) >= 1800.0f ||
         cls.netchan.message.cursize + 64 >= cls.netchan.message.maxsize)
         return;
+
     FOR_LOOP(i, view->num_entities) {
         renderEntity_t const *ent = &view->entities[i];
         if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
-            ent->owner != 15u ||
+            !ent->model || ent->owner != 15u ||
             (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
-            cl.ents[ent->number].current.class_id != MAKEFOURCC('u','0','0','0'))
+            !CL_ORDRSimulatorRawMatch(cl.ents[ent->number].current.class_id,
+                                      codes[next_step]))
             continue;
         MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
         SZ_Printf(&cls.netchan.message, "select %u", (unsigned)ent->number);
-        sent = true;
-        CL_ORDRTrace("SIM_CHOICE_SELECT_QUEUED");
+        char stage[128];
+        snprintf(stage, sizeof(stage),
+                 "SIM_CHOICE_SELECT_QUEUED unit=%u raw=%s step=%u",
+                 (unsigned)ent->number, stage_name[next_step],
+                 (unsigned)(next_step + 1));
+        next_step++;
+        CL_ORDRTrace(stage);
         return;
     }
 }

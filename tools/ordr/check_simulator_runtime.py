@@ -40,6 +40,17 @@ def inspect(report):
     runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
     division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
     divisor_globals = re.findall(r"\[DIVISOR_GLOBAL\s*\]\s+([^\r\n]+)", jass)
+    divisor_values = re.findall(r"\[DIVISOR_VALUE\s*\]\s+([^\r\n]+)", jass)
+    probe_requests = re.findall(
+        r"stage=SIM_CHOICE_SELECT_QUEUED unit=(\d+) raw=(u00[0-9A-C]) step=(\d+)",
+        client)
+    command_ids = set(re.findall(
+        r"\[CHOICE_SELECT_COMMAND\s*\][^\r\n]*\bunit=(\d+)", jass))
+    accepted_ids = set(re.findall(
+        r"\[CHOICE_USER_SELECTION\s*\][^\r\n]*\bunit=(\d+)[^\r\n]*\bqueued=1\b",
+        jass))
+    verified_requests = [item for item in probe_requests
+                         if item[0] in command_ids and item[0] in accepted_ids]
     # The first few server-frame checkpoints are a diagnostic sample, not proof
     # that the server stopped running after that frame.
     jass_times = [int(n) for n in re.findall(r"^(\d+) ms\s+\[", jass, re.M)]
@@ -62,6 +73,7 @@ def inspect(report):
         "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
         "last_division_source": division_sources[-1][:360] if division_sources else None,
         "recent_divisor_global_states": [entry[:160] for entry in divisor_globals[-4:]],
+        "recent_divisor_values": [entry[:160] for entry in divisor_values[-4:]],
         "last_completed_game_frame": max(frames) if frames else None,
         "last_observed_jass_ms": max(jass_times) if jass_times else None,
         "choice_units_created": len(choice_creates),
@@ -73,10 +85,10 @@ def inspect(report):
         "simulator_choice_probe_queued": "SIM_CHOICE_SELECT_QUEUED" in client,
         "choice_select_command_seen": "CHOICE_SELECT_COMMAND" in jass,
         "choice_user_selection_event_seen": "CHOICE_USER_SELECTION" in jass,
+        "simulator_choice_requested": [item[1] for item in probe_requests],
+        "simulator_choice_verified": [item[1] for item in verified_requests],
         "simulator_choice_network_roundtrip_verified":
-            "SIM_CHOICE_SELECT_QUEUED" in client and
-            "CHOICE_SELECT_COMMAND" in jass and
-            "CHOICE_USER_SELECTION" in jass,
+            bool(probe_requests) and len(verified_requests) == len(probe_requests),
         "physical_touch_verified": False,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,

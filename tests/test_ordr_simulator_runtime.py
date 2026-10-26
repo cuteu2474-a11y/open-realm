@@ -99,10 +99,10 @@ class SimulatorRuntimeTests(unittest.TestCase):
 
     def test_simulated_network_choice_needs_both_server_traces(self):
         report = json.loads(self.inspect(
-            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143 raw=0x75303030 player=0\n"
-            "5500 ms [CHOICE_USER_SELECTION] unit=2143\n",
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2148 raw=0x75303035 player=0\n"
+            "5500 ms [CHOICE_USER_SELECTION] player=0 unit=2148 type=7 rawcode=0x75303035 queued=1\n",
             "game_ms=5500 frame=55 stage=SERVER_FRAME_COMPLETE\n",
-            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED\n", ""))
+            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1\n", ""))
         self.assertTrue(report["simulator_choice_probe_queued"])
         self.assertTrue(report["choice_select_command_seen"])
         self.assertTrue(report["choice_user_selection_event_seen"])
@@ -112,8 +112,8 @@ class SimulatorRuntimeTests(unittest.TestCase):
 
     def test_probe_does_not_pass_without_server_selection_event(self):
         report = json.loads(self.inspect(
-            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143\n", "",
-            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED\n", ""))
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2148\n", "",
+            "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1\n", ""))
         self.assertTrue(report["simulator_choice_probe_queued"])
         self.assertFalse(report["choice_user_selection_event_seen"])
         self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
@@ -123,6 +123,38 @@ class SimulatorRuntimeTests(unittest.TestCase):
             "5500 ms [CHOICE_SELECT_COMMAND] unit=2143\n"
             "5500 ms [CHOICE_USER_SELECTION] unit=2143\n", "", "", ""))
         self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
+    def test_wrong_selected_unit_never_counts_as_probe_success(self):
+        report = json.loads(self.inspect(
+            "5500 ms [CHOICE_SELECT_COMMAND] unit=2143\n"
+            "5500 ms [CHOICE_USER_SELECTION] unit=2143 queued=1\n",
+            "", "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1\n", ""))
+        self.assertTrue(report["simulator_choice_probe_queued"])
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+        self.assertEqual(report["simulator_choice_verified"], [])
+
+    def test_staged_nightmare_isekai_probe_requires_both_confirmations(self):
+        report = json.loads(self.inspect(
+            "10000 ms [CHOICE_SELECT_COMMAND] unit=2148\n"
+            "10000 ms [CHOICE_USER_SELECTION] player=0 unit=2148 queued=1\n"
+            "12000 ms [CHOICE_SELECT_COMMAND] unit=2150\n",
+            "", "wall_ms=540000 stage=SIM_CHOICE_SELECT_QUEUED unit=2148 raw=u005 step=1\n"
+                "wall_ms=630000 stage=SIM_CHOICE_SELECT_QUEUED unit=2150 raw=u00C step=2\n", ""))
+        self.assertEqual(report["simulator_choice_requested"], ["u005", "u00C"])
+        self.assertEqual(report["simulator_choice_verified"], ["u005"])
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
+    def test_divisor_local_values_are_distinct_from_missing_globals(self):
+        report = json.loads(self.inspect(
+            "2000 ms [DIVISOR_GLOBAL ] name=vP scope=global state=missing\n"
+            "2000 ms [DIVISOR_VALUE  ] name=vP scope=local type=integer value=0\n"
+            "2000 ms [DIVISOR_VALUE  ] name=EK scope=local type=integer value=8\n",
+            "", "", ""))
+        self.assertEqual(report["recent_divisor_values"], [
+            "name=vP scope=local type=integer value=0",
+            "name=EK scope=local type=integer value=8",
+        ])
+        self.assertFalse(report["gameplay_verified"])
 
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(

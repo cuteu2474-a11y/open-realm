@@ -138,6 +138,7 @@ static JASSTYPEID jass_getvarbasetype(jassVar_t const *var);
 static uint32_t jass_dotoken(jass_t *j, token_t const *token);
 static jassFunc_t const *find_function(jass_t const *j, cstring_t name);
 static jassVar_t *find_global(jass_t const *j, cstring_t name);
+static jassVar_t *find_dict(jassdict_t *dict, cstring_t name);
 static void eval_SINGLETOKEN(jass_t *j, token_t const *token);
 static void eval_VARDECL(jass_t *j, token_t const *token);
 void eval_TOKENS(jass_t *j, token_t const *token);
@@ -223,27 +224,34 @@ uint32_t __unm(jass_t *j) {
 JASS_NUMOP(__sub, -);
 JASS_NUMOP(__mul, *);
 
-/* Report the numeric map globals referenced by the known ORDR startup
- * divisor. Do not modify them or evaluate the expression a second time.
- * The JASS log helper ignores non-ORDR maps; avoid string values entirely. */
-static void jass_ordr_log_divisor_global(jass_t *j, cstring_t name) {
+/* ORDR CV5 divides by vP * EK. Resolve through the same global-then-
+ * current-function-local lookup used by the JASS evaluator. Looking only at
+ * globals incorrectly labels local operands "missing" in simulator logs.
+ * Read numeric values without changing the map or invoking JASS again. */
+static void jass_ordr_log_divisor_value(jass_t *j, cstring_t name) {
     jassVar_t *var = find_global(j, name);
+    cstring_t scope = "global";
     char detail[160];
-    if (!var) {
-        snprintf(detail, sizeof(detail), "name=%s scope=global state=missing", name);
-    } else if (!var->value) {
-        snprintf(detail, sizeof(detail), "name=%s scope=global type=%s state=unset",
-                 name, var->type ? var->type->name : "unknown");
-    } else if (jass_getvarbasetype(var) == jasstype_integer) {
-        snprintf(detail, sizeof(detail), "name=%s scope=global type=integer value=%d",
-                 name, *(int32_t *)var->value);
-    } else if (jass_getvarbasetype(var) == jasstype_real) {
-        snprintf(detail, sizeof(detail), "name=%s scope=global type=real value=%.9g",
-                 name, (double)*(float *)var->value);
-    } else {
-        snprintf(detail, sizeof(detail), "name=%s scope=global state=non_numeric", name);
+    if (!var && j->stack_pointer && j->num_stack) {
+        var = find_dict(jass_stackvalue(j, 0)->env.locals, name);
+        scope = "local";
     }
-    jass_ordr_log_event(j, "DIVISOR_GLOBAL", detail);
+    if (!var) {
+        snprintf(detail, sizeof(detail), "name=%s scope=unresolved state=missing", name);
+    } else if (!var->value) {
+        snprintf(detail, sizeof(detail), "name=%s scope=%s type=%s state=unset",
+                 name, scope, var->type ? var->type->name : "unknown");
+    } else if (jass_getvarbasetype(var) == jasstype_integer) {
+        snprintf(detail, sizeof(detail), "name=%s scope=%s type=integer value=%d",
+                 name, scope, *(int32_t *)var->value);
+    } else if (jass_getvarbasetype(var) == jasstype_real) {
+        snprintf(detail, sizeof(detail), "name=%s scope=%s type=real value=%.9g",
+                 name, scope, (double)*(float *)var->value);
+    } else {
+        snprintf(detail, sizeof(detail), "name=%s scope=%s state=non_numeric",
+                 name, scope);
+    }
+    jass_ordr_log_event(j, "DIVISOR_VALUE", detail);
 }
 
 /* C integer division raises SIGFPE for zero divisors and INT_MIN / -1.
@@ -257,8 +265,8 @@ uint32_t __div(jass_t *j) {
             snprintf(detail, sizeof(detail), "left=%d right=%d", left, right);
             jass_ordr_log_event(j, "ARITHMETIC_ERROR", detail);
             if (!right) {
-                jass_ordr_log_divisor_global(j, "vP");
-                jass_ordr_log_divisor_global(j, "EK");
+                jass_ordr_log_divisor_value(j, "vP");
+                jass_ordr_log_divisor_value(j, "EK");
             }
             jass_rterror(j, !right ? "integer division by zero" : "integer division overflow");
             return 0;
