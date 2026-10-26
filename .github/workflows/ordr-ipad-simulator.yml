@@ -122,7 +122,10 @@ jobs:
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
             MAP_NAME="$(find "$DATA_DIR/Documents/Maps" -maxdepth 1 -iname 'ORDR_S2_2.323*.w3x' -print -quit | xargs basename)"
             echo "launch_mode=ordr_map" | tee "$REPORT/launch-mode.txt"
-            xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
+            # simctl forwards SIMCTL_CHILD_* into the simulator app process.
+            # This keeps the automated finger test off real iPad builds and
+            # independent of late +cvar command parsing during map loading.
+            SIMCTL_CHILD_ORDR_SIM_TEST_CHOICES=1 xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
               -tft +map "Maps\\$MAP_NAME" +ordr_simulator_choice_probe 1 > "$REPORT/launch.txt"
           else
             echo "launch_mode=menu_only_missing_licensed_assets" | tee "$REPORT/launch-mode.txt"

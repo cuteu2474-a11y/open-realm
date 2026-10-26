@@ -56,6 +56,8 @@ def inspect(report):
     blocked_taps = re.findall(
         r"stage=SIM_CHOICE_TAP_BLOCKED raw=(u00[0-9A-C]) step=(\d+)",
         client)
+    probe_states = re.findall(
+        r"stage=SIM_CHOICE_PROBE_STATE ([^\r\n]+)", client)
     background_audits = re.findall(
         r"\[CHOICE_BACKGROUND_AUDIT\s*\]\s+B100_instances=(\d+) visible=(\d+) model_indices=(\d+)",
         jass)
@@ -96,6 +98,13 @@ def inspect(report):
         "simulator_choice_requested": [item[1] for item in probe_requests],
         "simulator_choice_input_type": "synthetic_sdl_finger",
         "simulator_choice_tap_blocked": [item[0] for item in blocked_taps[-12:]],
+        "simulator_probe_latest_state": probe_states[-1][:240] if probe_states else None,
+        "simulator_probe_enabled_observed":
+            any("enabled=1" in item for item in probe_states),
+        "choice_background_original_asset_recovered":
+            "CHOICE_BACKGROUND_RECOVERED" in jass,
+        "choice_background_original_asset_missing":
+            "CHOICE_BACKGROUND_NOT_FOUND" in jass,
         "simulator_choice_script_functions": sorted(set(choice_actions)),
         "choice_background_instance_count":
             int(background_audits[-1][0]) if background_audits else None,

@@ -206,6 +206,30 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertEqual(report["simulator_choice_tap_blocked"], ["u005"])
         self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
 
+    def test_probe_armed_and_existing_map_background_restored(self):
+        report = json.loads(self.inspect(
+            "5100 ms [CHOICE_BACKGROUND_RECOVERED] B100 model=405 original_import=war3mapImported\\Background.mdx\n"
+            "5500 ms [CHOICE_BACKGROUND_AUDIT] B100_instances=1 visible=1 model_indices=1\n",
+            "",
+            "wall_ms=650000 stage=SIM_CHOICE_PROBE_STATE enabled=1 step=0 state=3 key=1 ui=0 ready=1 entities=12 target=(-6000,-8864)\n",
+            ""))
+        self.assertTrue(report["choice_background_original_asset_recovered"])
+        self.assertFalse(report["choice_background_original_asset_missing"])
+        self.assertTrue(report["simulator_probe_enabled_observed"])
+        self.assertEqual(report["choice_background_model_count"], 1)
+        self.assertEqual(report["choice_background_visible_count"], 1)
+
+    def test_probe_disabled_is_not_mistaken_for_failed_touch(self):
+        report = json.loads(self.inspect(
+            "5100 ms [CHOICE_BACKGROUND_NOT_FOUND] B100 original imported Background.mdx unavailable\n",
+            "",
+            "wall_ms=650000 stage=SIM_CHOICE_PROBE_STATE enabled=0 step=0 state=3 key=1 ui=0 ready=1 entities=12 target=(-6000,-8864)\n",
+            ""))
+        self.assertFalse(report["simulator_probe_enabled_observed"])
+        self.assertEqual(report["simulator_probe_latest_state"].split()[0], "enabled=0")
+        self.assertTrue(report["choice_background_original_asset_missing"])
+        self.assertFalse(report["simulator_choice_network_roundtrip_verified"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

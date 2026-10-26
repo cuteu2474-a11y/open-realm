@@ -677,6 +677,65 @@ void G_FillMapPlacedUnitMana(edict_t *ent) {
     ent->mana.value = ent->mana.max_value;
 }
 
+/* ORDR's original neutral choice backdrop is a custom B100 map object.
+ * On older maps its custom object row sometimes reaches SP_CallSpawn with no
+ * resolved modelFile/DestructableData.file, leaving an in-use, visible edict
+ * with s.model=0. Only recover the original imported MDX file when it
+ * actually exists; never substitute a fabricated texture or edit map data.
+ * This exception is scoped to the exact ORDR map and scenery class. */
+static bool SP_IsORDRChoiceBackground(uint32_t class_id, cstring_t map) {
+    return class_id == MAKEFOURCC('B','1','0','0') &&
+           map && strstr(map, "ORDR_S2_2.323") != NULL;
+}
+
+static void SP_RestoreORDRChoiceBackgroundModel(edict_t *edict) {
+    static cstring_t const paths[] = {
+        "war3mapImported\\Background.mdx",
+        "Background.mdx",
+    };
+    if (!edict || edict->s.model ||
+        edict->class_id != MAKEFOURCC('B','1','0','0')) return;
+    cstring_t const map = gi.CvarString("map", "");
+    if (!SP_IsORDRChoiceBackground(edict->class_id, map)) return;
+    FOR_LOOP(i, sizeof(paths) / sizeof(paths[0])) {
+        uint32_t size = 0;
+        uint8_t *data = gi.ReadFile(paths[i], &size);
+        bool valid = data && size >= 4 && !memcmp(data, "MDLX", 4);
+        if (data) gi.MemFree(data);
+        if (!valid) continue;
+        int model = G_RegisterModel(paths[i]);
+        if (!model) continue;
+        edict->s.model = model;
+        edict->svflags &= ~SVF_NOCLIENT;
+        edict->svflags |= SVF_STATIC_SCENERY;
+        /* A background plane is not a playable selectable unit. */
+        edict->s.flags |= EF_NOT_SELECTABLE;
+        if (level.vm) {
+            char detail[160];
+            snprintf(detail, sizeof(detail),
+                     "B100 model=%u original_import=%s",
+                     (unsigned)model, paths[i]);
+            jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_RECOVERED", detail);
+        }
+        return;
+    }
+    if (level.vm)
+        jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_NOT_FOUND",
+                            "B100 original imported Background.mdx unavailable");
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_spawn, ordr_choice_backdrop_fallback_is_map_scoped) {
+    T_ASSERT(SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'),
+                                       "Maps\\ORDR_S2_2.323[C].w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'),
+                                        "Maps\\Other.w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','1'),
+                                        "Maps\\ORDR_S2_2.323[C].w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'), NULL));
+}
+#endif
+
 void SP_CallSpawn(edict_t *edict) {
     if (!edict->class_id)
         return;
@@ -703,6 +762,7 @@ void SP_CallSpawn(edict_t *edict) {
             fprintf(stderr, "Warning: Invalid map object ID %.4s\n", (char const *)&edict->class_id);
         }
     }
+    SP_RestoreORDRChoiceBackgroundModel(edict);
 //    for (struct spawn *s = spawns; s->func; s++) {
 //        if (*((int const *)s->name) == edict->class_id) {
 //            s->func(edict);

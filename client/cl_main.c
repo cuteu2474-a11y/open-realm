@@ -1592,6 +1592,7 @@ static void CL_ORDRSimulatorProbeChoice(void) {
      * authored selection enough client+server frames before the next tap. */
     static uint32_t next_step;
     static uint32_t next_miss_log;
+    static uint32_t next_state_log;
     static uint32_t const codes[3] = {
         MAKEFOURCC('u','0','0','5'), /* nightmare difficulty */
         MAKEFOURCC('u','0','0','C'), /* Isekai mode */
@@ -1602,8 +1603,26 @@ static void CL_ORDRSimulatorProbeChoice(void) {
     viewDef_t const *view = &cl.viewDef;
     cstring_t map = Cvar_String("map", "");
     uint32_t now = SDL_GetTicks();
-    if (next_step >= 3 || cls.state != ca_active ||
-        !Cvar_Integer("ordr_simulator_choice_probe", 0) ||
+    cstring_t probe_env = getenv("ORDR_SIM_TEST_CHOICES");
+    bool enabled = (probe_env && !strcmp(probe_env, "1")) ||
+                   Cvar_Integer("ordr_simulator_choice_probe", 0) == 1;
+    /* A missing cvar or an unexpectedly different active UI used to silently
+     * skip all finger taps. Record the actual decision without logging paths,
+     * input text or unrelated user data. */
+    if (map && strstr(map, "ORDR_S2_2.323") && now >= 600000u &&
+        now >= next_state_log) {
+        char trace[240];
+        snprintf(trace, sizeof(trace),
+                 "SIM_CHOICE_PROBE_STATE enabled=%u step=%u state=%d key=%d ui=%u ready=%u entities=%u target=(%.0f,%.0f)",
+                 (unsigned)enabled, (unsigned)next_step, (int)cls.state,
+                 (int)cls.key_dest, (unsigned)cl.playerstate.client_ui_state,
+                 (unsigned)CL_GameplayInputReady(),
+                 (unsigned)view->num_entities,
+                 (double)view->target.x, (double)view->target.y);
+        CL_ORDRTrace(trace);
+        next_state_log = now + 20000u;
+    }
+    if (next_step >= 3 || cls.state != ca_active || !enabled ||
         !map || !strstr(map, "ORDR_S2_2.323") ||
         now < earliest_ms[next_step] ||
         !view->entities ||
