@@ -2,6 +2,11 @@
 #include "../mdx/r_mdx.h"
 #include "renderer/r_shader.h"
 #include <float.h>
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+extern void R_ORDRMapTrace(cstring_t stage);
+#else
+#define R_ORDRMapTrace(stage) ((void)(stage))
+#endif
 #include <math.h>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -813,10 +818,14 @@ void _W3M_RegisterMap(char const *mapFilename) {
     /* A map registration replaces the whole WC3 world.  Free GPU buffers,
      * map-owned models, fog targets and source terrain before creating the
      * next level so repeated campaign transitions do not accumulate state. */
+    R_ORDRMapTrace("W3M_BEFORE_CLEAR");
     _W3M_ClearMap();
+    R_ORDRMapTrace("W3M_AFTER_CLEAR");
 
     /* Load .w3m file (which is itself an MPQ archive) */
+    R_ORDRMapTrace("W3M_BEFORE_READ_MPQ");
     mapSize = ri.FS_ReadFile(mapFilename, (void **)&mapData);
+    R_ORDRMapTrace("W3M_AFTER_READ_MPQ");
     if (mapSize < 0 || !mapData) {
         ri.error("R_RegisterMap: failed to open map %s\n", mapFilename);
         return;
@@ -828,24 +837,40 @@ void _W3M_RegisterMap(char const *mapFilename) {
         ri.error("R_RegisterMap: failed to open map archive %s\n", mapFilename);
         return;
     }
+    R_ORDRMapTrace("W3M_MPQ_OPENED");
     map = FileReadWar3Map(hMpq);
+    R_ORDRMapTrace("W3M_AFTER_TERRAIN_READ");
     R_FileReadShadowMap(hMpq, map);
+    R_ORDRMapTrace("W3M_AFTER_SHADOW");
     R_LoadMapMinimap(hMpq, mapFilename);
+    R_ORDRMapTrace("W3M_AFTER_MINIMAP");
     tr.world = map;
+    R_ORDRMapTrace("W3M_BEFORE_TILESET_ARCHIVE");
     R_W3OpenTilesetArchive(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_TILESET_ARCHIVE");
     /* Read special-doodad footprint masks while the nested map MPQ is open,
      * before baking either ground or ordinary cliff meshes. */
+    R_ORDRMapTrace("W3M_BEFORE_SPECIAL_CUTOUTS");
     R_W3LoadSpecialCutouts(hMpq, map);
+    R_ORDRMapTrace("W3M_AFTER_SPECIAL_CUTOUTS");
     SFileCloseArchive(hMpq);
     ri.FS_FreeFile(mapData);
+    R_ORDRMapTrace("W3M_BEFORE_BLIGHT");
     R_LoadBlightTexture(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_BLIGHT");
     R_LoadWaterStyle(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_WATER");
     R_W3SetMapTerrainOffsets(map);
+    R_ORDRMapTrace("W3M_AFTER_TERRAIN_OFFSETS");
     R_W3RebuildCameraHeightMap();
+    R_ORDRMapTrace("W3M_AFTER_CAMERA_HEIGHT");
 
     R_LoadMapSegments(map);
+    R_ORDRMapTrace("W3M_AFTER_SEGMENTS");
     R_FinishCliffs();
+    R_ORDRMapTrace("W3M_AFTER_CLIFFS");
     R_BuildGroundLayers(map);
+    R_ORDRMapTrace("W3M_AFTER_GROUND_LAYERS");
     w3_terrain_rebuild_pending = false;
 }
 

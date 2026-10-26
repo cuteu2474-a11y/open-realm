@@ -10,6 +10,8 @@
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void _W3M_RegisterMap(cstring_t mapFileName);
 void _W3M_DrawWorld(void);
@@ -896,9 +898,13 @@ void R_LoadAssets(void) {
     R_W3ClearCameraEventStates();
     R_W3ClearEventSplats();
     R_W3ClearEventWarnings();
+    R_ORDRMapTrace("R_BEFORE_SPAWN_DATA");
     R_W3LoadSpawnData();
+    R_ORDRMapTrace("R_AFTER_SPAWN_DATA");
     R_W3LoadSplatData();
+    R_ORDRMapTrace("R_AFTER_SPLAT_DATA");
     R_W3LoadUberSplatData();
+    R_ORDRMapTrace("R_AFTER_UBER_SPLATS");
     memset(event_state, 0, sizeof(event_state));
 
     FOR_LOOP(i, NUM_SELECTION_CIRCLES) {
@@ -1253,7 +1259,37 @@ void R_DrawMinimap(rect_t const *screen, cstring_t map) {
     R_DrawMinimapBorder(&content, MAKE(color32_t, 192, 192, 192, 255));
 }
 
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+/* Diagnostic only: no private file paths, game contents, or credentials in
+ * this log. This recording never changes rendering or JASS gameplay. */
+static bool r_ordr_trace_enabled;
+static FILE *r_ordr_trace_file;
+void R_ORDRMapTrace(cstring_t stage) {
+    if (!r_ordr_trace_enabled || !r_ordr_trace_file) return;
+    fprintf(r_ordr_trace_file, "%s\n", stage ? stage : "(null)");
+    fflush(r_ordr_trace_file);
+}
+static void R_ORDRMapTraceBegin(cstring_t map) {
+    r_ordr_trace_enabled = map && strstr(map, "ORDR_S2_2.323") != NULL;
+    if (!r_ordr_trace_enabled) return;
+    if (!r_ordr_trace_file) {
+        char path[1024];
+        cstring_t home = getenv("HOME");
+        if (home && *home &&
+            snprintf(path, sizeof(path), "%s/Documents/ordr-renderer.log", home) < (int)sizeof(path)) {
+            r_ordr_trace_file = fopen(path, "w");
+            if (r_ordr_trace_file) setvbuf(r_ordr_trace_file, NULL, _IOLBF, 0);
+        }
+    }
+    R_ORDRMapTrace("R_REGISTER_MAP_ENTER");
+}
+#else
+#define R_ORDRMapTrace(stage) ((void)(stage))
+#define R_ORDRMapTraceBegin(map) ((void)(map))
+#endif
+
 void R_RegisterMap(cstring_t mapFileName) {
+    R_ORDRMapTraceBegin(mapFileName);
     cursor_active_model = NULL; cursor_anim = NULL;
     R_SetMapAssetScope(mapFileName);
     R_AdvanceTextureGeneration();
@@ -1268,10 +1304,15 @@ void R_RegisterMap(cstring_t mapFileName) {
     memset(&model_texture_cache, 0, sizeof(model_texture_cache));
     R_ClearMinimapSpecialAssets();
     if (mapFileName && *mapFileName) R_LoadMinimapSpecialAssets();
+    R_ORDRMapTrace("R_AFTER_MINIMAP_SPECIAL");
     R_WeatherRegisterMap();
+    R_ORDRMapTrace("R_AFTER_WEATHER");
     R_LightningRegisterMap();
+    R_ORDRMapTrace("R_BEFORE_W3M");
     _W3M_RegisterMap(mapFileName);
+    R_ORDRMapTrace("R_AFTER_W3M");
     R_ReclaimStreamedTextures(0);
+    R_ORDRMapTrace("R_REGISTER_MAP_COMPLETE");
 }
 
 void R_SetupEnvironmentLighting(void) {

@@ -141,6 +141,12 @@ jobs:
           done
 
           # Capture bounded engine and client checkpoint logs; no game files.
+          if [ -f "$DATA_DIR/Documents/ordr-renderer.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-renderer.log" "$REPORT/ordr-renderer.log"
+            echo "renderer_trace_found=true" > "$REPORT/renderer-trace-status.txt"
+          else
+            echo "renderer_trace_found=false" > "$REPORT/renderer-trace-status.txt"
+          fi
           if [ -f "$DATA_DIR/Documents/ordr-client.log" ]; then
             cp "$DATA_DIR/Documents/ordr-client.log" "$REPORT/ordr-client.log"
             echo "client_trace_found=true" > "$REPORT/client-trace-status.txt"
