@@ -43,7 +43,8 @@ class SimulatorRuntimeTests(unittest.TestCase):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"
             "2000 ms [CUX_CONDITION_AFTER] authored trigger condition returned\n"
-            "2000 ms [EVENT_AFTER_RESUME] ordinal=2 function=BB4\n",
+            "2000 ms [EVENT_AFTER_RESUME] ordinal=2 function=BB4\n"
+            "2100 ms [RUNTIME_ERROR] unrelated later callback\n",
             "game_ms=2100 frame=21 stage=SERVER_FRAME_COMPLETE\n", "", "")
         self.assertIn('"jass_status": "bb4_resume_completed"', output)
 
@@ -58,13 +59,17 @@ class SimulatorRuntimeTests(unittest.TestCase):
             "2000 ms [CONDITION_ENTER ] index=2 function=CUl\n"
             "2000 ms [CONDITION_RESULT] index=2 function=CUl returns=0\n"
             "2000 ms [CONDITION_ENTER ] index=3 function=CV5\n"
+            "2000 ms [DIVIDE_SOURCE ] numerator=360 denominator=GetPlayerState(Player(0),11)\n"
             "2000 ms [ARITHMETIC_ERROR] left=18 right=0\n"
-            "2000 ms [RUNTIME_ERROR] integer division by zero\n",
+            "2000 ms [RUNTIME_ERROR] integer division by zero\n"
+            "2000 ms [EVENT_AFTER_RESUME] ordinal=2 function=BB4\n",
             "game_ms=800 frame=8 stage=SERVER_FRAME_COMPLETE\n", "", "")
         report = json.loads(output)
+        self.assertEqual(report["jass_status"], "bb4_resume_aborted_runtime_error")
         self.assertEqual(report["last_condition_entered"], "CV5")
         self.assertEqual(report["last_condition_completed"], "CUl")
         self.assertEqual(report["last_jass_runtime_error"], "integer division by zero")
+        self.assertEqual(report["last_division_source"], "numerator=360 denominator=GetPlayerState(Player(0),11)")
         self.assertFalse(report["gameplay_verified"])
 
 

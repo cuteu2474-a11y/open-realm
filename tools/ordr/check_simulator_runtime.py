@@ -38,10 +38,13 @@ def inspect(report):
     condition_entered = re.findall(r"\[CONDITION_ENTER\s*\]\s+index=\d+\s+function=(\S+)", jass)
     condition_completed = re.findall(r"\[CONDITION_RESULT\s*\]\s+index=\d+\s+function=(\S+)", jass)
     runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
+    division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
     if entered and not finished and "CUX_CONDITION_AFTER" in jass:
         status = "bb4_resume_unfinished"
     elif entered and finished:
-        status = "bb4_resume_completed"
+        # A VM error marks the coroutine done, but its JASS condition/action never completed.
+        between = jass[entered.end():finished.start()]
+        status = "bb4_resume_aborted_runtime_error" if "[RUNTIME_ERROR" in between else "bb4_resume_completed"
     else:
         status = "insufficient_evidence"
     return {
@@ -49,6 +52,7 @@ def inspect(report):
         "last_condition_entered": condition_entered[-1] if condition_entered else None,
         "last_condition_completed": condition_completed[-1] if condition_completed else None,
         "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
+        "last_division_source": division_sources[-1][:360] if division_sources else None,
         "last_completed_game_frame": max(frames) if frames else None,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
         "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,

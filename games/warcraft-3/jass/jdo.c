@@ -2192,6 +2192,38 @@ uint32_t VM_EvalFourCC(jass_t *j, token_t const *token) {
     return jass_pushinteger(j, *(uint32_t *)token->primary);
 }
 
+/* An ORDR arithmetic failure needs its operand origins, not just the numbers.
+ * Keep signatures bounded and omit string literals (which may contain user data). */
+static void jass_ordr_expr_signature(token_t const *tok, char *out, size_t cap, int depth) {
+    cstring_t name;
+    size_t used;
+    if (!cap) return;
+    if (!tok) { snprintf(out, cap, "(missing)"); return; }
+    if (tok->type == TT_STRING) { snprintf(out, cap, "(string)"); return; }
+    if (tok->type != TT_CALL && tok->type != TT_IDENTIFIER && tok->type != TT_ARRAYACCESS &&
+        tok->type != TT_INTEGER && tok->type != TT_REAL && tok->type != TT_FOURCC) {
+        snprintf(out, cap, "(token:%u)", (unsigned)tok->type);
+        return;
+    }
+    name = tok->primary ? tok->primary : "(unnamed)";
+    snprintf(out, cap, "%.60s", name);
+    if (!depth || (tok->type != TT_CALL && tok->type != TT_ARRAYACCESS)) return;
+    used = strlen(out);
+    if (used + 2 >= cap) return;
+    snprintf(out + used, cap - used, "%s", tok->type == TT_CALL ? "(" : "[");
+    used = strlen(out);
+    token_t const *arg = tok->type == TT_CALL ? tok->args : tok->index;
+    for (unsigned i = 0; arg && i < 2 && used + 2 < cap; i++, arg = arg->next) {
+        char part[96];
+        if (i) { snprintf(out + used, cap - used, ","); used = strlen(out); }
+        jass_ordr_expr_signature(arg, part, sizeof(part), depth - 1);
+        snprintf(out + used, cap - used, "%s", part);
+        used = strlen(out);
+    }
+    if (arg && used + 4 < cap) { snprintf(out + used, cap - used, ",..."); used = strlen(out); }
+    if (used + 2 < cap) snprintf(out + used, cap - used, "%s", tok->type == TT_CALL ? ")" : "]");
+}
+
 uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassCFunction_t cf = NULL;
@@ -2240,6 +2272,18 @@ uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
                 jass_pushnull(j);
             }
             args++;
+        }
+        /* Only report the failing ORDR division, after evaluating both operands.
+         * The AST signatures identify a zero-producing native/global without
+         * exporting the private map source or changing arithmetic semantics. */
+        if (jass_root(j) == ordr_flow_vm && !strcmp(token->primary, "__div") && args == 2 &&
+            j->num_stack == stacksize + 3 && jass_gettype(j, -1) == jasstype_integer &&
+            jass_gettype(j, -2) == jasstype_integer && jass_checkinteger(j, -1) == 0) {
+            char lhs[160], rhs[160], detail[368];
+            jass_ordr_expr_signature(token->args, lhs, sizeof(lhs), 3);
+            jass_ordr_expr_signature(token->args ? token->args->next : NULL, rhs, sizeof(rhs), 3);
+            snprintf(detail, sizeof(detail), "numerator=%s denominator=%s", lhs, rhs);
+            jass_ordr_log_event(j, "DIVIDE_SOURCE", detail);
         }
         jass_call(j, args);
         return j->num_stack - stacksize;
