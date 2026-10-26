@@ -1465,6 +1465,24 @@ void G_RequestCampaignSelect(void) {
     level.campaign_select_on_end = true;
 }
 
+/* Keep the detailed ORDR startup evidence in ordr-jass.log.  The transient
+ * diagnostics previously obscured the difficulty controls every five seconds;
+ * production iPad builds must show the original map UI unless explicitly
+ * opted into the on-screen overlay for development. */
+static bool G_ORDRDebugOverlayEnabled(cstring_t value) {
+    return value && !strcmp(value, "1");
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_ordr, startup_diagnostic_overlay_is_opt_in) {
+    T_ASSERT(!G_ORDRDebugOverlayEnabled(NULL));
+    T_ASSERT(!G_ORDRDebugOverlayEnabled(""));
+    T_ASSERT(!G_ORDRDebugOverlayEnabled("0"));
+    T_ASSERT(!G_ORDRDebugOverlayEnabled("true"));
+    T_ASSERT(G_ORDRDebugOverlayEnabled("1"));
+}
+#endif
+
 /* Temporary, map-specific iPad diagnosis. The VM's ORDR milestone mask
  * separates missing script/timer execution from missing world rendering.
  * Surface it in the running game because iPad app logs may omit stderr. */
@@ -1561,13 +1579,17 @@ static void G_ORDRShowFlowStatus(void) {
             jass_ordr_log_event(level.vm, "CHOICE_RENDER_AUDIT", "offline local client not found");
         }
     }
-    FOR_LOOP(i, game.max_clients) {
-        gameClient_t *client = &game.clients[i];
-        edict_t *ent;
-        if (!client->connected) continue;
-        ent = G_GetPlayerEntityByNumber(client->ps.number);
-        if (ent && ent->client)
-            UI_ShowTransientText(ent, &MAKE(vec2_t, 0.03f, 0.12f), message, 4.7f);
+    /* No transient HUD overlay during ordinary play.  JASS stage, selection,
+     * camera and render audits above still reach the simulator artifact. */
+    if (G_ORDRDebugOverlayEnabled(gi.CvarString("ordr_debug_overlay", "0"))) {
+        FOR_LOOP(i, game.max_clients) {
+            gameClient_t *client = &game.clients[i];
+            edict_t *ent;
+            if (!client->connected) continue;
+            ent = G_GetPlayerEntityByNumber(client->ps.number);
+            if (ent && ent->client)
+                UI_ShowTransientText(ent, &MAKE(vec2_t, 0.03f, 0.12f), message, 4.7f);
+        }
     }
 }
 
