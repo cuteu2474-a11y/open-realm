@@ -1613,7 +1613,9 @@ static void G_RunFrame(void) {
     /* Original ORDR-only -offline/-오프라인모드 command, delivered after
      * main() has registered player chat handlers. Never bypass JASS. */
     G_ORDRTryAutoOfflineMode();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_OFFLINE", ordr_frame_detail);
     G_ORDRShowFlowStatus();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_FLOW", ordr_frame_detail);
     G_UpdateTimerDialogs();
     G_UpdateLeaderboards();
 
@@ -1624,9 +1626,12 @@ static void G_RunFrame(void) {
     G_DrainPausedResultEvents();
     G_BotRunFrame();
 
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_BEFORE_CLIENTS", ordr_frame_detail);
     G_RunClients();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_CLIENTS", ordr_frame_detail);
 
     G_RunEntities();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_ENTITIES", ordr_frame_detail);
 
     /* Flow-field cache misses are resumable so arbitrary reachable move orders
      * never depend on a lifetime quota of synchronous whole-map floods.  Keep
@@ -1643,6 +1648,7 @@ static void G_RunFrame(void) {
     G_UpdateClientInfoPanels();
     G_UpdateClientResourceBars();
     ORDR_DzRenderFrames();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_AFTER_DZ_RENDER", ordr_frame_detail);
     /* After the resource compare pass so Team Resources follows an owner's
      * gold/lumber/food change in the same frame as that owner's console. */
     G_UpdateMultiboards();
@@ -1664,6 +1670,7 @@ static void G_RunFrame(void) {
     /* The VM callback stack is quiescent here. A restored snapshot must not
      * contain any transient outgoing session request. */
     G_FlushScriptSave();
+    if (ordr_frame_trace) jass_ordr_log_event(level.vm, "FRAME_COMPLETE", ordr_frame_detail);
 }
 
 static cstring_t G_GetThemeValue(cstring_t filename) {

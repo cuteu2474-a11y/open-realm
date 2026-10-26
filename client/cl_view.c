@@ -16,6 +16,15 @@ static struct {
 static bool world_loaded = false;
 static bool begin_sent = false;
 
+extern void CL_ORDRTrace(cstring_t stage);
+static unsigned ordr_prep_seen;
+static void CL_ORDRPrepTrace(unsigned bit, cstring_t stage) {
+    if (!(ordr_prep_seen & (1u << bit))) {
+        ordr_prep_seen |= 1u << bit;
+        CL_ORDRTrace(stage);
+    }
+}
+
 /* Optional CS_MODELS indices become handles here. Games that do not publish
  * CS_TERRAIN_LIGHT_MODEL / CS_ENTITY_LIGHT_MODEL leave the slots empty. */
 static model_t const *V_ConfigLightModel(uint32_t configstring) {
@@ -576,7 +585,12 @@ static void CL_AddEntities(void) {
 }
 
 void CL_PrepRefresh(void) {
-    if (!cl.precache_ready || !cl.layout[LAYER_LOADING]) return;
+    CL_ORDRPrepTrace(0, "PREP_REFRESH_ENTER");
+    if (!cl.precache_ready || !cl.layout[LAYER_LOADING]) {
+        CL_ORDRPrepTrace(1, "PREP_GATE_WAITING_FOR_ASSETS_OR_LAYOUT");
+        return;
+    }
+    CL_ORDRPrepTrace(2, "PREP_READY_GATE_PASSED");
     if (!*cl.configstrings[CS_WORLD]) {
         world_loaded = false;
         begin_sent = false;
@@ -589,7 +603,9 @@ void CL_PrepRefresh(void) {
         if (!CM_IsMapLoaded(cl.configstrings[CS_WORLD])) {
             CM_LoadMap(cl.configstrings[CS_WORLD], CL_LoadingFrame);
         }
+        CL_ORDRPrepTrace(3, "PREP_BEFORE_REGISTER_MAP");
         re.RegisterMap(cl.configstrings[CS_WORLD]);
+        CL_ORDRPrepTrace(4, "PREP_AFTER_REGISTER_MAP");
         CL_ApplyWorldPresentationConfig();
         world_loaded = true;
     }
@@ -625,6 +641,7 @@ void CL_PrepRefresh(void) {
         CL_RegisterConfigString(CS_MODELS + i);
     }
     CL_RegisterConfigString(CS_ORDER_MARKER);
+    CL_ORDRPrepTrace(5, "PREP_AFTER_MODEL_REGISTRATION");
     CL_LoadingStage(0.60f);
 
     for (uint32_t i = 1; i < MAX_IMAGES; i++) {
@@ -632,6 +649,7 @@ void CL_PrepRefresh(void) {
             continue;
         CL_RegisterConfigString(CS_IMAGES + i);
     }
+    CL_ORDRPrepTrace(6, "PREP_AFTER_IMAGE_REGISTRATION");
     CL_LoadingStage(0.75f);
 
     if (register_sounds)
@@ -644,10 +662,13 @@ void CL_PrepRefresh(void) {
             continue;
         CL_RegisterConfigString(CS_FONTS + i);
     }
+    CL_ORDRPrepTrace(7, "PREP_AFTER_FONT_REGISTRATION");
     CL_LoadingStage(0.94f);
 
     if (world_loaded && !begin_sent) {
+        CL_ORDRPrepTrace(8, "PREP_BEFORE_SEND_BEGIN");
         CL_SendBegin();
+        CL_ORDRPrepTrace(9, "PREP_AFTER_SEND_BEGIN");
         begin_sent = true;
     }
     CL_LoadingStage(0.98f);
@@ -656,7 +677,10 @@ void CL_PrepRefresh(void) {
         S_EndRegistration();
         cl.refresh_prepped = true;
     }
-    if (cl.refresh_prepped) CL_LoadingStage(1.0f);
+    if (cl.refresh_prepped) {
+        CL_LoadingStage(1.0f);
+        CL_ORDRPrepTrace(10, "PREP_COMPLETE");
+    }
 }
 
 void V_RenderView(void) {

@@ -140,7 +140,13 @@ jobs:
             echo "Simulated iPad observation: $elapsed seconds, screenshot=$(basename "$output")"
           done
 
-          # Capture an engine JASS log if it exists, never any MPQ/w3x.
+          # Capture bounded engine and client checkpoint logs; no game files.
+          if [ -f "$DATA_DIR/Documents/ordr-client.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-client.log" "$REPORT/ordr-client.log"
+            echo "client_trace_found=true" > "$REPORT/client-trace-status.txt"
+          else
+            echo "client_trace_found=false" > "$REPORT/client-trace-status.txt"
+          fi
           if [ -f "$DATA_DIR/Documents/ordr-jass.log" ]; then
             cp "$DATA_DIR/Documents/ordr-jass.log" "$REPORT/ordr-jass.log"
             echo "jass_log_found=true" > "$REPORT/runtime-status.txt"

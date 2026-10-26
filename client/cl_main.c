@@ -50,6 +50,41 @@ static uint32_t cl_connect_started, cl_connect_retry;
 
 uint32_t CL_RealTime(void) { return cl_realtime; }
 
+/* Private ORDR-only iPad progress probes. Do not log player names, map bytes,
+ * arbitrary file paths, network contents or credentials. The app Documents
+ * directory is copied by the private simulator workflow, never to the repo. */
+void CL_ORDRTrace(cstring_t stage) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    static FILE *file;
+    static bool open_attempted;
+    static unsigned lines;
+    cstring_t map = Cvar_String("map", "");
+    if (!map || !strstr(map, "ORDR_S2_2.323")) return;
+    if (!open_attempted) {
+        char filename[1024];
+        cstring_t home = getenv("HOME");
+        open_attempted = true;
+        if (home && *home &&
+            snprintf(filename, sizeof(filename), "%s/Documents/ordr-client.log", home) < (int)sizeof(filename))
+            file = fopen(filename, "w");
+        if (file) setvbuf(file, NULL, _IOLBF, 0);
+    }
+    if (!file || lines++ >= 500) return;
+    fprintf(file,
+            "client_ms=%u stage=%s state=%d ui=%u ready=%d precache=%d loading_layout=%d world_cs=%d plaque=%d progress=%.2f\n",
+            (unsigned)cl_realtime, stage ? stage : "(none)", (int)cls.state,
+            (unsigned)cl.playerstate.client_ui_state, (int)cl.refresh_prepped,
+            (int)cl.precache_ready, cl.layout[LAYER_LOADING] != NULL,
+            cl.configstrings[CS_WORLD][0] != '\0', cls.disable_screen != 0,
+            (double)cl.loading_progress);
+    fflush(file);
+#else
+    (void)stage;
+#endif
+}
+
+
+
 typedef enum {
     CL_MENU_ACTION_NONE,
     CL_MENU_ACTION_MAP,
@@ -567,6 +602,7 @@ void CL_BeginLoadingMap(cstring_t mapName) {
     cl.playerstate.client_ui_state = CLIENT_UI_LOADING;
     cls.state = ca_connected;
     CL_SetGameplayInput();
+    CL_ORDRTrace("LOADING_MAP_BEGIN");
     SCR_BeginLoadingPlaque();
     /* New map baselines repopulate the compact active-entity list; drop any
      * stale entries from the previous map before they arrive. */
@@ -1535,8 +1571,15 @@ static void CL_SendSoundEvents(void) {
 }
 
 void CL_Frame(uint32_t msec) {
+    static uint32_t ordr_next_trace;
+    bool trace_tick;
     cl_realtime += msec;
     cl.time += msec;
+    trace_tick = cl_realtime >= ordr_next_trace;
+    if (trace_tick) {
+        ordr_next_trace = cl_realtime + 5000;
+        CL_ORDRTrace("CL_FRAME_ENTER");
+    }
 
     netadr_t online_host;
     if (Online_TakeConnection(&online_host)) {
@@ -1551,6 +1594,7 @@ void CL_Frame(uint32_t msec) {
     CL_CanvasFrame(cl_realtime);
     CL_MovieUpdate();
     CL_ReadPackets();
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_AFTER_PACKETS");
     if (cls.state == ca_connecting && cls.netchan.remote_address.type == NA_EOS) {
         if (cl_realtime - cl_connect_started > CL_TIMEOUT_MSEC) {
             CL_Disconnect("Internet host connection timed out.", true);
@@ -1570,7 +1614,9 @@ void CL_Frame(uint32_t msec) {
     } else if (cls.state == ca_active) {
         CL_PrepRefresh();
     }
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_BEFORE_DRAW");
     SCR_UpdateScreen(msec);
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_AFTER_DRAW");
 }
 
 #if defined(BZ_TESTS) && defined(BZ_CLIENT_WORLD)

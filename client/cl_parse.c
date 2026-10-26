@@ -427,7 +427,10 @@ static bool CL_ParseTerrainMaskChunk(sizeBuf_t *msg) {
 
 /* Handle the svc_frame header and its game-owned datagram, then snapshot entity
  * states into "prev" so the renderer can interpolate the current scene. */
+extern void CL_ORDRTrace(cstring_t stage);
 void CL_ParseFrame(sizeBuf_t *msg) {
+    static unsigned ordr_frame_trace_count;
+    if (ordr_frame_trace_count++ < 8) CL_ORDRTrace("SERVER_FRAME_RECEIVED");
     int const previous_frame = cl.frame.serverframe;
     bool const had_frame = cl.frame.valid;
     cl.frame.serverframe = MSG_ReadLong(msg);
@@ -463,6 +466,7 @@ void CL_ParseFrame(sizeBuf_t *msg) {
         Cbuf_InsertFromDefer();
         cl.playerstate.client_ui_state = CLIENT_UI_GAME;
         SCR_EndLoadingPlaque();
+        CL_ORDRTrace("CLIENT_ACTIVATED_LOADING_CLEARED");
         SAFE_DELETE(cl.layout[LAYER_LOADING], MemFree);
         SCR_ClearLayoutLayer(LAYER_LOADING);
         CL_SetGameplayInput();
