@@ -84,6 +84,19 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertFalse(report["choice_scene_setup_logged"])
         self.assertFalse(report["offline_map_flag_confirmed"])
 
+    def test_zero_divisor_records_numeric_globals_without_claiming_gameplay(self):
+        report = json.loads(self.inspect(
+            "2000 ms [DIVIDE_SOURCE   ] numerator=360 denominator=__mul(vP,EK)\n"
+            "2000 ms [ARITHMETIC_ERROR] left=360 right=0\n"
+            "2000 ms [DIVISOR_GLOBAL  ] name=vP scope=global type=integer value=0\n"
+            "2000 ms [DIVISOR_GLOBAL  ] name=EK scope=global type=integer value=8\n",
+            "", "", ""))
+        self.assertEqual(report["recent_divisor_global_states"], [
+            "name=vP scope=global type=integer value=0",
+            "name=EK scope=global type=integer value=8",
+        ])
+        self.assertFalse(report["gameplay_verified"])
+
     def test_cv5_condition_and_arithmetic_error_are_reported_separately(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"

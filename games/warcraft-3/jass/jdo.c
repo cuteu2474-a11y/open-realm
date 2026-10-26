@@ -222,6 +222,30 @@ uint32_t __unm(jass_t *j) {
 
 JASS_NUMOP(__sub, -);
 JASS_NUMOP(__mul, *);
+
+/* Report the numeric map globals referenced by the known ORDR startup
+ * divisor. Do not modify them or evaluate the expression a second time.
+ * The JASS log helper ignores non-ORDR maps; avoid string values entirely. */
+static void jass_ordr_log_divisor_global(jass_t *j, cstring_t name) {
+    jassVar_t *var = find_global(j, name);
+    char detail[160];
+    if (!var) {
+        snprintf(detail, sizeof(detail), "name=%s scope=global state=missing", name);
+    } else if (!var->value) {
+        snprintf(detail, sizeof(detail), "name=%s scope=global type=%s state=unset",
+                 name, var->type ? var->type->name : "unknown");
+    } else if (jass_getvarbasetype(var) == jasstype_integer) {
+        snprintf(detail, sizeof(detail), "name=%s scope=global type=integer value=%d",
+                 name, *(int32_t *)var->value);
+    } else if (jass_getvarbasetype(var) == jasstype_real) {
+        snprintf(detail, sizeof(detail), "name=%s scope=global type=real value=%.9g",
+                 name, (double)*(float *)var->value);
+    } else {
+        snprintf(detail, sizeof(detail), "name=%s scope=global state=non_numeric", name);
+    }
+    jass_ordr_log_event(j, "DIVISOR_GLOBAL", detail);
+}
+
 /* C integer division raises SIGFPE for zero divisors and INT_MIN / -1.
  * A map arithmetic error must unwind through the JASS runtime boundary,
  * not kill the host app before the offending trigger can be diagnosed. */
@@ -232,6 +256,10 @@ uint32_t __div(jass_t *j) {
             char detail[96];
             snprintf(detail, sizeof(detail), "left=%d right=%d", left, right);
             jass_ordr_log_event(j, "ARITHMETIC_ERROR", detail);
+            if (!right) {
+                jass_ordr_log_divisor_global(j, "vP");
+                jass_ordr_log_divisor_global(j, "EK");
+            }
             jass_rterror(j, !right ? "integer division by zero" : "integer division overflow");
             return 0;
         }

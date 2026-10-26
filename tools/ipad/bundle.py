@@ -10,6 +10,18 @@ import subprocess
 FRAMEWORKS = ('shared', 'jass', 'sheet', 'renderer', 'game', 'menu')
 
 
+# The port renders a landscape-only Warcraft III HUD. Allowing a portrait
+# UIKit orientation rotates the game surface relative to touch coordinates.
+LANDSCAPE_ORIENTATIONS = ('UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight')
+
+
+def app_orientation_info():
+    return {
+        'UISupportedInterfaceOrientations': list(LANDSCAPE_ORIENTATIONS),
+        'UISupportedInterfaceOrientations~ipad': list(LANDSCAPE_ORIENTATIONS),
+    }
+
+
 def framework_plist(name, bundle_id, minimum):
     return {
         'CFBundleIdentifier': bundle_id + '.' + name,
@@ -101,8 +113,8 @@ def main():
         'UIRequiresFullScreen': True,
         # SDL mouse/trackpad support (iPad pointer, Magic Keyboard trackpad).
         'UIApplicationSupportsIndirectInputEvents': True,
-        'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
     })
+    info.update(app_orientation_info())
     (target / 'Info.plist').write_bytes(plistlib.dumps(info))
     (target / 'PkgInfo').write_bytes(b'APPL????')
     print('Packaged ' + str(target))

@@ -39,6 +39,7 @@ def inspect(report):
     condition_completed = re.findall(r"\[CONDITION_RESULT\s*\]\s+index=\d+\s+function=(\S+)", jass)
     runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
     division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
+    divisor_globals = re.findall(r"\[DIVISOR_GLOBAL\s*\]\s+([^\r\n]+)", jass)
     # The first few server-frame checkpoints are a diagnostic sample, not proof
     # that the server stopped running after that frame.
     jass_times = [int(n) for n in re.findall(r"^(\d+) ms\s+\[", jass, re.M)]
@@ -60,6 +61,7 @@ def inspect(report):
         "last_condition_completed": condition_completed[-1] if condition_completed else None,
         "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
         "last_division_source": division_sources[-1][:360] if division_sources else None,
+        "recent_divisor_global_states": [entry[:160] for entry in divisor_globals[-4:]],
         "last_completed_game_frame": max(frames) if frames else None,
         "last_observed_jass_ms": max(jass_times) if jass_times else None,
         "choice_units_created": len(choice_creates),
