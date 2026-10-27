@@ -1576,7 +1576,7 @@ static void G_ORDRShowFlowStatus(void) {
             if (unit->aiflags & AI_IMMOBILE) immobile++;
             if (unit->currentmove && unit->currentmove->think != ai_stand)
                 active_orders++;
-            if (samples++ < 4) {
+            if (samples++ < 16) {
                 char detail[360];
                 snprintf(detail, sizeof(detail),
                          "unit=%u raw=0x%08x owner=%u pos=(%.0f,%.0f) "

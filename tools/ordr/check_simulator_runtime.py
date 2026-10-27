@@ -97,6 +97,46 @@ def inspect(report):
     for unit in set(wisp_moves) & set(wisp_selects) & wisp_server_selects & wisp_server_moves:
         if unit in observed_movement:
             moved_wisps.add(unit)
+    # An accepted order is not movement. Compare position samples for the
+    # same enemy entity across distinct game-time checkpoints.
+    enemy_order_accepts = re.findall(
+        r"\[ORDR_SCRIPT_POINT_ORDER\s*\][^\r\n]*\bowner=5\b[^\r\n]*\baccepted=1\b",
+        jass)
+    enemy_positions = {}
+    for timestamp, unit, x, y in re.findall(
+        r"^(\d+) ms\s+\[ORDR_ENEMY_MOVEMENT\s*\]\s+unit=(\d+)\b[^\r\n]*?"
+        r"\bpos=\(([-\d.]+),([-\d.]+)\)", jass, re.M):
+        enemy_positions.setdefault(unit, []).append(
+            (int(timestamp), float(x), float(y)))
+    moving_enemies, repeated_enemies = [], []
+    for unit, samples in enemy_positions.items():
+        if len({sample[0] for sample in samples}) < 2:
+            continue
+        repeated_enemies.append(unit)
+        start = samples[0]
+        if any((x - start[1]) ** 2 + (y - start[2]) ** 2 > 16.0
+               for _, x, y in samples[1:]):
+            moving_enemies.append(unit)
+
+    # UI-generated finger taps and actual server command consumption must
+    # match in entity id and command; a green simulator job is not enough.
+    building_selected = set(re.findall(
+        r"stage=SIM_BUILDING_SELECT_QUEUED unit=(\d+)\b[^\r\n]*\binput=finger", client))
+    building_server_selected = set(re.findall(
+        r"\[ORDR_BUILDING_SELECTION\s*\]\s+unit=(\d+)\b", jass))
+    button_requests = re.findall(
+        r"stage=SIM_BUILDING_BUTTON_QUEUED unit=(\d+) command=(button|upgrade|research) (\S+) input=finger", client)
+    server_buttons = set(re.findall(
+        r"\[ORDR_BUILDING_BUTTON\s*\]\s+building=(\d+)\b[^\r\n]*\bbutton=(\S+)", jass))
+    server_actions = set(re.findall(
+        r"\[ORDR_BUILDING_ACTION\s*\]\s+building=(\d+) kind=(upgrade|research) button=(\S+)", jass))
+    verified_buttons = []
+    for unit, kind, code in button_requests:
+        if unit not in building_selected or unit not in building_server_selected:
+            continue
+        if (kind == "button" and (unit, code) in server_buttons) or (
+                kind != "button" and (unit, kind, code) in server_actions):
+            verified_buttons.append((unit, kind, code))
     background_audits = re.findall(
         r"\[CHOICE_BACKGROUND_AUDIT\s*\]\s+B100_instances=(\d+) visible=(\d+) model_indices=(\d+)",
         jass)
@@ -162,6 +202,24 @@ def inspect(report):
         "simulator_choice_full_three_tap_roundtrip_verified":
             len(probe_requests) == 3 and len(verified_requests) == 3 and
             [request[1] for request in probe_requests] == ["u005", "u00C", "u006"],
+        "enemy_wave_sampled_units": len(enemy_positions),
+        "enemy_wave_repeatedly_sampled_units": len(repeated_enemies),
+        "enemy_wave_moving_units": sorted(moving_enemies),
+        "enemy_script_order_accepted": bool(enemy_order_accepts),
+        "enemy_movement_verified": bool(moving_enemies),
+        "enemy_movement_status": (
+            "moving_confirmed" if moving_enemies else
+            "stationary_in_samples" if repeated_enemies else
+            "no_repeat_samples" if enemy_positions else
+            "no_wave_sample"),
+        "simulator_building_selection_requested": len(building_selected),
+        "simulator_building_selection_server_seen":
+            len(building_selected & building_server_selected),
+        "simulator_building_buttons_requested": len(button_requests),
+        "simulator_building_buttons_server_seen": len(verified_buttons),
+        "simulator_building_button_roundtrip_verified": bool(verified_buttons),
+        "simulator_building_probe_blocked": re.findall(
+            r"stage=SIM_BUILDING_PROBE_BLOCKED ([^\r\n]+)", client)[-12:],
         "simulator_wisp_selection_requested": bool(wisp_selects),
         "simulator_wisp_selection_server_seen": bool(set(wisp_selects) & wisp_server_selects),
         "simulator_wisp_move_requested": bool(wisp_moves),

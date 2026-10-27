@@ -170,6 +170,19 @@ static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
     if (!client || !unit) return;
     evt = G_PublishEventWithSource(unit, type,
                                    G_GetPlayerEntityByNumber(client->ps.number));
+    if (type == EVENT_PLAYER_UNIT_SELECTED && G_UnitIsStructure(unit) &&
+        level.vm && jass_functionbyname(level.vm, "CUN")) {
+        static unsigned n;
+        if (n++ < 48) {
+            char detail[155];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u player=%u controlled=%u",
+                     (unsigned)unit->s.number, (unsigned)unit->class_id,
+                     (unsigned)unit->s.player, (unsigned)client->ps.number,
+                     (unsigned)G_UnitCanControl(client, unit));
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_SELECTION", detail);
+        }
+    }
     if (evt) evt->dialog_player = client->ps.number + 1;
     if (evt && level.vm && jass_functionbyname(level.vm, "CUO") &&
         jass_functionbyname(level.vm, "CUW") &&
@@ -1558,6 +1571,13 @@ CLIENTCOMMAND(Research) {
         return;
     }
     memcpy(&abilcode, classname, sizeof(abilcode));
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        ent && G_UnitIsStructure(ent)) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "building=%u kind=research button=%.4s",
+                 (unsigned)ent->s.number, classname);
+        jass_ordr_log_event(level.vm, "ORDR_BUILDING_ACTION", detail);
+    }
     if (G_ProducerCanResearch(ent, abilcode)) {
         if (!G_UnitCanSpendResources(client, ent)) return;
         G_QueueResearch(ent, abilcode);
@@ -1576,6 +1596,13 @@ CLIENTCOMMAND(Upgrade) {
 
     if (!G_UnitCanSpendResources(client, ent) || !classname || strlen(classname) != 4) return;
     memcpy(&unit_id, classname, sizeof(unit_id));
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        ent && G_UnitIsStructure(ent)) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "building=%u kind=upgrade button=%.4s",
+                 (unsigned)ent->s.number, classname);
+        jass_ordr_log_event(level.vm, "ORDR_BUILDING_ACTION", detail);
+    }
     G_StartBuildingUpgrade(ent, unit_id);
     Get_Commands_f(clent);
 }

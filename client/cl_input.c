@@ -807,6 +807,45 @@ bool CL_ORDRSimulatorTapWisp(uint32_t number) {
 
 /* Send an actual two-finger iPad smart-order gesture at the map's beacon.
  * The server still resolves the hit, ownership, pathing, and movement. */
+/* Simulator-only: a building uses the same projected iPad finger selection
+ * path as an ordinary unit. Never force a server selection here. */
+bool CL_ORDRSimulatorTapBuilding(uint32_t number) {
+    viewDef_t const *view = &cl.viewDef;
+    vec2_t point;
+    uint32_t hit = 0;
+    if (!number || number >= MAX_CLIENT_ENTITIES || !view->entities ||
+        !CL_GameplayInputReady() || cls.key_dest != key_game) return false;
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (ent->number != number || !(ent->flags & RF_UNIT) ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+            !(cl.ents[number].current.flags & EF_BUILDING)) continue;
+        if (!CL_ORDRSimulatorProjectWorld(&ent->origin, &point) ||
+            !CL_TouchInWorld(point, re.GetWindowSize()) ||
+            CL_WindowMouseOver((int)point.x, (int)point.y) ||
+            !CL_TraceFingerSelectionEntity(point.x, point.y, &hit) ||
+            hit != number) return false;
+        if (!CL_ORDRSimulatorFingerTap(point, (SDL_FingerID)-9300)) return false;
+        FOR_LOOP(j, cl.selection.num_selected)
+            if (cl.selection.entity_nums[j] == number) return true;
+        return false;
+    }
+    return false;
+}
+
+/* This helper taps a real rendered command-button position through SDL;
+ * a sent network message alone cannot prove the button's effect. */
+bool SCR_ORDRSimulatorFindCommandButton(vec2_t *point, char *command, size_t capacity);
+
+bool CL_ORDRSimulatorTapBuildingButton(char *command, size_t capacity) {
+    vec2_t point;
+    if (!command || capacity < 2 || !CL_GameplayInputReady() ||
+        cls.key_dest != key_game ||
+        !SCR_ORDRSimulatorFindCommandButton(&point, command, capacity))
+        return false;
+    return CL_ORDRSimulatorFingerTap(point, (SDL_FingerID)-9301);
+}
+
 bool CL_ORDRSimulatorTapBeacon(void) {
     size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
     vec3_t const beacon = { -3456.0f, -9360.0f, 0.0f };

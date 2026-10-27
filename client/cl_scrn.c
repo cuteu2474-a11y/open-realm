@@ -3,6 +3,9 @@
 #include "ui_layout.h"
 #include <ctype.h>
 #include <SDL2/SDL.h>
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
 
 /* An edit control in a persistent game-authored layout is not a transient
  * client window. Keep one locally focused editor across redraws and transport
@@ -2318,6 +2321,49 @@ void SCR_LayoutClampSelectionRect(rect_t *rect) {
     rect->w = (clamped.x / SCR_UICanvasWidth()) * window.width - rect->x;
     rect->h = (clamped.y / UI_BASE_HEIGHT) * window.height - rect->y;
 }
+
+/* Only available in simulator builds: discover an enabled, visible command
+ * icon in the actual server-authored HUD, then return its screen center. */
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+bool SCR_ORDRSimulatorFindCommandButton(vec2_t *point, char *command, size_t capacity) {
+    uiCanvas_t const *canvas = CL_Canvas();
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    if (!point || !command || capacity < 2 || !canvas ||
+        canvas->scene.w <= 0 || canvas->scene.h <= 0 ||
+        win.width <= 0 || win.height <= 0 ||
+        !SCR_LayoutLayerVisible(LAYER_COMMANDBAR))
+        return false;
+    SCR_Clear(layout_layers[LAYER_COMMANDBAR]);
+    for (uint32_t i = SCR_NumFrames(); i > 0; i--) {
+        uiFrame_t const *frame = SCR_Frame(i - 1);
+        rect_t const *r;
+        vec2_t candidate;
+        if (!frame || frame->flags.type != FT_COMMANDBUTTON ||
+            !SCR_LayoutFrameRowsVisible(frame) ||
+            !SCR_LayoutFrameHasClickCommand(frame) ||
+            (strncmp(frame->onclick, "button ", 7) &&
+             strncmp(frame->onclick, "research ", 9) &&
+             strncmp(frame->onclick, "upgrade ", 8)))
+            continue;
+        if (strstr(frame->onclick, "CmdStop") ||
+            strstr(frame->onclick, "CmdCancel") ||
+            strstr(frame->onclick, "CmdHoldPos")) continue;
+        r = SCR_LayoutRect(frame);
+        if (!r || r->w <= 0 || r->h <= 0) continue;
+        candidate = (vec2_t){
+            (r->x + r->w * 0.5f) * win.width / canvas->scene.w,
+            (r->y + r->h * 0.5f) * win.height / canvas->scene.h
+        };
+        if (candidate.x < 0 || candidate.y < 0 ||
+            candidate.x >= win.width || candidate.y >= win.height)
+            continue;
+        strlcpy(command, frame->onclick, capacity);
+        *point = candidate;
+        return true;
+    }
+    return false;
+}
+#endif
 
 bool SCR_LayoutHitTest(int x, int y) {
     vec2_t const point = SCR_ScreenToUI(x, y);

@@ -1582,6 +1582,8 @@ static void CL_SendSoundEvents(void) {
 bool CL_ORDRSimulatorTapChoice(uint32_t number);
 bool CL_ORDRSimulatorTapWisp(uint32_t number);
 bool CL_ORDRSimulatorTapBeacon(void);
+bool CL_ORDRSimulatorTapBuilding(uint32_t number);
+bool CL_ORDRSimulatorTapBuildingButton(char *command, size_t capacity);
 
 static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
     if (actual == wanted) return true;
@@ -1666,6 +1668,73 @@ static void CL_ORDRSimulatorProbeWisp(uint32_t now) {
     }
 }
 
+/* Up to three distinct structures are selected with a real simulated finger,
+ * followed by an enabled command-card button. Missing visibility, selection,
+ * and server receipt are all recorded separately. */
+static void CL_ORDRSimulatorProbeBuildings(uint32_t now) {
+    static uint32_t visited[3], count, selected, selected_at, next_try, next_block;
+    static bool pending;
+    viewDef_t const *view = &cl.viewDef;
+    if (now < 1050000u || !view->entities ||
+        cls.netchan.message.cursize + 160 >= cls.netchan.message.maxsize) return;
+    if (pending) {
+        bool has_selection = false;
+        FOR_LOOP(i, cl.selection.num_selected)
+            if (cl.selection.entity_nums[i] == selected) has_selection = true;
+        if (has_selection && now >= selected_at + 12000u) {
+            char command[96] = { 0 }, line[220];
+            if (CL_ORDRSimulatorTapBuildingButton(command, sizeof(command))) {
+                snprintf(line, sizeof(line),
+                         "SIM_BUILDING_BUTTON_QUEUED unit=%u command=%s input=finger",
+                         (unsigned)selected, command);
+                CL_ORDRTrace(line);
+                pending = false;
+                next_try = now + 12000u;
+                return;
+            }
+        }
+        if (now >= selected_at + 32000u) {
+            char line[180];
+            snprintf(line, sizeof(line),
+                     "SIM_BUILDING_PROBE_BLOCKED unit=%u reason=%s",
+                     (unsigned)selected, has_selection
+                         ? "no_clickable_command_button" : "selection_not_retained");
+            CL_ORDRTrace(line);
+            pending = false;
+            next_try = now + 12000u;
+        }
+        return;
+    }
+    if (count >= 3 || now < next_try) return;
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        bool seen = false;
+        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+            !(ent->flags & RF_UNIT) ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+            !(cl.ents[ent->number].current.flags & EF_BUILDING) ||
+            (ent->owner != view->player && ent->owner != 15u)) continue;
+        FOR_LOOP(k, count) if (visited[k] == ent->number) seen = true;
+        if (seen || !CL_ORDRSimulatorTapBuilding(ent->number)) continue;
+        selected = ent->number;
+        selected_at = now;
+        visited[count++] = selected;
+        pending = true;
+        char line[176];
+        snprintf(line, sizeof(line),
+                 "SIM_BUILDING_SELECT_QUEUED unit=%u owner=%u raw=0x%08x input=finger",
+                 (unsigned)selected, (unsigned)ent->owner,
+                 (unsigned)cl.ents[selected].current.class_id);
+        CL_ORDRTrace(line);
+        return;
+    }
+    if (now >= next_block) {
+        CL_ORDRTrace("SIM_BUILDING_PROBE_BLOCKED reason=no_visible_selectable_building");
+        next_block = now + 25000u;
+    }
+    next_try = now + 5000u;
+}
+
 static void CL_ORDRSimulatorProbeChoice(void) {
     /* Initial screenshots at 600 s capture the untouched menu. Allow each
      * authored selection enough client+server frames before the next tap. */
@@ -1705,6 +1774,7 @@ static void CL_ORDRSimulatorProbeChoice(void) {
         !map || !strstr(map, "ORDR_S2_2.323")) return;
     if (next_step >= 3) {
         CL_ORDRSimulatorProbeWisp(now);
+        CL_ORDRSimulatorProbeBuildings(now);
         return;
     }
     if (

@@ -131,11 +131,12 @@ jobs:
               > "$REPORT/launch.txt"
           fi
 
+          # Continue through the first potential wave and building-button probes.
           # Capture after the choice taps, scripted wisp selection and beacon
           # two-finger order. simctl launch alone is not gameplay evidence.
           OBSERVE_STARTED=$SECONDS
           printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
-          for target in 8 16 45 90 150 240 360 480 600 720 840 960 1080 1200 1320; do
+          for target in 8 16 45 90 150 240 360 480 600 720 840 960 1080 1200 1320 1500 1800; do
             elapsed=$((SECONDS - OBSERVE_STARTED))
             if [ "$elapsed" -lt "$target" ]; then
               sleep "$((target - elapsed))"
@@ -205,6 +206,8 @@ jobs:
             --launched-at "$LAUNCH_EPOCH" > "$REPORT/crash-report-status.json"
           echo "simulator_scripted_finger_selection_probe=enabled" >> "$REPORT/runtime-status.txt"
           echo "simulator_scripted_wisp_selection_and_two_finger_beacon_order=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_enemy_wave_coordinate_probe=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_building_finger_and_command_button_probe=enabled" >> "$REPORT/runtime-status.txt"
           echo "physical_touch_input=false" >> "$REPORT/runtime-status.txt"
           echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
           if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
@@ -222,11 +225,13 @@ jobs:
             echo "- App install and launch command: complete"
             echo "- Retail War3.mpq supplied: $MPQ_FOUND"
             echo "- ORDR map supplied: $MAP_FOUND"
-            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, 720, 840, 960, 1080, 1200 and 1320 seconds (landscape review copies for >=600)"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1500 and 1800 seconds (landscape review copies for >=600)"
             echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
             echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
             echo "- Simulator-only scripted SDL finger taps on nightmare, Isekai and Start: verdict in engine-stage-summary.json"
             echo "- Simulator-only scripted wisp finger selection, two-finger beacon order and sampled positions: separate server and movement verdicts in engine-stage-summary.json"
+            echo "- Enemy wave: compare server position samples over multiple game ticks; accepted orders alone do not prove movement"
+            echo "- Buildings: select up to three visible structures by simulated SDL finger and tap enabled HUD buttons; track matching server receipt separately"
             echo "- Physical taps and full ORDR gameplay: **not implemented / not verified**"
             if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
               echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."

@@ -22,6 +22,44 @@ class SimulatorRuntimeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             return completed.stdout
 
+    def test_enemy_movement_and_building_button_roundtrip(self):
+        report = json.loads(self.inspect(
+            "22000 ms [ORDR_SCRIPT_POINT_ORDER] owner=5 accepted=1\n"
+            "22000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(10,20) goal=(100,100)\n"
+            "27000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(22,20) goal=(100,100)\n"
+            "28000 ms [ORDR_BUILDING_SELECTION] unit=12 owner=0 player=0\n"
+            "30000 ms [ORDR_BUILDING_BUTTON] building=12 owner=0 button=A100\n",
+            "",
+            "wall_ms=2000 stage=SIM_BUILDING_SELECT_QUEUED unit=12 owner=0 raw=1 input=finger\n"
+            "wall_ms=3000 stage=SIM_BUILDING_BUTTON_QUEUED unit=12 command=button A100 input=finger\n",
+            ""))
+        self.assertTrue(report["enemy_movement_verified"])
+        self.assertEqual(report["enemy_movement_status"], "moving_confirmed")
+        self.assertTrue(report["enemy_script_order_accepted"])
+        self.assertEqual(report["simulator_building_selection_server_seen"], 1)
+        self.assertEqual(report["simulator_building_buttons_server_seen"], 1)
+        self.assertTrue(report["simulator_building_button_roundtrip_verified"])
+
+    def test_stationary_enemy_and_rejected_button_are_not_verified(self):
+        report = json.loads(self.inspect(
+            "22000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(10,20)\n"
+            "27000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(10,20)\n",
+            "",
+            "wall_ms=2000 stage=SIM_BUILDING_SELECT_QUEUED unit=12 owner=0 raw=1 input=finger\n"
+            "wall_ms=3000 stage=SIM_BUILDING_BUTTON_QUEUED unit=12 command=button A100 input=finger\n", ""))
+        self.assertFalse(report["enemy_movement_verified"])
+        self.assertEqual(report["enemy_movement_status"], "stationary_in_samples")
+        self.assertFalse(report["simulator_building_button_roundtrip_verified"])
+
+    def test_research_button_receipt_is_separate_from_skill_effect(self):
+        report = json.loads(self.inspect(
+            "27000 ms [ORDR_BUILDING_SELECTION] unit=12 owner=0 player=0\n"
+            "28000 ms [ORDR_BUILDING_ACTION] building=12 kind=research button=R001\n",
+            "",
+            "wall_ms=2000 stage=SIM_BUILDING_SELECT_QUEUED unit=12 owner=0 raw=1 input=finger\n"
+            "wall_ms=3000 stage=SIM_BUILDING_BUTTON_QUEUED unit=12 command=research R001 input=finger\n", ""))
+        self.assertEqual(report["simulator_building_buttons_server_seen"], 1)
+
     def test_last_condition_is_not_completed_frame(self):
         output = self.inspect(
             "2000 ms [EVENT_BEFORE_RESUME] ordinal=2 function=BB4\n"
