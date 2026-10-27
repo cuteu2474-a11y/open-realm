@@ -160,6 +160,30 @@ static bool G_SelectionListContains(edict_t *const *selection, uint32_t count, e
     return false;
 }
 
+/* These two ORDR facilities have building models and selectable command
+ * cards but are authored as zero-speed UNITs (not structures). Treat this as
+ * diagnostics only; do not rewrite their pathing, ownership, or JASS types. */
+static bool G_ORDRFacilityForDiagnostics(edict_t const *unit) {
+    return unit && (G_UnitIsStructure(unit) ||
+        unit->class_id == MAKEFOURCC('H','0','C','4') ||
+        unit->class_id == MAKEFOURCC('H','0','5','M'));
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_ordr, facility_diagnostics_accept_unit_based_structures) {
+    edict_t unit = {0};
+    unit.class_id = MAKEFOURCC('H','0','C','4');
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+    unit.class_id = MAKEFOURCC('H','0','5','M');
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+    unit.class_id = MAKEFOURCC('h','f','o','o');
+    T_ASSERT(!G_ORDRFacilityForDiagnostics(&unit));
+    unit.s.flags |= EF_BUILDING;
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+}
+#endif
+
 /* Selection is initiated by the viewer, not by the selected unit's
  * owner. An ORDR difficulty button belongs to Neutral Passive (player 15)
  * but TriggerRegisterPlayerUnitEvent(Player(0), SELECTED) and
@@ -170,7 +194,7 @@ static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
     if (!client || !unit) return;
     evt = G_PublishEventWithSource(unit, type,
                                    G_GetPlayerEntityByNumber(client->ps.number));
-    if (type == EVENT_PLAYER_UNIT_SELECTED && G_UnitIsStructure(unit) &&
+    if (type == EVENT_PLAYER_UNIT_SELECTED && G_ORDRFacilityForDiagnostics(unit) &&
         level.vm && jass_functionbyname(level.vm, "CUN")) {
         static unsigned n;
         if (n++ < 48) {
@@ -1401,7 +1425,7 @@ CLIENTCOMMAND(Button) {
      * buttons or Warcraft stock. Record the pressed code and available route
      * before dispatch, without manufacturing stock or changing map rules. */
     if (level.vm && jass_functionbyname(level.vm, "CUN") &&
-        producer && G_UnitIsStructure(producer)) {
+        producer && G_ORDRFacilityForDiagnostics(producer)) {
         static unsigned button_samples;
         if (button_samples < 64) {
             char detail[304];
@@ -1572,7 +1596,7 @@ CLIENTCOMMAND(Research) {
     }
     memcpy(&abilcode, classname, sizeof(abilcode));
     if (level.vm && jass_functionbyname(level.vm, "CUN") &&
-        ent && G_UnitIsStructure(ent)) {
+        ent && G_ORDRFacilityForDiagnostics(ent)) {
         char detail[128];
         snprintf(detail, sizeof(detail), "building=%u kind=research button=%.4s",
                  (unsigned)ent->s.number, classname);
@@ -1597,7 +1621,7 @@ CLIENTCOMMAND(Upgrade) {
     if (!G_UnitCanSpendResources(client, ent) || !classname || strlen(classname) != 4) return;
     memcpy(&unit_id, classname, sizeof(unit_id));
     if (level.vm && jass_functionbyname(level.vm, "CUN") &&
-        ent && G_UnitIsStructure(ent)) {
+        ent && G_ORDRFacilityForDiagnostics(ent)) {
         char detail[128];
         snprintf(detail, sizeof(detail), "building=%u kind=upgrade button=%.4s",
                  (unsigned)ent->s.number, classname);

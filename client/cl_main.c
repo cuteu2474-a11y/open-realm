@@ -1706,14 +1706,27 @@ static void CL_ORDRSimulatorProbeBuildings(uint32_t now) {
         return;
     }
     if (count >= 3 || now < next_try) return;
+    /* Prefer the two unit-based ORDR facilities from the physical-device
+     * report before the map's many ordinary buildings occupy all three slots. */
+    FOR_LOOP(pass, 2) {
     FOR_LOOP(i, view->num_entities) {
         renderEntity_t const *ent = &view->entities[i];
         bool seen = false;
         if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
             !(ent->flags & RF_UNIT) ||
             (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
-            !(cl.ents[ent->number].current.flags & EF_BUILDING) ||
             (ent->owner != view->player && ent->owner != 15u)) continue;
+        /* H0C4 (vault) and H05M are map-owned, stationary facility units.
+         * Their authored object rows do not set the WC3 building bit; the
+         * original simulator's EF_BUILDING-only filter skipped precisely
+         * these structures despite the real iPad selecting them. */
+        uint32_t const id = cl.ents[ent->number].current.class_id;
+        bool const facility =
+            CL_ORDRSimulatorRawMatch(id, MAKEFOURCC('H','0','C','4')) ||
+            CL_ORDRSimulatorRawMatch(id, MAKEFOURCC('H','0','5','M'));
+        if (!facility && !(cl.ents[ent->number].current.flags & EF_BUILDING))
+            continue;
+        if ((pass == 0 && !facility) || (pass == 1 && facility)) continue;
         FOR_LOOP(k, count) if (visited[k] == ent->number) seen = true;
         if (seen || !CL_ORDRSimulatorTapBuilding(ent->number)) continue;
         selected = ent->number;
@@ -1727,6 +1740,7 @@ static void CL_ORDRSimulatorProbeBuildings(uint32_t now) {
                  (unsigned)cl.ents[selected].current.class_id);
         CL_ORDRTrace(line);
         return;
+    }
     }
     if (now >= next_block) {
         CL_ORDRTrace("SIM_BUILDING_PROBE_BLOCKED reason=no_visible_selectable_building");

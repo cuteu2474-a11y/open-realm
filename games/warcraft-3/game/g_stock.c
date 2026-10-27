@@ -5,6 +5,25 @@
 #include "g_local.h"
 #include "skills/s_skills.h"
 
+/* Stock entries must be valid gameplay objects; a missing *display* model
+ * is not a reason to hide an item/unit from a custom map's merchandise.
+ * OpenRealm already accepts modeled and model-less UnitBalance entries at
+ * spawn. Real stock/charges/costs/exit placement still gate purchases. */
+static bool G_ShopUnitRowValid(UnitBalance_t const *unit, uint32_t id) {
+    return unit && unit->id == id;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_shop, model_missing_does_not_invalidate_unit_stock_row) {
+    UnitBalance_t valid = {0};
+    valid.id = MAKEFOURCC('h','f','o','o');
+    T_ASSERT(G_ShopUnitRowValid(&valid, valid.id));
+    T_ASSERT(!G_ShopUnitRowValid(&valid, MAKEFOURCC('h','b','a','r')));
+    T_ASSERT(!G_ShopUnitRowValid(NULL, valid.id));
+}
+#endif
+
 #define SHOP_DEFAULT_ACTIVATION_RADIUS 450.0f // world units; retail custom-data interaction fallback; used when Aneu/Aall DataA is absent
 
 /* Warsmash and retail unit data treat Makeitems as merchandise alongside
@@ -561,7 +580,6 @@ static void G_InitUnitStock(edict_t *shop) {
     PARSE_LIST(units, unit_name, parse_segment) {
         uint32_t unit_id;
         UnitBalance_t const *unit;
-        UnitUI_t const *ui;
         uint32_t index;
         uint32_t start_delay;
 
@@ -572,15 +590,13 @@ static void G_InitUnitStock(edict_t *shop) {
         }
         memcpy(&unit_id, unit_name, sizeof(unit_id));
         unit = G_UnitBalance(unit_id);
-        if (!unit || unit->id != unit_id) {
+        if (!G_ShopUnitRowValid(unit, unit_id)) {
             fprintf(stderr, "WC3 shop: unresolved Sellunits %.4s on %.4s\n", unit_name, (cstring_t)&shop->class_id);
             continue;
         }
-        ui = G_UnitUI(unit_id);
-        if (!ui || !ui->modelFile || !*ui->modelFile) {
-            fprintf(stderr, "WC3 shop: unit %.4s on unit %.4s has no model\n", unit_name, (cstring_t)&shop->class_id);
-            continue;
-        }
+        /* A purchase can create a unit without a renderable model: the
+         * authored UnitBalance entry (and stock rules) is authoritative. */
+        (void)ui;
         /* Taverns also use Sellunits, but Hero availability/limits are a
          * separate neutral-Hero contract. Do not silently sell them as ordinary mercenaries. */
         if (unit->strength > 0 || unit->agility > 0 || unit->intelligence > 0) {
@@ -928,7 +944,6 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     edict_t *patron;
     edict_t *unit_ent;
     UnitBalance_t const *unit;
-    UnitUI_t const *ui;
     int32_t stock_index;
     uint32_t gold;
     uint32_t lumber;
@@ -945,8 +960,7 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     }
 
     unit = G_UnitBalance(unit_id);
-    ui = G_UnitUI(unit_id);
-    if (!unit || unit->id != unit_id || !ui || !ui->modelFile || !*ui->modelFile) return false;
+    if (!G_ShopUnitRowValid(unit, unit_id)) return false;
     if (shop->stock->units[stock_index].current <= 0) {
         G_ShowCommandErrorKey(clent, "Outofstock", "Out of stock.");
         return false;

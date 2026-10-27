@@ -809,6 +809,18 @@ bool CL_ORDRSimulatorTapWisp(uint32_t number) {
  * The server still resolves the hit, ownership, pathing, and movement. */
 /* Simulator-only: a building uses the same projected iPad finger selection
  * path as an ordinary unit. Never force a server selection here. */
+/* Private simulator allowlist for two original ORDR interactive facilities
+ * represented by Warcraft units, not structures. This is a hit-test hint
+ * only: never apply building pathing or production rules to these units. */
+static bool CL_IsORDRServiceFacilityClass(uint32_t id) {
+    uint32_t const swapped =
+        ((id & 0xffu) << 24) | ((id & 0xff00u) << 8) |
+        ((id & 0xff0000u) >> 8) | (id >> 24);
+    uint32_t const vault = MAKEFOURCC('H','0','C','4');
+    uint32_t const service = MAKEFOURCC('H','0','5','M');
+    return id == vault || id == service || swapped == vault || swapped == service;
+}
+
 bool CL_ORDRSimulatorTapBuilding(uint32_t number) {
     viewDef_t const *view = &cl.viewDef;
     vec2_t point;
@@ -819,7 +831,9 @@ bool CL_ORDRSimulatorTapBuilding(uint32_t number) {
         renderEntity_t const *ent = &view->entities[i];
         if (ent->number != number || !(ent->flags & RF_UNIT) ||
             (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
-            !(cl.ents[number].current.flags & EF_BUILDING)) continue;
+            !(cl.ents[number].current.flags & EF_BUILDING) &&
+            !CL_IsORDRServiceFacilityClass(cl.ents[number].current.class_id))
+            continue;
         if (!CL_ORDRSimulatorProjectWorld(&ent->origin, &point) ||
             !CL_TouchInWorld(point, re.GetWindowSize()) ||
             CL_WindowMouseOver((int)point.x, (int)point.y) ||

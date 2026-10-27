@@ -686,6 +686,27 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
     }
 
     G_ResolveNagaCommandButtonCollisions(ent, buttons, count);
+    /* iPad ORDR facilities H0C4/H05M look like buildings but were authored
+     * as units. Count their actual server-generated command cards separately
+     * from whether the client's HUD renders/clicks them. Never invent
+     * commands for rows whose original map data has none. */
+    if (level.vm && level.time >= 12000 &&
+        jass_functionbyname(level.vm, "CUN") && ui_current_client &&
+        G_GetMainSelectedUnit(ui_current_client) == ent &&
+        (G_UnitIsStructure(ent) ||
+         ent->class_id == MAKEFOURCC('H','0','C','4') ||
+         ent->class_id == MAKEFOURCC('H','0','5','M'))) {
+        static unsigned logged;
+        if (logged++ < 64) {
+            char info[256];
+            snprintf(info, sizeof(info),
+                     "unit=%u raw=0x%08x command_count=%u first=%.32s second=%.32s",
+                     (unsigned)ent->s.number, (unsigned)ent->class_id,
+                     (unsigned)count, count > 0 ? buttons[0].command : "",
+                     count > 1 ? buttons[1].command : "");
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_COMMAND_CARD", info);
+        }
+    }
     return count;
 }
 
