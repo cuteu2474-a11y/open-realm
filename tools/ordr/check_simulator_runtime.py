@@ -97,6 +97,14 @@ def inspect(report):
     for unit in set(wisp_moves) & set(wisp_selects) & wisp_server_selects & wisp_server_moves:
         if unit in observed_movement:
             moved_wisps.add(unit)
+    # Attack animation is only a start signal. Track whether a hit reaches
+    # T_Damage and actually mutates enemy HP, and why earlier gates reject it.
+    attack_windups = re.findall(r"\[ORDR_ATTACK_WINDUP_(?:MELEE|RANGED)\s*\]", jass)
+    attack_hit_attempts = re.findall(r"\[ORDR_ATTACK_HIT_ATTEMPT\s*\]", jass)
+    attack_hp_applied = re.findall(
+        r"\[ORDR_ATTACK_HEALTH_(?:APPLIED|LETHAL)\s*\][^\r\n]*\btarget_owner=5\b", jass)
+    attack_block_reasons = re.findall(r"\[(ORDR_ATTACK_BLOCKED_[A-Z_]+)\s*\]", jass)
+    projectiles_stalled = re.findall(r"\[ORDR_PROJECTILE_STALLED\s*\]", jass)
     # An accepted order is not movement. Compare position samples for the
     # same enemy entity across distinct game-time checkpoints.
     enemy_order_accepts = re.findall(
@@ -202,6 +210,12 @@ def inspect(report):
         "simulator_choice_full_three_tap_roundtrip_verified":
             len(probe_requests) == 3 and len(verified_requests) == 3 and
             [request[1] for request in probe_requests] == ["u005", "u00C", "u006"],
+        "attack_windup_count": len(attack_windups),
+        "attack_hit_attempt_count": len(attack_hit_attempts),
+        "attack_enemy_hp_changed_count": len(attack_hp_applied),
+        "attack_block_reasons": sorted(set(attack_block_reasons)),
+        "attack_projectiles_stalled_count": len(projectiles_stalled),
+        "attack_damage_verified": bool(attack_hp_applied),
         "enemy_wave_sampled_units": len(enemy_positions),
         "enemy_wave_repeatedly_sampled_units": len(repeated_enemies),
         "enemy_wave_moving_units": sorted(moving_enemies),

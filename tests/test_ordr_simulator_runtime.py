@@ -22,6 +22,26 @@ class SimulatorRuntimeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             return completed.stdout
 
+    def test_attack_swing_without_enemy_hp_change_does_not_pass(self):
+        report = json.loads(self.inspect(
+            "22000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=5\n"
+            "23000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=5\n"
+            "24000 ms [ORDR_ATTACK_BLOCKED_TARGET] attacker=11 owner=0 target=51 target_owner=5\n",
+            "", "", ""))
+        self.assertEqual(report["attack_windup_count"], 1)
+        self.assertEqual(report["attack_hit_attempt_count"], 1)
+        self.assertFalse(report["attack_damage_verified"])
+        self.assertIn("ORDR_ATTACK_BLOCKED_TARGET", report["attack_block_reasons"])
+
+    def test_enemy_hp_mutation_is_required_for_damage_verification(self):
+        report = json.loads(self.inspect(
+            "23000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=5\n"
+            "24000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=5\n"
+            "25000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=51 target_owner=5 amount=10 hp=90.0\n",
+            "", "", ""))
+        self.assertEqual(report["attack_enemy_hp_changed_count"], 1)
+        self.assertTrue(report["attack_damage_verified"])
+
     def test_enemy_movement_and_building_button_roundtrip(self):
         report = json.loads(self.inspect(
             "22000 ms [ORDR_SCRIPT_POINT_ORDER] owner=5 accepted=1\n"
