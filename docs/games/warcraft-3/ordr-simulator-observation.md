@@ -73,6 +73,16 @@ guarantee, particularly for map UI, combat, and movement.
   creates its reward. Existing game tests exercise region entry, wisp
   consumption, and reward creation, but movement into **this exact** beacon
   and the actual imported unit table are still unverified in a device run.
+- The engine previously classified an object as a live unit only when its
+  `UnitUI.modelFile` was available. Custom maps can provide a valid
+  `UnitBalance` row with a sparse or absent model row; these spawned as
+  non-units, without `SVF_MONSTER`, and could not fire enter-region triggers.
+  Spawn classification now accepts an authored `UnitBalance.id`, consistent
+  with runtime callback binding. New headless regressions use the real `e0IX`
+  code, `CH` bounds, native JASS enter-region callback and owned reward, and
+  also check the missing-model unit's health and active flags. They verify a
+  position crossing, **not** physical pathing through the imported terrain;
+  the real iPad beacon and random reward table still need device validation.
 - The map's `war3mapImported\\Background.mdx`, its root `Background.tga`,
   `war3mapImported\\ORDRTemplates.toc` and several Discord/dashboard TGAs
   are present in the original archive. Their presence alone does not confirm

@@ -21,7 +21,7 @@ static bool G_LoadMapUnitData(void) {
 static bool G_MapObjectCreatedByMapScript(uint32_t id) {
     if (id == MAKEFOURCC('s', 'l', 'o', 'c') || G_Doodad(id)->id || G_DestructableData(id)->file)
         return false;
-    return G_UnitUI(id)->modelFile || G_ItemData(id)->file;
+    return G_UnitBalance(id)->id || G_UnitUI(id)->modelFile || G_ItemData(id)->file;
 }
 
 static char *G_Orc07SkipScriptSpace(char *cursor, char *end) {
@@ -796,7 +796,11 @@ void SP_CallSpawn(edict_t *edict) {
     } else if (edict->data.DestructableData->file) {
         SP_SpawnDestructable(edict);
         SP_monster_tree(edict);
-    } else if (edict->data.UnitUI->modelFile) {
+    } else if (edict->data.UnitBalance->id || edict->data.UnitUI->modelFile) {
+        /* A sparse custom UnitUI row can intentionally omit the model path.
+         * The authoritative UnitBalance id still denotes a unit: skipping
+         * SP_SpawnUnit left it without EF_UNIT/SVF_MONSTER, so neither point
+         * orders nor enter-region triggers (such as wisp beacons) worked. */
         SP_SpawnUnit(edict);
         SP_monster_unit(edict);
     } else if (edict->data.ItemData->file) {
