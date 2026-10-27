@@ -211,25 +211,43 @@ static void R_MakeWaterTile(war3map_t const *map, uint32_t x, uint32_t y) {
     R_EmitClippedWaterTriangle(triangle_b);
 }
 
-maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {
-    /* R_LoadWaterStyle already reported a missing Water.slk row or texture for this tileset. */
-    if (!R_WaterStyle()->num_frames) return NULL;
-    maplayer_t *mapLayer = ri.MemAlloc(sizeof(maplayer_t));
-    mapLayer->type = MAPLAYERTYPE_WATER;
-    mapLayer->texture = R_WaterStyle()->frames[0]; /* _W3M_DrawAlphaSurfaces selects the animated frame. */
+/* The wet flags, terrain heights, and surface intersection determine vertex
+ * count. SetWaterBaseColor changes only the color attributes, so both initial
+ * creation and a tint update can use the identical deterministic bake. */
+static uint32_t R_BakeMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {
     water_current_vertex = water_vertex_buffer;
     for (uint32_t x = sx * SEGMENT_SIZE; x < (sx + 1) * SEGMENT_SIZE; x++) {
         for (uint32_t y = sy * SEGMENT_SIZE; y < (sy + 1) * SEGMENT_SIZE; y++) {
             R_MakeWaterTile(map, x, y);
         }
     }
-    mapLayer->num_vertices = (uint32_t)(water_current_vertex - water_vertex_buffer);
+    return (uint32_t)(water_current_vertex - water_vertex_buffer);
+}
+
+/* Reuse the existing VAO/VBO if only the tint changed; terrain deformations
+ * use the separate segment-rebuild path because they can change clipping. */
+bool R_UpdateMapSegmentWaterColors(war3map_t const *map, uint32_t sx, uint32_t sy,
+                                   maplayer_t *layer) {
+    if (!layer || layer->type != MAPLAYERTYPE_WATER || !layer->buffer ||
+        !R_WaterStyle()->num_frames) return false;
+    uint32_t const count = R_BakeMapSegmentWater(map, sx, sy);
+    if (count != layer->num_vertices) return false;
+    if (count) R_UpdateVertexArrayObject(layer->buffer, 0, water_vertex_buffer, count);
+    layer->texture = R_WaterStyle()->frames[0];
+    return true;
+}
+
+maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {
+    /* R_LoadWaterStyle already reported a missing Water.slk row or texture for this tileset. */
+    if (!R_WaterStyle()->num_frames) return NULL;
+    uint32_t const count = R_BakeMapSegmentWater(map, sx, sy);
     /* Dry terrain contributes no water geometry. Avoid a zero-vertex buffer
      * upload for each empty segment without changing rendered water. */
-    if (!mapLayer->num_vertices) {
-        ri.MemFree(mapLayer);
-        return NULL;
-    }
-    mapLayer->buffer = R_MakeVertexArrayObject(water_vertex_buffer, mapLayer->num_vertices);
+    if (!count) return NULL;
+    maplayer_t *mapLayer = ri.MemAlloc(sizeof(maplayer_t));
+    mapLayer->type = MAPLAYERTYPE_WATER;
+    mapLayer->texture = R_WaterStyle()->frames[0]; /* _W3M_DrawAlphaSurfaces selects the animated frame. */
+    mapLayer->num_vertices = count;
+    mapLayer->buffer = R_MakeVertexArrayObject(water_vertex_buffer, count);
     return mapLayer;
 }

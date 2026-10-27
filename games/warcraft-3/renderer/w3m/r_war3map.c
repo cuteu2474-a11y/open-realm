@@ -332,9 +332,11 @@ static void R_W3RefreshWaterColors(void) {
      * rebuilds it with the latest authored tint before drawing it. */
     if (R_W3WaterHidden(R_WaterStyle())) return;
     FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments) {
-        maplayer_t *fresh = R_BuildMapSegmentWater(tr.world, segment->sx, segment->sy);
         maplayer_t **link = &segment->layers;
         while (*link && (*link)->type != MAPLAYERTYPE_WATER) link = &(*link)->next;
+        if (*link && R_UpdateMapSegmentWaterColors(tr.world, segment->sx, segment->sy, *link))
+            continue;
+        maplayer_t *fresh = R_BuildMapSegmentWater(tr.world, segment->sx, segment->sy);
         if (*link) {
             maplayer_t *old = *link;
             *link = old->next;
@@ -716,6 +718,41 @@ static void R_ORDRSegmentProgress(cstring_t phase, uint32_t x, uint32_t y,
 #endif
 }
 
+/* W3E wet flags and stored water levels are independent. Record their
+ * relationship once per loaded map so a genuine flooded region can be
+ * distinguished from a dry-ground shading defect without changing map data. */
+typedef struct {
+    uint32_t total, authored_wet, wet_submerged, dry_above;
+} wc3WaterCoverage_t;
+
+static wc3WaterCoverage_t R_W3CountWaterCorners(war3map_t const *map) {
+    wc3WaterCoverage_t counts = {0};
+    if (!map || !map->vertices) return counts;
+    for (uint32_t y = 0; y < map->height; y++) {
+        for (uint32_t x = 0; x < map->width; x++) {
+            war3mapVertex_t const *v = GetWar3MapVertex(map, x, y);
+            float const water = GetWar3MapVertexWaterLevel(v);
+            float const ground = R_GetVertexPosition(map, x, y, true).z;
+            bool const submerged = water > ground + 0.25f;
+            counts.total++;
+            if (v->water) {
+                counts.authored_wet++;
+                if (submerged) counts.wet_submerged++;
+            } else if (submerged) {
+                counts.dry_above++;
+            }
+        }
+    }
+    return counts;
+}
+
+static void R_W3LogWaterCoverage(war3map_t const *map) {
+    wc3WaterCoverage_t const counts = R_W3CountWaterCorners(map);
+    fprintf(stderr, "WC3 W3E water: corners=%u wet=%u submerged_wet=%u dry_above_water=%u\n",
+            (unsigned)counts.total, (unsigned)counts.authored_wet,
+            (unsigned)counts.wet_submerged, (unsigned)counts.dry_above);
+}
+
 static void R_LoadMapSegments(war3map_t const *map) {
     uint32_t const columns = (map->width - 1) / SEGMENT_SIZE;
     uint32_t const rows = (map->height - 1) / SEGMENT_SIZE;
@@ -917,6 +954,7 @@ void _W3M_RegisterMap(char const *mapFilename) {
     R_ORDRMapTrace("W3M_AFTER_BLIGHT");
     R_LoadWaterStyle(map->tileset);
     R_ORDRMapTrace("W3M_AFTER_WATER");
+    R_W3LogWaterCoverage(map);
     R_W3SetMapTerrainOffsets(map);
     R_ORDRMapTrace("W3M_AFTER_TERRAIN_OFFSETS");
     R_W3RebuildCameraHeightMap();

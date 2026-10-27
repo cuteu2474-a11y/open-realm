@@ -2,6 +2,34 @@
 
 For process footprint, allocation profiling, and RAM reduction priorities, see [WC3 memory](memory.md).
 
+## ORDR iPad simulator: water tint transition (October 27, 2026)
+
+The GitHub simulator smoke run `40475640529` passed its workflow and advanced
+into the map, but its observed wall time was far longer than simulated game
+time (roughly 795 seconds to reach 30 seconds of game simulation). Client
+frame logs showed several multi-second draw intervals. Those observations do
+not identify a single CPU or GPU bottleneck, nor do they establish playable
+iPad performance. The simulator is not a substitute for a physical device.
+
+One independently verified source of unnecessary work was
+`SetWaterBaseColor`: entering or leaving the difficulty-selection scene
+invalidated water tint, and `R_W3RefreshWaterColors` reallocated the water
+vertex array, GPU buffer and layer per affected map segment even though tint
+does not change its positions, indices or clipping. The water baker now
+updates that segment's existing buffer using `R_UpdateVertexArrayObject`,
+retaining the VAO and falling back to rebuilding only if vertex counts differ.
+The headless regression captures the original vertex attributes and verifies
+that recoloring preserves geometry while uploading exactly one existing-buffer
+range. This is a reduction in loading/transition work, **not yet a measured
+frame-rate improvement**.
+
+The same revision stops shading dry ground/cliff corners as submerged based
+solely on their inactive W3E water-height fields. A single bounded
+`WC3 W3E water` count at map registration will help the next simulator check
+distinguish authored wet terrain from renderer artifacts. Per the project's
+simulator policy, an ordinary push does not launch the expensive simulator;
+only a separately authorized `[ipad-test]` commit does.
+
 ## September 21 CPU profile: Graveyard update scan
 
 Inspection of `build/perf-full.txt` found about 7K `cpu/cycles/P` samples, no lost samples,

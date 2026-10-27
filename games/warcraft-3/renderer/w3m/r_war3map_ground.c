@@ -184,11 +184,14 @@ static void R_MakeTile(war3map_t const *map, uint32_t x, uint32_t y, uint32_t gr
         GetWar3MapVertexWaterLevel(&tile[1]),
     };
 
+    /* W3E retains an encoded water height at dry corners. Such a value does
+     * not mean the ground is submerged: the authored wet flag controls
+     * whether water-depth shading applies, just as for the water mesh. */
     float const color[] = {
-        GetTileDepth(waterlevel[0], p[0].z),
-        GetTileDepth(waterlevel[1], p[1].z),
-        GetTileDepth(waterlevel[2], p[2].z),
-        GetTileDepth(waterlevel[3], p[3].z),
+        tile[3].water ? GetTileDepth(waterlevel[0], p[0].z) : 1.0f,
+        tile[2].water ? GetTileDepth(waterlevel[1], p[1].z) : 1.0f,
+        tile[0].water ? GetTileDepth(waterlevel[2], p[2].z) : 1.0f,
+        tile[1].water ? GetTileDepth(waterlevel[3], p[3].z) : 1.0f,
     };
 
     struct vertex geom[] = {

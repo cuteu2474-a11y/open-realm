@@ -157,16 +157,38 @@ build/bin/mpqtool -mpq "data/Warcraft III/Frozen Throne/War3x.mpq" cat TerrainAr
 
 ## Known gaps
 
-`SetWaterBaseColor` replaces the per-vertex RGBA returned by `R_WaterDepthColor`.
-`R_W3InvalidateWaterColor` now schedules only water layers of existing map
-segments for replacement on the next world draw. Ground batches, cliff meshes,
-terrain deformation and blight remain untouched; these belong to the separate
-`w3_terrain_dirty_segments` path. Previously the color change rebaked all of
-them, adding costly work during scripted start-up. Regression:
-`renderer_terrain.water_color_change_rebuilds_only_water_layers`.
+`SetWaterBaseColor` multiplies the authored Water.slk RGBA instead of discarding
+the depth-dependent alpha. An alpha-zero override suppresses the water color
+and depth passes. `R_W3InvalidateWaterColor` updates only water layers on the
+next visible world draw; their vertex positions and clipping do not depend on
+the tint. The normal path now rewrites the **existing vertex-buffer range** with
+recalculated color values, preserving the VAO/VBO and its vertex count. A count
+mismatch (for example after unexpected geometry changes) falls back to rebuilding
+that water segment. Ground batches, cliff meshes, terrain deformation and
+blight remain untouched; these belong to the separate `w3_terrain_dirty_segments`
+path. Regression: `renderer_terrain.water_color_change_rebuilds_only_water_layers`
+and `renderer_terrain.water_tint_reuses_existing_vertex_array_and_keeps_geometry`.
 
-If ORDR still appears flooded, compare the W3E wet flags, water/ground
-heights and camera at the same position before and after mode selection.
+W3E encodes water heights at **dry corners** as well as wet ones. Previously the
+ground and cliff shading used that value unconditionally, which could darken dry
+terrain when its inactive water height exceeded the ground. Ground uses the
+four authored wet flags directly; cliff meshes bilinearly interpolate them to
+avoid hard shoreline edges. Real wet corners still use their original depth
+shading. Regressions:
+`renderer_terrain.dry_ground_does_not_inherit_unpainted_water_depth` and
+`renderer_terrain.dry_cliff_face_does_not_inherit_unpainted_water_depth`.
+
+At map registration the renderer logs one `WC3 W3E water` line with corner
+counts for authored wet corners, truly submerged wet corners, and **dry**
+corners whose stored water level is above ground. This distinguishes a real
+authored wet region from misleading height values without modifying the map.
+The synthetic fixture is
+`renderer_terrain.water_coverage_diagnostic_separates_dry_height_from_wet_surface`.
+
+If ORDR still appears flooded, compare the new water coverage counts and the
+W3E wet flags, water/ground heights and camera at the same position before and
+after mode selection. A headless assertion does **not** establish that the iPad
+renderer is visually correct; the next authorized simulator capture must confirm it.
 Lighting changes do not directly alter those heights. Do not modify the
 original map or hide its authored water to evade a renderer issue.
 
