@@ -1404,13 +1404,31 @@ static bool R_W3WalkableSurfaceHit(renderEntity_t const *surface, float x, float
     return true;
 }
 
+/* Classify the bridge/deck models once per frame. Most scene entities cannot
+ * support ground-conforming units, so rescanning them for every unit is wasteful. */
+static uint32_t R_W3CollectWalkableSurfaces(viewDef_t const *viewdef,
+                                            uint32_t *indices, uint32_t capacity) {
+    uint32_t count = 0;
+    FOR_LOOP(i, viewdef->num_entities) {
+        renderEntity_t const *ent = &viewdef->entities[i];
+        if (!(ent->flags & RF_GROUND_SURFACE) || (ent->flags & RF_HIDDEN) || !ent->model) continue;
+        if (count < capacity) indices[count] = i;
+        count++;
+    }
+    return count;
+}
+
 /* Warsmash keeps walkable destructable height as presentation state: the
  * simulation decides whether a unit may traverse the bridge, while the model
  * collision/geoset geometry supplies the exact visual support Z. Preserve the
  * explicit server-authored altitude offset (WC3 FlyHeight) and replace only the
  * coarse destructable-origin support height with the highest authored MDX hit. */
 void R_ConformGroundSurfaces(viewDef_t *viewdef) {
+    static uint32_t surface_indices[MAX_GAME_ENTITIES];
+    uint32_t surface_count;
     if (!viewdef || (viewdef->rdflags & RDF_NOWORLDMODEL)) return;
+
+    surface_count = R_W3CollectWalkableSurfaces(viewdef, surface_indices, MAX_GAME_ENTITIES);
 
     FOR_LOOP(i, viewdef->num_entities) {
         renderEntity_t *ent = &viewdef->entities[i];
@@ -1424,11 +1442,14 @@ void R_ConformGroundSurfaces(viewDef_t *viewdef) {
             continue;
         }
 
-        FOR_LOOP(j, viewdef->num_entities) {
-            renderEntity_t const *surface = &viewdef->entities[j];
+        /* If an unusual view exceeds the fixed scratch cap, preserve the
+         * complete old scan rather than dropping a walkable surface. */
+        bool const overflow = surface_count > MAX_GAME_ENTITIES;
+        FOR_LOOP(j, overflow ? viewdef->num_entities : surface_count) {
+            renderEntity_t const *surface = &viewdef->entities[overflow ? j : surface_indices[j]];
             float hit_z;
 
-            if (!(surface->flags & RF_GROUND_SURFACE)) continue;
+            if (overflow && !(surface->flags & RF_GROUND_SURFACE)) continue;
             if (!R_W3WalkableSurfaceHit(surface, ent->origin.x, ent->origin.y, &hit_z)) continue;
             if (!found_surface || hit_z > authored_support) {
                 authored_support = hit_z;

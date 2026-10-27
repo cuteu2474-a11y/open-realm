@@ -36,24 +36,24 @@ Remaining implementation sequence:
    benchmark is a starting point; verify that its fixture actually enters `monster_think` and ability updates.
    Removing all current lookup self cost has an idealized fixed-work CPU speedup ceiling of about 4x,
    not a predicted FPS gain.
-3. `R_ConformGroundSurfaces` remains a renderer optimization candidate. An earlier capture measured 1.76%
+3. `R_ConformGroundSurfaces` now classifies the visible walkable deck/bridge
+   surfaces once per view into bounded renderer scratch, then traces only
+   those candidates for each conforming unit. It keeps candidate order,
+   highest-hit selection and the authored altitude offset. Before the change,
+   an earlier capture measured 1.76%
    self / 2.19% inclusive; `screenshots/2026-09-25/fixed4/perf-full-Orc04.txt` measures 11.01% self /
    11.12% inclusive with about 3K CPU-cycle samples and no lost samples. Orc03 and Orc04 are different
-   campaign scenes, so this is not an A/B regression measurement. The current nested loops scan the full
-   view entity list for each ground-conforming entity. A possible fix is to gather eligible
-   `RF_GROUND_SURFACE` entity indices once into bounded renderer-owned scratch, then test only those
-   candidates for each eligible `RF_GROUND_CONFORM` entity. Preserve original candidate order and leave
-   `MDLX_TraceWalkableSurface`, highest-hit selection, and `ground_offset` behavior unchanged. This reduces
-   the list work from O(C*N) to O(N+C*S), where N is the view entity count, C the conforming entity count,
-   and S the walkable surface count; add spatial filtering only if a follow-up profile shows the exact MDX
-   traces still dominate.
+   campaign scenes, so this is not an A/B regression measurement. The new
+   classification reduces list work from O(C*N) to O(N+C*S), where N is the
+   view entity count, C the conforming entity count, and S the walkable surface
+   count. Add spatial filtering only if a follow-up profile shows the exact
+   MDX traces still dominate.
 
-   Test first in the headless renderer suite using the production `R_ConformGroundSurfaces` path: cover no
-   surfaces/no hit, hidden or model-less entities, overlapping surfaces (highest hit wins), altitude offsets,
-   and `RDF_NOWORLDMODEL`. In the test build, count entity classification visits and exact trace calls; a scene
-   with many unrelated entities, several conformers, and few surfaces should fail the old repeated full-list
-   scan bound and pass with one collection pass plus C-by-S traces. Then repeat the same bounded Orc04 scene
-   and record N/C/S counts and repeated profile or frame-time measurements.
+   Headless regression `renderer_game.walkable_surface_candidates_skip_unrelated_and_hidden_entities`
+   covers the collector, hidden/model-less candidates, exact trace count and
+   `RDF_NOWORLDMODEL`; existing bridge/elevator tests protect altitude rules.
+   Next repeat a bounded Orc04 scene with matched N/C/S and frame times; the
+   historic CPU profile does not predict an iPad frame-rate gain.
 4. `MDLX_BindBoneMatrices` is 2.01% inclusive, including geometry and attachment collection. Investigate
    sharing the already evaluated entity pose with `MDLX_CollectAttachmentPositions`; global scratch matrices
    can be overwritten by another model, so reuse requires explicit lifetime/identity. Preserve interpolation,

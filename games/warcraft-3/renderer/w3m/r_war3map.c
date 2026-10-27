@@ -30,13 +30,12 @@ static float *w3_terrain_offsets;
 static uint8_t *w3_terrain_dirty_segments;
 static uint32_t w3_terrain_offset_count, w3_deform_last_update, w3_terrain_segment_count;
 static bool w3_terrain_rebuild_pending;
+static bool w3_water_color_rebuild_pending;
 static bool w3_occlusion_enabled = true;
 
-/* Rebuild the actual water vertex colors when JASS replaces their tint. */
+/* Water tint changes only water vertices; no ground/cliff rebake is needed. */
 void R_W3InvalidateWaterColor(void) {
-    if (!tr.world || !w3_terrain_dirty_segments) return;
-    memset(w3_terrain_dirty_segments, 1, w3_terrain_segment_count);
-    w3_terrain_rebuild_pending = true;
+    if (tr.world && g_mapSegments) w3_water_color_rebuild_pending = true;
 }
 
 void R_W3SetOcclusionEnabled(bool enabled) {
@@ -319,6 +318,25 @@ static void R_FreeMapLayers(maplayer_t * *layers) {
     }
 }
 
+/* Keep global ground buffers, cliffs, their welds and segment bounds intact
+ * when the map changes SetWaterBaseColor. Only water has per-vertex tint. */
+static void R_W3RefreshWaterColors(void) {
+    if (!w3_water_color_rebuild_pending || !tr.world) return;
+    FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments) {
+        maplayer_t *fresh = R_BuildMapSegmentWater(tr.world, segment->sx, segment->sy);
+        maplayer_t **link = &segment->layers;
+        while (*link && (*link)->type != MAPLAYERTYPE_WATER) link = &(*link)->next;
+        if (*link) {
+            maplayer_t *old = *link;
+            *link = old->next;
+            old->next = NULL;
+            R_FreeMapLayers(&old);
+        }
+        R_AddMapSegmentLayer(segment, fresh);
+    }
+    w3_water_color_rebuild_pending = false;
+}
+
 static void R_FreeMapSegments(void) {
     while (g_mapSegments) {
         mapsegment_t *segment = g_mapSegments;
@@ -343,6 +361,7 @@ static void R_W3ClearTerrainDeformations(void) {
     w3_terrain_segment_count = 0;
     w3_deform_last_update = 0;
     w3_terrain_rebuild_pending = false;
+    w3_water_color_rebuild_pending = false;
     w3_deform_bounds_valid = false;
     memset(w3_deformations, 0, sizeof(w3_deformations));
 }
@@ -960,6 +979,8 @@ void _W3M_DrawWorld(void) {
     }
     if (tr.viewDef.rdflags & RDF_NOWORLDMODEL)
         return;
+
+    R_W3RefreshWaterColors();
 
     R_Call(glEnable, GL_DEPTH_TEST);
     R_Call(glDepthMask, GL_TRUE);

@@ -2008,8 +2008,16 @@ void R_BuildCameraHeightMap(cameraHeightBuild_t const *build) { (void)build; }
 void R_FreeCameraHeightMap(cameraHeightMap_t *map) { (void)map; }
 void R_ShutdownFogOfWar(void) {}
 void R_InitFogOfWar(uint32_t width, uint32_t height) { (void)width; (void)height; }
+static bool test_water_layer_enabled;
+static uint32_t test_water_layer_builds;
 maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {
-    (void)map; (void)sx; (void)sy; return NULL;
+    (void)map; (void)sx; (void)sy;
+    test_water_layer_builds++;
+    if (!test_water_layer_enabled) return NULL;
+    maplayer_t *layer = test_alloc(sizeof(*layer));
+    memset(layer, 0, sizeof(*layer));
+    layer->type = MAPLAYERTYPE_WATER;
+    return layer;
 }
 static struct { uint32_t enables, disables, offsets; float factor, units; } splat_bias;
 static void test_splat_enable(GLenum cap) { if (cap == GL_POLYGON_OFFSET_FILL) splat_bias.enables++; }
@@ -2208,6 +2216,51 @@ TEST(renderer_terrain, deformation_rebuild_rebakes_blight_layer) {
     R_FreeMapSegments();
     R_W3ClearTerrainDeformations();
     tr.world = saved_world;
+}
+
+/* Changing only water tint must not rebake the global ground atlas or cliff
+ * geometry. A full terrain rebuild is costly and can expose stale joins. */
+TEST(renderer_terrain, water_color_change_rebuilds_only_water_layers) {
+    war3map_t map = { .width = SEGMENT_SIZE + 1, .height = SEGMENT_SIZE + 1 };
+    war3map_t const *saved_world = tr.world;
+    mapsegment_t *saved_segments = g_mapSegments;
+    maplayer_t *saved_ground = g_groundLayers;
+    maplayer_t cliff = { .type = MAPLAYERTYPE_CLIFF };
+    mapsegment_t segment = { .layers = &cliff };
+    int freed_before;
+    ri.MemAlloc = test_alloc; ri.MemFree = test_free;
+    tr.world = &map; g_mapSegments = &segment;
+    R_W3SetMapTerrainOffsets(&map);
+    g_groundLayers = &cliff;
+    blight_layer_generation = 7;
+    test_water_layer_enabled = true;
+    test_water_layer_builds = 0;
+
+    R_W3InvalidateWaterColor();
+    T_ASSERT(!w3_terrain_rebuild_pending);
+    T_EQ(w3_terrain_dirty_segments[0], 0);
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 1);
+    T_ASSERT(segment.layers->type == MAPLAYERTYPE_WATER);
+    T_ASSERT(segment.layers->next == &cliff);
+    T_ASSERT(g_groundLayers == &cliff);
+    T_EQ(blight_layer_generation, 7);
+    freed_before = free_count;
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 1); /* no per-frame rebuild */
+    R_W3InvalidateWaterColor();
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 2);
+    T_ASSERT(segment.layers != &cliff);
+    T_ASSERT(segment.layers->next == &cliff);
+    T_EQ(blight_layer_generation, 7);
+    T_EQ(free_count, freed_before + 1); /* replaced water buffer was released */
+
+    segment.layers->next = NULL;
+    R_FreeMapLayers(&segment.layers);
+    test_water_layer_enabled = false;
+    R_W3ClearTerrainDeformations();
+    tr.world = saved_world; g_mapSegments = saved_segments; g_groundLayers = saved_ground;
 }
 
 TEST(renderer_terrain, splat_draw_biases_coplanar_terrain_geometry) {

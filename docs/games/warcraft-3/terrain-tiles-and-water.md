@@ -157,6 +157,19 @@ build/bin/mpqtool -mpq "data/Warcraft III/Frozen Throne/War3x.mpq" cat TerrainAr
 
 ## Known gaps
 
+`SetWaterBaseColor` replaces the per-vertex RGBA returned by `R_WaterDepthColor`.
+`R_W3InvalidateWaterColor` now schedules only water layers of existing map
+segments for replacement on the next world draw. Ground batches, cliff meshes,
+terrain deformation and blight remain untouched; these belong to the separate
+`w3_terrain_dirty_segments` path. Previously the color change rebaked all of
+them, adding costly work during scripted start-up. Regression:
+`renderer_terrain.water_color_change_rebuilds_only_water_layers`.
+
+If ORDR still appears flooded, compare the W3E wet flags, water/ground
+heights and camera at the same position before and after mode selection.
+Lighting changes do not directly alter those heights. Do not modify the
+original map or hide its authored water to evade a renderer issue.
+
 - W3I `waterColor` (TFT custom water tint) is parsed into `mapInfo_t` but not applied.
 - `Water.slk` `alphaMode`, `lighting` and shoreline (`shore*`) columns are not used.
 
