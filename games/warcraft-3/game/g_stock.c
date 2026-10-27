@@ -594,9 +594,7 @@ static void G_InitUnitStock(edict_t *shop) {
             fprintf(stderr, "WC3 shop: unresolved Sellunits %.4s on %.4s\n", unit_name, (cstring_t)&shop->class_id);
             continue;
         }
-        /* A purchase can create a unit without a renderable model: the
-         * authored UnitBalance entry (and stock rules) is authoritative. */
-        (void)ui;
+        /* Valid UnitBalance rows remain saleable even without a visual model. */
         /* Taverns also use Sellunits, but Hero availability/limits are a
          * separate neutral-Hero contract. Do not silently sell them as ordinary mercenaries. */
         if (unit->strength > 0 || unit->agility > 0 || unit->intelligence > 0) {
