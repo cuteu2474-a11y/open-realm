@@ -33,6 +33,12 @@ static bool w3_terrain_rebuild_pending;
 static bool w3_water_color_rebuild_pending;
 static bool w3_occlusion_enabled = true;
 
+/* Warcraft's SetWaterBaseColor(..., 0) hides the water surface, including its
+ * depth writes. ORDR uses it for the original difficulty-choice scene. */
+static bool R_W3WaterHidden(wc3WaterStyle_t const *style) {
+    return style && style->base_override_enabled && style->base_override.a == 0;
+}
+
 /* Water tint changes only water vertices; no ground/cliff rebake is needed. */
 void R_W3InvalidateWaterColor(void) {
     if (tr.world && g_mapSegments) w3_water_color_rebuild_pending = true;
@@ -322,6 +328,9 @@ static void R_FreeMapLayers(maplayer_t * *layers) {
  * when the map changes SetWaterBaseColor. Only water has per-vertex tint. */
 static void R_W3RefreshWaterColors(void) {
     if (!w3_water_color_rebuild_pending || !tr.world) return;
+    /* Retain the old GPU geometry while invisible; the first visible frame
+     * rebuilds it with the latest authored tint before drawing it. */
+    if (R_W3WaterHidden(R_WaterStyle())) return;
     FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments) {
         maplayer_t *fresh = R_BuildMapSegmentWater(tr.world, segment->sx, segment->sy);
         maplayer_t **link = &segment->layers;
@@ -1019,6 +1028,8 @@ void _W3M_DrawWorld(void) {
 void _W3M_DrawAlphaSurfaces(void) {
     if (tr.viewDef.rdflags & RDF_NOWORLDMODEL)
         return;
+    /* Transparent water must not occlude models in the depth-only prepass. */
+    if (R_W3WaterHidden(R_WaterStyle())) return;
 
     /* Establish the translucent water plane in depth before drawing alpha
      * unit geosets. That lets fragments above water pass and fragments below

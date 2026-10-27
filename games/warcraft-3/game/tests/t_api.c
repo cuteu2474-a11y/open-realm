@@ -1033,6 +1033,23 @@ TEST(wc3_api, ordr_single_connected_player_preserves_warcraft_multiplayer) {
     game.clients[1].mapplayer = &level.mapinfo->players[1];
 
     strlcpy(level.map_path, "Maps\\ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    /* Original ORDR registers the BJF player census at 0.02 seconds; the
+     * local slot must be locatable even before the network handshake. */
+    client->connected = false;
+    T_ASSERT(G_IsSinglePlayer());
+    T_ASSERT(G_SinglePlayerLocalClient() == client);
+    game.clients[0].jass.controller = 0;
+    game.clients[1].jass.controller = 0;
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        " local integer i = 0\n local integer active = 0\n"
+        " loop\n exitwhen i >= 2\n"
+        " if GetPlayerSlotState(Player(i)) == PLAYER_SLOT_STATE_PLAYING and GetPlayerController(Player(i)) == MAP_CONTROL_USER then\n"
+        "  set active = active + 1\n endif\n set i = i + 1\n endloop\n"
+        " call BJassAssert(active == 1, \"ORDR bootstrap BJF misidentified party\")\n"
+        " call BJassAssert(GetPlayerSlotState(Player(1)) == PLAYER_SLOT_STATE_EMPTY, \"vacant extra human is playing\")\n"
+        "endfunction\n"));
+    client->connected = true;
     T_ASSERT(G_IsSinglePlayer());
     T_ASSERT(G_SinglePlayerLocalClient() == client);
 

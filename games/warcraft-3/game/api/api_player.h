@@ -143,8 +143,15 @@ uint32_t GetPlayerController(jass_t *j) {
     bool const ordr_solo = level.map_path[0] &&
         strstr(level.map_path, "ORDR_S2_") != NULL &&
         G_SinglePlayerLocalClient() != NULL;
+    /* ORDR's original BJF census is scheduled only 0.02 seconds after
+     * loading. The first local human is already assigned by G_SpawnEntities
+     * even if ClientBegin's connection handshake has not finished. Do not
+     * turn that single bootstrap owner into a vacant lobby slot. */
+    bool const bootstrap_local = ordr_solo && level.framenum <= 1 &&
+        client && !client->connected &&
+        G_SinglePlayerLocalClient() == client;
     controller = WC3_ORDRActiveSlotController(
-        controller, ordr_solo, client && client->connected);
+        controller, ordr_solo, client && (client->connected || bootstrap_local));
     return JassPushMapControlHandle(j, controller);
 }
 uint32_t GetPlayerSlotState(jass_t *j) {
@@ -157,7 +164,10 @@ uint32_t GetPlayerSlotState(jass_t *j) {
     if (client && client->jass.removed) {
         state = 2;
     } else if (client && client->mapplayer &&
-        ((client->mapplayer->playerType == kPlayerTypeHuman && client->connected) ||
+        ((client->mapplayer->playerType == kPlayerTypeHuman &&
+          (client->connected ||
+           (level.framenum <= 1 && strstr(level.map_path, "ORDR_S2_") &&
+            G_SinglePlayerLocalClient() == client))) ||
          client->mapplayer->playerType == kPlayerTypeComputer))
     {
         state = 1;

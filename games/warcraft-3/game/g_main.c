@@ -1308,15 +1308,20 @@ bool G_IsSinglePlayer(void) {
     uint32_t humans = 0;
 
     /* ORDR declares several human-capable slots even for a real solo
-     * session. Count connected players for this map only. Warcraft III's
-     * own multiplayer menus, transport, and other maps are unaffected. */
+     * session. Its original BJF/CIh startup can query the local player
+     * before ClientBegin has marked the slot connected. An empty connection
+     * list at this stage is not evidence of a multiplayer session: avoid
+     * falling back to the authored human-slot count and making the map's
+     * solo helpers unavailable during initialization. Once any clients
+     * connect, preserve the actual occupancy distinction. Other maps keep
+     * their standard authored-slot semantics. */
     if (strstr(level.map_path, "ORDR_S2_") || strstr(level.map_path, "ordr_s2_")) {
         uint32_t connected = 0;
         if (game.clients) {
             FOR_LOOP(i, game.max_clients)
                 if (game.clients[i].connected) connected++;
         }
-        if (connected) return connected == 1;
+        return connected <= 1;
     }
     if (!level.mapinfo) return true;
     FOR_LOOP(i, MAX_PLAYERS) {

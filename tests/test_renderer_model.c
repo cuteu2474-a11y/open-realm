@@ -2263,6 +2263,19 @@ TEST(renderer_terrain, water_color_change_rebuilds_only_water_layers) {
     tr.world = saved_world; g_mapSegments = saved_segments; g_groundLayers = saved_ground;
 }
 
+TEST(renderer_terrain, original_ordr_zero_alpha_water_has_no_occluding_surface) {
+    wc3WaterStyle_t style = { .base_override_enabled = true,
+        .base_override = { 255, 255, 255, 0 } };
+    /* The original ORDR choice callback uses SetWaterBaseColor(255,255,255,0).
+     * The invisible plane must neither draw nor write depth over units. */
+    T_ASSERT(R_W3WaterHidden(&style));
+    style.base_override.a = 255;
+    T_ASSERT(!R_W3WaterHidden(&style));
+    style.base_override_enabled = false;
+    style.base_override.a = 0;
+    T_ASSERT(!R_W3WaterHidden(&style)); /* per-tileset water still applies */
+}
+
 TEST(renderer_terrain, splat_draw_biases_coplanar_terrain_geometry) {
     memset(&splat_bias, 0, sizeof(splat_bias));
     R_SetSplatDepthBias(true);
@@ -2387,6 +2400,20 @@ TEST(renderer_terrain, water_depth_color_follows_water_slk_bands) {
     c = R_WaterDepthColor(&custom, 64.f / 128); T_EQ(c.b, 103); T_EQ(c.a, 104);
     c = R_WaterDepthColor(&custom, 68.f / 128); T_EQ(c.r, 226); T_EQ(c.a, 229);
     c = R_WaterDepthColor(&custom, 2.0f); T_EQ(c.g, 252); T_EQ(c.a, 254);
+
+    /* ORDR's original script restores default water with white/255; the
+     * shallow alpha still comes from Water.slk instead of becoming opaque. */
+    wc3WaterStyle_t tinted = custom;
+    tinted.base_override_enabled = true;
+    tinted.base_override = (color32_t){255, 255, 255, 255};
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 51); T_EQ(c.g, 52); T_EQ(c.a, 54);
+    tinted.base_override.a = 0;
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 51); T_EQ(c.a, 0);
+    tinted.base_override = (color32_t){128, 255, 255, 128};
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 26); T_EQ(c.g, 52); T_EQ(c.a, 27);
 }
 /* The cliff material test needs the real bake/finalize lifecycle, but no OpenGL context. */
 static uint32_t cliff_buffer_upload_count;

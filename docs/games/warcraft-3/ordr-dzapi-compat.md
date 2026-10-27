@@ -316,7 +316,7 @@ prove iOS rendering or that gameplay after difficulty selection is stable.
 
 테스트 운영 규칙: 작은 커밋마다 iPad 시뮬레이터/IPA를 돌리지 않는다.
 일반 커밋만으로 iPad 시뮬레이터/IPA 작업을 실행하지 않는다. iPad 시뮬레이터는
-수동 실행 또는 명시적인 `[ordr-simulator]` 배치 커밋으로만 시작하고,
+수동 `workflow_dispatch`로만 시작하고(커밋 메시지에 관계없이 푸시로는 실행하지 않음),
 IPA 빌드는 계속 수동 실행만 허용한다. 원인 분석이 완료되지 않은 사항은
 `미검증`/`미해결`로 명시한다.
 

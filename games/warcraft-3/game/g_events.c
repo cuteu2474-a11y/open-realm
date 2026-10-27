@@ -65,8 +65,7 @@ void G_ORDRTryAutoOfflineMode(void) {
         !jass_hasfunction(level.vm, "CUO") ||
         !jass_hasfunction(level.vm, "CUW") ||
         !jass_hasfunction(level.vm, "CUN") ||
-        !jass_hasfunction(level.vm, "CIh") ||
-        level.time > 15000)
+        !jass_hasfunction(level.vm, "CIh"))
         return;
 
     client = G_SinglePlayerLocalClient();
@@ -74,7 +73,11 @@ void G_ORDRTryAutoOfflineMode(void) {
     player = G_GetPlayerEntityByNumber(client->ps.number);
     if (!player) return;
 
-    if (!level.ordr_offline_chat_registered_early && level.time <= 1000) {
+    /* A slow iPad load may complete ClientBegin after the first second.
+     * The original command still has to be present before the 2.1s offline
+     * dispatch, so prepare it on the first *connected* frame rather than
+     * irrevocably skipping the registration after a fixed 1s wall. */
+    if (!level.ordr_offline_chat_registered_early) {
         bool already_registered = false;
         FOR_EACH_EVENT(reg) {
             if (reg->type != EVENT_PLAYER_CHAT || !G_EventSubjectIsCurrent(reg) ||

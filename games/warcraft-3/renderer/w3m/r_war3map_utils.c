@@ -42,7 +42,6 @@ struct color32 MakeColor(float r, float g, float b, float a) {
 /* Water.slk colors interpolate across two depth bands; depth is in tiles below the water surface.
  * Band edges follow HiveWE/Warsmash: shallow from 10/128 to 64/128, deep from 64/128 to 72/128. */
 color32_t R_WaterDepthColor(wc3WaterStyle_t const *style, float depth) {
-    if (style && style->base_override_enabled) return style->base_override;
     float const min_depth = 10.f / 128, deep_level = 64.f / 128, max_depth = 72.f / 128;
     color32_t const *from = &style->shallow_min, *to = &style->shallow_max;
     float t;
@@ -53,12 +52,25 @@ color32_t R_WaterDepthColor(wc3WaterStyle_t const *style, float depth) {
         from = &style->deep_min; to = &style->deep_max;
         t = MIN(depth - deep_level, max_depth - deep_level) / (max_depth - deep_level);
     }
-    return (color32_t) {
+    color32_t color = {
         .r = (uint8_t)lroundf(LerpNumber(from->r, to->r, t)),
         .g = (uint8_t)lroundf(LerpNumber(from->g, to->g, t)),
         .b = (uint8_t)lroundf(LerpNumber(from->b, to->b, t)),
         .a = (uint8_t)lroundf(LerpNumber(from->a, to->a, t)),
     };
+    /* The map's SetWaterBaseColor is an RGBA tint on top of the authored
+     * Water.slk depth bands. White/255 restores native water; it must not
+     * replace every shallow pixel's alpha with opaque 255. ORDR explicitly
+     * alternates white/0 (choice screen) and white/255 (gameplay). Treating
+     * the latter as an opaque replacement covered its shallow arena with a
+     * white water sheet despite the original terrain being intact. */
+    if (style->base_override_enabled) {
+        color.r = ((uint32_t)color.r * style->base_override.r + 127) / 255;
+        color.g = ((uint32_t)color.g * style->base_override.g + 127) / 255;
+        color.b = ((uint32_t)color.b * style->base_override.b + 127) / 255;
+        color.a = ((uint32_t)color.a * style->base_override.a + 127) / 255;
+    }
+    return color;
 }
 
 /* Tile atlases are four cells tall; an extended atlas is twice as wide and adds 16 variations on its right

@@ -164,15 +164,46 @@ static uint32_t MultiboardTeamRows(uint32_t viewer) {
     return count;
 }
 
-/* strlen() counts three UTF-8 bytes per Hangul syllable and previously
- * expanded the player column threefold on Korean clients. */
-static size_t MultiboardUTF8Chars(cstring_t value) {
-    size_t chars = 0;
-    if (!value) return 0;
-    for (unsigned char const *p = (unsigned char const *)value; *p; p++)
-        if ((*p & 0xc0u) != 0x80u) chars++;
-    return chars;
+/* Names can contain Warcraft inline color codes. Their ten ASCII bytes are
+ * not visible text; treating them as part of a column's width pushes score
+ * columns out of alignment on ORDR's colored Korean player names. */
+static bool MultiboardIsColorCode(unsigned char const *p) {
+    if (p[0] != '|' || (p[1] != 'c' && p[1] != 'C')) return false;
+    for (unsigned i = 2; i < 10; ++i) {
+        unsigned char c = p[i];
+        if (!c || !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
 }
+
+/* One Unicode codepoint per glyph instead of one character per UTF-8 byte.
+ * Ignore inline colors, count a literal || as one visible pipe, and measure
+ * the longest line when a scripted name contains Warcraft's |n separator. */
+static size_t MultiboardUTF8Chars(cstring_t value) {
+    size_t chars = 0, widest = 0;
+    if (!value) return 0;
+    for (unsigned char const *p = (unsigned char const *)value; *p; ++p) {
+        if (MultiboardIsColorCode(p)) { p += 9; continue; }
+        if (p[0] == '|' && (p[1] == 'r' || p[1] == 'R')) { ++p; continue; }
+        if (p[0] == '|' && (p[1] == 'n' || p[1] == 'N')) {
+            widest = MAX(widest, chars); chars = 0; ++p; continue;
+        }
+        if (p[0] == '|' && p[1] == '|') { ++chars; ++p; continue; }
+        if ((*p & 0xc0u) != 0x80u) ++chars;
+    }
+    return MAX(widest, chars);
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_multiboard, colored_korean_names_do_not_expand_scoreboard_columns) {
+    T_EQ(MultiboardUTF8Chars("루피"), 2u);
+    T_EQ(MultiboardUTF8Chars("|cffff0000루피|r"), 2u);
+    T_EQ(MultiboardUTF8Chars("|cff00ff00A||B|r"), 3u);
+    T_EQ(MultiboardUTF8Chars("ABC|n가나"), 3u);
+}
+#endif
 
 /* MultiboardSetItemWidth / MultiboardSetItemsWidth write per-cell widths.
  * The old renderer threw them away and drew every column at equal width:
