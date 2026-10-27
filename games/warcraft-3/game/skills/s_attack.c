@@ -1026,8 +1026,8 @@ void attack_melee(edict_t *self) {
      * possible scheduling of an authored zero DamagePoint. Preserve the
      * "attack" animation for its entire first frame and commit a single hit
      * on the next think tick (unit_runwait consumes positive waits only). */
-    self->wait = MAX(FRAMETIME / 1000.0f,
-                     ACTIVE_ATTACK(self)->damagePoint / divisor);
+    self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    if (self->wait <= 0.0f) self->wait = FRAMETIME / 1000.0f;
     ordr_trace_combat("ORDR_ATTACK_WINDUP_MELEE", self, self->goalentity,
                       (int)ACTIVE_ATTACK(self)->damageBase);
 }
@@ -1056,8 +1056,8 @@ void attack_ranged(edict_t *self) {
     S_PermanentInvisibilityReveal(self);
     attack_set_cooldown(self, ACTIVE_ATTACK(self)->cooldown / divisor);
     unit_setmove(self, &attack_move_ranged);
-    self->wait = MAX(FRAMETIME / 1000.0f,
-                     ACTIVE_ATTACK(self)->damagePoint / divisor);
+    self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    if (self->wait <= 0.0f) self->wait = FRAMETIME / 1000.0f;
     ordr_trace_combat("ORDR_ATTACK_WINDUP_RANGED", self, self->goalentity,
                       (int)ACTIVE_ATTACK(self)->damageBase);
 }
@@ -1175,7 +1175,8 @@ static void attack_ground_ranged(edict_t *ent) {
     float divisor = attack_speed_divisor(ent);
     S_PermanentInvisibilityReveal(ent);
     unit_setmove(ent, &attack_ground_move_ranged);
-    ent->wait = MAX(FRAMETIME / 1000.0f, ent->attack1.damagePoint / divisor);
+    ent->wait = ent->attack1.damagePoint / divisor;
+    if (ent->wait <= 0.0f) ent->wait = FRAMETIME / 1000.0f;
     if (ent->sound.attack) G_PlaySound(NULL, ent, CHAN_WEAPON, ent->sound.attack, 1.0f, 1.0f, 0.0f);
 }
 
