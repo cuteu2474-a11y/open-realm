@@ -61,6 +61,42 @@ def inspect(report):
         client)
     probe_states = re.findall(
         r"stage=SIM_CHOICE_PROBE_STATE ([^\r\n]+)", client)
+    wisp_selects = re.findall(
+        r"stage=SIM_WISP_SELECT_QUEUED unit=(\d+) raw=(?:e0IX|e0HP) input=finger", client)
+    wisp_moves = re.findall(
+        r"stage=SIM_WISP_MOVE_QUEUED unit=(\d+) target=\([-\d.]+,[-\d.]+\) input=two_finger", client)
+    wisp_server_selects = set(re.findall(
+        r"\[ORDR_WORLD_SELECT_COMMAND\s*\][^\r\n]*\bunit=(\d+)[^\r\n]*\bcan_select=1\b", jass))
+    wisp_server_moves = set(re.findall(
+        r"\[ORDR_WORLD_SMART_COMMAND\s*\][^\r\n]*\bmode=(?:point|target)\b[^\r\n]*\bissued=1\b[^\r\n]*\bunit=(\d+)\b", jass))
+    # Compare the selected wisp's position immediately before and after the
+    # queued order, not two points from before the requested movement.
+    latest_pre_move_position = {}
+    movement_start_position = {}
+    observed_movement = set()
+    attempted_moves = set()
+    for line in client.splitlines():
+        position = re.search(r"stage=SIM_WISP_POSITION unit=(\d+) pos=\(([-\d.]+),([-\d.]+)\)", line)
+        movement = re.search(r"stage=SIM_WISP_MOVE_QUEUED unit=(\d+)\b", line)
+        if movement:
+            unit = movement.group(1)
+            attempted_moves.add(unit)
+            if unit in latest_pre_move_position:
+                movement_start_position[unit] = latest_pre_move_position[unit]
+        elif position:
+            unit, x, y = position.groups()
+            point = (float(x), float(y))
+            if unit not in attempted_moves:
+                latest_pre_move_position[unit] = point
+            elif unit in movement_start_position:
+                start = movement_start_position[unit]
+                if (point[0] - start[0]) ** 2 + (point[1] - start[1]) ** 2 > 16.0:
+                    observed_movement.add(unit)
+    # Do not credit unrelated units' movement or reject/undelivered orders.
+    moved_wisps = set()
+    for unit in set(wisp_moves) & set(wisp_selects) & wisp_server_selects & wisp_server_moves:
+        if unit in observed_movement:
+            moved_wisps.add(unit)
     background_audits = re.findall(
         r"\[CHOICE_BACKGROUND_AUDIT\s*\]\s+B100_instances=(\d+) visible=(\d+) model_indices=(\d+)",
         jass)
@@ -126,6 +162,15 @@ def inspect(report):
         "simulator_choice_full_three_tap_roundtrip_verified":
             len(probe_requests) == 3 and len(verified_requests) == 3 and
             [request[1] for request in probe_requests] == ["u005", "u00C", "u006"],
+        "simulator_wisp_selection_requested": bool(wisp_selects),
+        "simulator_wisp_selection_server_seen": bool(set(wisp_selects) & wisp_server_selects),
+        "simulator_wisp_move_requested": bool(wisp_moves),
+        "simulator_wisp_move_server_accepted":
+            bool(set(wisp_moves) & set(wisp_selects) & wisp_server_moves),
+        "simulator_wisp_position_changed": bool(moved_wisps),
+        "simulator_wisp_beacon_reward_verified": False,
+        "simulator_wisp_probe_blocked": re.findall(
+            r"stage=SIM_WISP_PROBE_BLOCKED reason=([^\s]+)", client)[-12:],
         "game_start_jass_called": "CUM" in choice_actions,
         "physical_touch_verified": False,
         "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,

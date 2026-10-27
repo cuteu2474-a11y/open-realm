@@ -720,16 +720,51 @@ static bool CL_ORDRSimulatedDirectTouch(SDL_TouchID id) {
     return true;
 }
 
-bool CL_ORDRSimulatorTapChoice(uint32_t number) {
+static bool CL_ORDRSimulatorProjectWorld(vec3_t const *origin, vec2_t *point) {
     viewDef_t const *view = &cl.viewDef;
     size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
-    rect_t viewport = view->viewport;
+    rect_t const viewport = view->viewport;
+    if (!origin || !point || !win.width || !win.height ||
+        viewport.w <= 0.0f || viewport.h <= 0.0f) return false;
+    vec3_t const ndc = Matrix4_multiply_vector3(&view->viewProjectionMatrix, origin);
+    if (!isfinite(ndc.x) || !isfinite(ndc.y) ||
+        ndc.x < -1.0f || ndc.x > 1.0f ||
+        ndc.y < -1.0f || ndc.y > 1.0f) return false;
+    *point = (vec2_t){
+        (viewport.x + (ndc.x + 1.0f) * viewport.w * 0.5f) * win.width,
+        (1.0f - viewport.y - (ndc.y + 1.0f) * viewport.h * 0.5f) * win.height
+    };
+    return true;
+}
+
+static bool CL_ORDRSimulatorFingerTap(vec2_t point, SDL_FingerID finger_id) {
+    size2_t const win = re.GetWindowSize();
+    uint32_t const before = cls.netchan.message.cursize;
+    bool (*saved_direct)(SDL_TouchID) = touch_is_direct;
+    SDL_TouchFingerEvent event = {
+        .type = SDL_FINGERDOWN,
+        .timestamp = SDL_GetTicks(),
+        .touchId = (SDL_TouchID)-9100,
+        .fingerId = finger_id,
+        .x = point.x / win.width,
+        .y = point.y / win.height,
+    };
+    touch_is_direct = CL_ORDRSimulatedDirectTouch;
+    CL_TouchFingerEvent(&event);
+    event.type = SDL_FINGERUP;
+    event.timestamp += 32;
+    CL_TouchFingerEvent(&event);
+    touch_is_direct = saved_direct;
+    return cls.netchan.message.cursize > before;
+}
+
+bool CL_ORDRSimulatorTapChoice(uint32_t number) {
+    viewDef_t const *view = &cl.viewDef;
     vec2_t point;
     uint32_t nearest;
     if (!number || number >= MAX_CLIENT_ENTITIES ||
         !CL_GameplayInputReady() || cls.key_dest != key_game ||
-        !view->entities || !win.width || !win.height ||
-        viewport.w <= 0.0f || viewport.h <= 0.0f)
+        !view->entities)
         return false;
 
     FOR_LOOP(i, view->num_entities) {
@@ -737,38 +772,72 @@ bool CL_ORDRSimulatorTapChoice(uint32_t number) {
         if (ent->number != number || !ent->model ||
             (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)))
             continue;
-        vec3_t const ndc = Matrix4_multiply_vector3(
-            &view->viewProjectionMatrix, &ent->origin);
-        if (!isfinite(ndc.x) || !isfinite(ndc.y) ||
-            ndc.x < -1.0f || ndc.x > 1.0f ||
-            ndc.y < -1.0f || ndc.y > 1.0f)
+        if (!CL_ORDRSimulatorProjectWorld(&ent->origin, &point))
             return false;
-        point = (vec2_t){
-            (viewport.x + (ndc.x + 1.0f) * viewport.w * 0.5f) * win.width,
-            (1.0f - viewport.y - (ndc.y + 1.0f) * viewport.h * 0.5f) * win.height
-        };
         if (!CL_TraceORDRChoiceCard(point.x, point.y, &nearest) ||
             nearest != number) return false;
-
-        uint32_t const before = cls.netchan.message.cursize;
-        bool (*saved_direct)(SDL_TouchID) = touch_is_direct;
-        SDL_TouchFingerEvent event = {
-            .type = SDL_FINGERDOWN,
-            .timestamp = SDL_GetTicks(),
-            .touchId = (SDL_TouchID)-9100,
-            .fingerId = (SDL_FingerID)-9100,
-            .x = point.x / win.width,
-            .y = point.y / win.height,
-        };
-        touch_is_direct = CL_ORDRSimulatedDirectTouch;
-        CL_TouchFingerEvent(&event);
-        event.type = SDL_FINGERUP;
-        event.timestamp += 32;
-        CL_TouchFingerEvent(&event);
-        touch_is_direct = saved_direct;
-        return cls.netchan.message.cursize > before;
+        return CL_ORDRSimulatorFingerTap(point, (SDL_FingerID)-9100);
     }
     return false;
+}
+
+/* Verify the real finger-sized unit hit test before injecting the same short
+ * single-finger tap that a player would use. No select command is forged. */
+bool CL_ORDRSimulatorTapWisp(uint32_t number) {
+    viewDef_t const *view = &cl.viewDef;
+    vec2_t point;
+    uint32_t nearest = 0;
+    if (!number || number >= MAX_CLIENT_ENTITIES || !view->entities ||
+        !CL_GameplayInputReady() || cls.key_dest != key_game) return false;
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        if (ent->number != number || ent->owner != view->player ||
+            !(ent->flags & RF_UNIT) ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE))) continue;
+        if (!CL_ORDRSimulatorProjectWorld(&ent->origin, &point) ||
+            !CL_TouchInWorld(point, re.GetWindowSize()) ||
+            CL_WindowMouseOver((int)point.x, (int)point.y) ||
+            !CL_TraceFingerSelectionEntity(point.x, point.y, &nearest) ||
+            nearest != number) return false;
+        return CL_ORDRSimulatorFingerTap(point, (SDL_FingerID)-9101) &&
+            cl.selection.num_selected && cl.selection.entity_nums[0] == number;
+    }
+    return false;
+}
+
+/* Send an actual two-finger iPad smart-order gesture at the map's beacon.
+ * The server still resolves the hit, ownership, pathing, and movement. */
+bool CL_ORDRSimulatorTapBeacon(void) {
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    vec3_t const beacon = { -3456.0f, -9360.0f, 0.0f };
+    vec2_t point;
+    if (!CL_GameplayInputReady() || cls.key_dest != key_game ||
+        !CL_ORDRSimulatorProjectWorld(&beacon, &point) ||
+        !CL_TouchInWorld(point, win) ||
+        CL_WindowMouseOver((int)point.x, (int)point.y) ||
+        !cl.selection.num_selected) return false;
+    uint32_t const before = cls.netchan.message.cursize;
+    bool (*saved_direct)(SDL_TouchID) = touch_is_direct;
+    SDL_TouchFingerEvent first = {
+        .type = SDL_FINGERDOWN, .timestamp = SDL_GetTicks(),
+        .touchId = (SDL_TouchID)-9200, .fingerId = (SDL_FingerID)-9200,
+        .x = (point.x - 8.0f) / win.width, .y = point.y / win.height,
+    };
+    SDL_TouchFingerEvent second = first;
+    second.fingerId = (SDL_FingerID)-9201;
+    second.x = (point.x + 8.0f) / win.width;
+    second.timestamp += 10;
+    touch_is_direct = CL_ORDRSimulatedDirectTouch;
+    CL_TouchFingerEvent(&first);
+    CL_TouchFingerEvent(&second);
+    first.type = SDL_FINGERUP;
+    first.timestamp += 50;
+    CL_TouchFingerEvent(&first);
+    second.type = SDL_FINGERUP;
+    second.timestamp += 60;
+    CL_TouchFingerEvent(&second);
+    touch_is_direct = saved_direct;
+    return cls.netchan.message.cursize > before;
 }
 #endif
 

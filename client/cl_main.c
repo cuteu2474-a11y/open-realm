@@ -1580,11 +1580,90 @@ static void CL_SendSoundEvents(void) {
  * which selection, mode and game-start actions are valid. */
 #if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
 bool CL_ORDRSimulatorTapChoice(uint32_t number);
+bool CL_ORDRSimulatorTapWisp(uint32_t number);
+bool CL_ORDRSimulatorTapBeacon(void);
 
 static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
     if (actual == wanted) return true;
     return (((actual & 0xffu) << 24) | ((actual & 0xff00u) << 8) |
             ((actual & 0xff0000u) >> 8) | (actual >> 24)) == wanted;
+}
+
+/* After the original difficulty/mode/start taps, attempt a genuine world
+ * selection and two-finger movement order. Position samples are observations,
+ * not a claim that the beacon reward or game progression works. */
+static void CL_ORDRSimulatorProbeWisp(uint32_t now) {
+    static uint32_t selected_wisp, selected_at, next_position, next_miss;
+    static bool move_queued;
+    static cstring_t wisp_kind = "e0IX";
+    viewDef_t const *view = &cl.viewDef;
+    renderEntity_t const *wisp = NULL;
+    if (now < 970000u || !view->entities ||
+        cls.netchan.message.cursize + 128 >= cls.netchan.message.maxsize)
+        return;
+
+    if (selected_wisp) {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (ent->number == selected_wisp) { wisp = ent; break; }
+        }
+    } else {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+                ent->owner != view->player || !(ent->flags & RF_UNIT) ||
+                (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)))
+                continue;
+            uint32_t const raw = cl.ents[ent->number].current.class_id;
+            if (CL_ORDRSimulatorRawMatch(raw, MAKEFOURCC('e','0','I','X')))
+                wisp_kind = "e0IX";
+            else if (CL_ORDRSimulatorRawMatch(raw, MAKEFOURCC('e','0','H','P')))
+                wisp_kind = "e0HP";
+            else continue;
+            wisp = ent;
+            break;
+        }
+        if (wisp && CL_ORDRSimulatorTapWisp(wisp->number)) {
+            char trace[160];
+            selected_wisp = wisp->number;
+            selected_at = now;
+            next_position = now;
+            snprintf(trace, sizeof(trace),
+                     "SIM_WISP_SELECT_QUEUED unit=%u raw=%s input=finger",
+                     (unsigned)selected_wisp, wisp_kind);
+            CL_ORDRTrace(trace);
+        }
+    }
+
+    if (selected_wisp && wisp && now >= next_position) {
+        char trace[160];
+        snprintf(trace, sizeof(trace), "SIM_WISP_POSITION unit=%u pos=(%.1f,%.1f)",
+                 (unsigned)selected_wisp, (double)wisp->origin.x,
+                 (double)wisp->origin.y);
+        CL_ORDRTrace(trace);
+        next_position = now + 20000u;
+    }
+    if (selected_wisp && !move_queued && now >= selected_at + 30000u &&
+        cl.selection.num_selected && cl.selection.entity_nums[0] == selected_wisp &&
+        CL_ORDRSimulatorTapBeacon()) {
+        char trace[180];
+        snprintf(trace, sizeof(trace),
+                 "SIM_WISP_MOVE_QUEUED unit=%u target=(-3456,-9360) input=two_finger",
+                 (unsigned)selected_wisp);
+        CL_ORDRTrace(trace);
+        move_queued = true;
+        return;
+    }
+    if (now >= next_miss && (!selected_wisp || (!move_queued && now >= selected_at + 30000u))) {
+        cstring_t reason = !wisp ? (selected_wisp ? "selected_wisp_not_rendered" : "wisp_not_visible") :
+            !selected_wisp ? "wisp_finger_hit_blocked" :
+            cl.selection.num_selected && cl.selection.entity_nums[0] == selected_wisp ?
+            "beacon_two_finger_order_blocked" : "wisp_selection_lost";
+        char trace[160];
+        snprintf(trace, sizeof(trace), "SIM_WISP_PROBE_BLOCKED reason=%s", reason);
+        CL_ORDRTrace(trace);
+        next_miss = now + 15000u;
+    }
 }
 
 static void CL_ORDRSimulatorProbeChoice(void) {
@@ -1622,8 +1701,13 @@ static void CL_ORDRSimulatorProbeChoice(void) {
         CL_ORDRTrace(trace);
         next_state_log = now + 20000u;
     }
-    if (next_step >= 3 || cls.state != ca_active || !enabled ||
-        !map || !strstr(map, "ORDR_S2_2.323") ||
+    if (cls.state != ca_active || !enabled ||
+        !map || !strstr(map, "ORDR_S2_2.323")) return;
+    if (next_step >= 3) {
+        CL_ORDRSimulatorProbeWisp(now);
+        return;
+    }
+    if (
         now < earliest_ms[next_step] ||
         !view->entities ||
         cls.netchan.message.cursize + 64 >= cls.netchan.message.maxsize)

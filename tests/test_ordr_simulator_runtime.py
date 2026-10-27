@@ -196,6 +196,49 @@ class SimulatorRuntimeTests(unittest.TestCase):
         self.assertFalse(report["game_start_jass_called"])
         self.assertEqual(report["simulator_choice_verified"], ["u005", "u00C"])
 
+    def test_wisp_finger_selection_and_two_finger_beacon_order_are_traced(self):
+        report = json.loads(self.inspect(
+            "30200 ms [ORDR_WORLD_SELECT_COMMAND] unit=2204 owner=0 raw=0x65304958 can_select=1 can_control=1\n"
+            "31200 ms [ORDR_WORLD_SMART_COMMAND] mode=point point=(-3456,-9360) issued=1 selected=1 unit=2204 raw=0x65304958\n",
+            "game_ms=31200 frame=312 stage=SERVER_FRAME_COMPLETE\n",
+            "wall_ms=995000 stage=SIM_WISP_SELECT_QUEUED unit=2204 raw=e0IX input=finger\n"
+            "wall_ms=995000 stage=SIM_WISP_POSITION unit=2204 pos=(-3456,-9696)\n"
+            "wall_ms=1050000 stage=SIM_WISP_MOVE_QUEUED unit=2204 target=(-3456,-9360) input=two_finger\n"
+            "wall_ms=1120000 stage=SIM_WISP_POSITION unit=2204 pos=(-3456,-9550)\n", ""))
+        self.assertTrue(report["simulator_wisp_selection_requested"])
+        self.assertTrue(report["simulator_wisp_selection_server_seen"])
+        self.assertTrue(report["simulator_wisp_move_requested"])
+        self.assertTrue(report["simulator_wisp_move_server_accepted"])
+        self.assertTrue(report["simulator_wisp_position_changed"])
+        self.assertFalse(report["simulator_wisp_beacon_reward_verified"])
+        self.assertFalse(report["gameplay_verified"])
+
+    def test_wisp_move_is_not_verified_on_rejected_or_different_unit_order(self):
+        report = json.loads(self.inspect(
+            "31500 ms [ORDR_WORLD_SELECT_COMMAND] unit=2205 owner=0 can_select=0\n"
+            "31500 ms [ORDR_WORLD_SMART_COMMAND] mode=point issued=0 selected=1 unit=2205\n",
+            "", "stage=SIM_WISP_SELECT_QUEUED unit=2204 raw=e0IX input=finger\n"
+            "stage=SIM_WISP_MOVE_QUEUED unit=2204 target=(-3456,-9360) input=two_finger\n"
+            "stage=SIM_WISP_POSITION unit=2204 pos=(-3456,-9696)\n", ""))
+        self.assertTrue(report["simulator_wisp_selection_requested"])
+        self.assertFalse(report["simulator_wisp_selection_server_seen"])
+        self.assertTrue(report["simulator_wisp_move_requested"])
+        self.assertFalse(report["simulator_wisp_move_server_accepted"])
+        self.assertFalse(report["simulator_wisp_position_changed"])
+        self.assertFalse(report["simulator_wisp_beacon_reward_verified"])
+
+    def test_wisp_motion_before_tap_does_not_count_as_ordered_movement(self):
+        report = json.loads(self.inspect(
+            "30100 ms [ORDR_WORLD_SELECT_COMMAND] unit=2204 can_select=1\n"
+            "31200 ms [ORDR_WORLD_SMART_COMMAND] mode=target issued=1 unit=2204\n",
+            "", "stage=SIM_WISP_SELECT_QUEUED unit=2204 raw=e0IX input=finger\n"
+            "stage=SIM_WISP_POSITION unit=2204 pos=(-3460,-9700)\n"
+            "stage=SIM_WISP_POSITION unit=2204 pos=(-3450,-9680)\n"
+            "stage=SIM_WISP_MOVE_QUEUED unit=2204 target=(-3456,-9360) input=two_finger\n"
+            "stage=SIM_WISP_POSITION unit=2204 pos=(-3450,-9680)\n", ""))
+        self.assertTrue(report["simulator_wisp_move_server_accepted"])
+        self.assertFalse(report["simulator_wisp_position_changed"])
+
     def test_missing_original_background_is_reported_without_fake_art(self):
         report = json.loads(self.inspect(
             "5000 ms [CHOICE_BACKGROUND_AUDIT] B100_instances=0 visible=0 model_indices=0\n",
