@@ -1022,13 +1022,14 @@ void attack_melee(edict_t *self) {
     S_PermanentInvisibilityReveal(self);
     attack_set_cooldown(self, ACTIVE_ATTACK(self)->cooldown / divisor);
     unit_setmove(self, &attack_move_melee);
-    self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    /* There is no sub-frame callback: one simulation step is the closest
+     * possible scheduling of an authored zero DamagePoint. Preserve the
+     * "attack" animation for its entire first frame and commit a single hit
+     * on the next think tick (unit_runwait consumes positive waits only). */
+    self->wait = MAX(FRAMETIME / 1000.0f,
+                     ACTIVE_ATTACK(self)->damagePoint / divisor);
     ordr_trace_combat("ORDR_ATTACK_WINDUP_MELEE", self, self->goalentity,
                       (int)ACTIVE_ATTACK(self)->damageBase);
-    /* unit_runwait() only calls back for a strictly positive wait. With an
-     * authored DamagePoint of zero the visible swing otherwise never lands.
-     * Resolve that zero-time point once at swing start, not on every frame. */
-    if (self->wait <= 0.0f) damage_target(self);
 }
 
 void attack_ranged_cooldown(edict_t *self) {
@@ -1055,12 +1056,10 @@ void attack_ranged(edict_t *self) {
     S_PermanentInvisibilityReveal(self);
     attack_set_cooldown(self, ACTIVE_ATTACK(self)->cooldown / divisor);
     unit_setmove(self, &attack_move_ranged);
-    self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    self->wait = MAX(FRAMETIME / 1000.0f,
+                     ACTIVE_ATTACK(self)->damagePoint / divisor);
     ordr_trace_combat("ORDR_ATTACK_WINDUP_RANGED", self, self->goalentity,
                       (int)ACTIVE_ATTACK(self)->damageBase);
-    /* A zero DamagePoint launches one projectile immediately. Arrival and
-     * mitigation still occur through the ordinary projectile impact path. */
-    if (self->wait <= 0.0f) throw_missile(self);
 }
 
 /* ---- Attack Ground --------------------------------------------------------
@@ -1176,9 +1175,8 @@ static void attack_ground_ranged(edict_t *ent) {
     float divisor = attack_speed_divisor(ent);
     S_PermanentInvisibilityReveal(ent);
     unit_setmove(ent, &attack_ground_move_ranged);
-    ent->wait = ent->attack1.damagePoint / divisor;
+    ent->wait = MAX(FRAMETIME / 1000.0f, ent->attack1.damagePoint / divisor);
     if (ent->sound.attack) G_PlaySound(NULL, ent, CHAN_WEAPON, ent->sound.attack, 1.0f, 1.0f, 0.0f);
-    if (ent->wait <= 0.0f) throw_artillery_ground(ent);
 }
 
 bool S_OrderAttackGround(edict_t *unit, vec2_t const *point) {

@@ -2298,6 +2298,9 @@ TEST(wc3_combat, zero_damage_point_melee_hit_is_not_lost_to_wait_guard) {
 
     order_attack(attacker, target);
     attacker->currentmove->think(attacker);
+    T_STREQ(attacker->currentmove->animation, "attack");
+    T_FEQ(target->health.value, target->health.max_value, 0.001f);
+    attacker->currentmove->think(attacker);
     T_ASSERT(target->health.value < target->health.max_value);
     after = target->health.value;
     attacker->currentmove->think(attacker);
@@ -2325,6 +2328,8 @@ TEST(wc3_combat, zero_damage_point_ranged_launches_one_projectile) {
     target->targtype = TARG_GROUND;
 
     order_attack(attacker, target);
+    attacker->currentmove->think(attacker);
+    T_STREQ(attacker->currentmove->animation, "attack range");
     attacker->currentmove->think(attacker);
     FILTER_EDICTS(ent, ent->inuse && ent->owner == attacker &&
                           ent->movetype == MOVETYPE_FLYMISSILE) {
