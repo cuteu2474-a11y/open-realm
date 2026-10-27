@@ -94,9 +94,33 @@ color codes). The user requested one final test/simulator batch, **after**
 all known source issues are addressed; do not infer successful gameplay from
 source review or a green workflow alone.
 
-The single local `make test` attempt on 2026-10-27 did **not** complete the
-native suite: this execution environment lacks `SDL2/SDL.h`, `SDL2/SDL_keycode.h`,
-and linkable `libSDL2`, `EGL`, and `GL`. JASS parser fixtures and several Python
-checks ran successfully before build failure, but no C/renderer unit pass is
-claimed. The repository's normal dependency-provisioned CI and the final
-explicitly dispatched iPad simulator must independently verify this batch.
+An earlier `make test` attempt could not compile due to unavailable SDL/GL
+dependencies. A later dependency-provisioned local run completed the
+Warcraft III headless engine assertions. The umbrella `make test` also ran;
+its sole failing fixture was the socket-based `test-server-net` under the
+restricted sandbox, which passed independently with network access enabled
+(4,462/4,462 assertions). Normal repository CI and the iPad simulator still
+need to confirm the new batch independently.
+
+## 2026-10-27: iPad simulator screenshot follow-up
+
+Simulator run `40513151773` produced screenshots through 960 wall-clock
+seconds. The imported difficulty background, four-player scoreboard and
+top-left shortcuts were present; scripted selection reached the post-start
+gameplay camera without a JASS runtime error. This is a **startup milestone**,
+not evidence that the player can use a wisp beacon or finish a round. The
+renderer had advanced only about 30 game-time seconds and the screenshot
+alone cannot distinguish slow simulation from full-speed device behavior.
+
+The mode-selection unit had a blank/white portrait. Missing `UnitUI.modelFile`
+no longer disqualifies a valid `UnitBalance` entry from the gameplay unit
+lifecycle. For model-less helper units, the information panel now uses their
+authored 2D unit icon when available; a model path which registers but fails
+to load client-side no longer leaves a glaring white portrait aperture.
+
+The large water area and floating gambling/help labels visible after startup
+cannot safely be classified as wrong without a reference capture of the same
+original map camera. Do not replace authored water colors or hide scripted
+labels merely to make the screenshot appear brighter. The actual beacon
+order/pathing, reward and enemy movement remain pending end-to-end iPad
+verification after this grouped code change.

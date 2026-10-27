@@ -1145,8 +1145,21 @@ void Get_Commands_f(edict_t *ent) {
 static void WritePortraitFrame(edict_t *ent) {
     uiFrame_t frame;
     char command[64];
+    cstring_t art;
 
-    if (!ent || !ent->s.model) return;
+    if (!ent) return;
+    /* Custom maps sometimes select invisible helper units (e.g. difficulty
+     * and mode switches). A missing model must not leave a bright empty 3D
+     * portrait aperture on top of the otherwise functional choice panel.
+     * Their authored command-button art is an appropriate static portrait. */
+    if (!ent->s.model) {
+        art = FindConfigValue(GetClassName(ent->class_id), STR_ART);
+        if (!art || !*art) art = G_UnitProfile(ent->class_id)->art;
+        if (art && *art)
+            UI_WriteTextureFrame(WC3_HUD_PORTRAIT_X, WC3_HUD_PORTRAIT_Y,
+                                 WC3_HUD_PORTRAIT_WIDTH, WC3_HUD_PORTRAIT_HEIGHT, art);
+        return;
+    }
     memset(&frame, 0, sizeof(frame));
     frame.flags.type = FT_PORTRAIT;
     frame.color = COLOR32_WHITE;

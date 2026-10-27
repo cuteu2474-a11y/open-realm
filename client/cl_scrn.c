@@ -1102,7 +1102,14 @@ void SCR_LayoutDrawPortrait(uiFrame_t const *frame, rect_t const *screen) {
     model_t const *draw = is_portrait && port ? port : model;
     cstring_t anim = (frame->text && *frame->text)
         ? frame->text : (is_portrait ? "Portrait" : "Stand");
-    if (!draw) return;
+    if (!draw) {
+        /* A custom map may register a model path that is absent from the
+         * client's archive. Clear only that portrait aperture instead of
+         * leaving the HUD's pale placeholder visible as a white flash.
+         * FT_MODEL controls have no such portrait background to clear. */
+        if (is_portrait) re.DrawFill(screen, MAKE(color32_t, 0, 0, 0, 255));
+        return;
+    }
 
     renderEntity_t entity = {0};
     entity.model = draw; entity.scale = 1.0f;
