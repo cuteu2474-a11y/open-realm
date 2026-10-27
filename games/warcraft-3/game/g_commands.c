@@ -1384,6 +1384,32 @@ CLIENTCOMMAND(Button) {
     queued = G_CommandQueueRequested(argc, argv, 2);
     producer = G_GetMainSelectedUnit(client);
     classname = argv[1];
+    /* The map's custom structures may be controlled by JASS events, ability
+     * buttons or Warcraft stock. Record the pressed code and available route
+     * before dispatch, without manufacturing stock or changing map rules. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        producer && G_UnitIsStructure(producer)) {
+        static unsigned button_samples;
+        if (button_samples < 64) {
+            char detail[304];
+            uint32_t code = 0;
+            if (strlen(classname) == 4) memcpy(&code, classname, 4);
+            snprintf(detail, sizeof(detail),
+                     "building=%u raw=0x%08x owner=%u button=%.40s "
+                     "controlled=%u resources=%u ability_handler=%u "
+                     "custom_handler=%u shop_item=%u shop_unit=%u",
+                     (unsigned)producer->s.number, (unsigned)producer->class_id,
+                     (unsigned)producer->s.player, classname,
+                     (unsigned)G_UnitCanControl(client, producer),
+                     (unsigned)G_UnitCanSpendResources(client, producer),
+                     (unsigned)(FindAbilityForCommand(classname) != NULL),
+                     (unsigned)(client->menu.cmdbutton != NULL),
+                     (unsigned)(code && G_ShopSellsItem(producer, code)),
+                     (unsigned)(code && G_ShopSellsUnit(producer, code)));
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_BUTTON", detail);
+            button_samples++;
+        }
+    }
     /* A neutral shop remains neutral selection state; buying from it must not
      * weaken G_UnitCanControl() for ordinary enemy/neutral units. Merchandise
      * commands are raw object IDs and the authoritative stock path decides

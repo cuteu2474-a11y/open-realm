@@ -1213,9 +1213,37 @@ bool unit_issuetargetorder(edict_t *self, cstring_t order, edict_t *target) {
 }
 
 bool unit_issueorder(edict_t *self, cstring_t order, vec2_t const *point) {
-    if (G_BuildingUpgradeActive(self)) return false;
-    return G_IssueUnitPointOrder(self, order, point, false,
-                                 self ? self->s.player : 0, 0.0f);
+    bool accepted = !G_BuildingUpgradeActive(self) &&
+        G_IssueUnitPointOrder(self, order, point, false,
+                              self ? self->s.player : 0, 0.0f);
+    /* ORDR's wave scripts use several JASS order natives (including groups
+     * and location variants). Trace at the common unit router so rejected
+     * creep orders cannot disappear behind an uninstrumented native. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN") && self) {
+        static unsigned traced;
+        if (traced < 96) {
+            char detail[352];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u order=%.32s accepted=%u "
+                     "from=(%.0f,%.0f) to=(%.0f,%.0f) hp=%.0f/%.0f "
+                     "speed=%.0f ai=0x%x paused=%u structure=%u upgrading=%u move=%s",
+                     (unsigned)self->s.number, (unsigned)self->class_id,
+                     (unsigned)self->s.player, order ? order : "(null)",
+                     (unsigned)accepted,
+                     (double)self->s.origin2.x, (double)self->s.origin2.y,
+                     (double)(point ? point->x : 0.0f),
+                     (double)(point ? point->y : 0.0f),
+                     (double)self->health.value, (double)self->health.max_value,
+                     (double)self->unitinfo.MoveSpeed, (unsigned)self->aiflags,
+                     (unsigned)self->paused, (unsigned)G_UnitIsStructure(self),
+                     (unsigned)G_BuildingUpgradeActive(self),
+                     self->currentmove && self->currentmove->animation
+                         ? self->currentmove->animation : "(none)");
+            jass_ordr_log_event(level.vm, "ORDR_SCRIPT_POINT_ORDER", detail);
+            traced++;
+        }
+    }
+    return accepted;
 }
 
 /* Rebind an existing edict to another WC3 unit type while retaining its

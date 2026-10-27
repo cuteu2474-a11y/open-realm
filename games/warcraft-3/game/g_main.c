@@ -1561,6 +1561,47 @@ static void G_ORDRShowFlowStatus(void) {
              (unsigned)choice_screen_units,
              (unsigned)globals.num_edicts);
     jass_ordr_log_event(level.vm, "STATE", message);
+    /* ORDR's first creep wave is owned by player 5 in the supplied iPad
+     * traces. Record a bounded live sample every five game seconds. This
+     * distinguishes no scripted order from a stalled route or an immobile
+     * unit without forcing enemies to march or altering the original map. */
+    if (level.time >= 15000) {
+        unsigned count = 0, samples = 0, active_orders = 0, immobile = 0;
+        FOR_LOOP(i, globals.num_edicts) {
+            edict_t const *unit = &g_edicts[i];
+            if (!unit->inuse || !(unit->svflags & SVF_MONSTER) ||
+                unit->s.player != 5 || G_UnitIsStructure(unit) || M_IsDead(unit))
+                continue;
+            count++;
+            if (unit->aiflags & AI_IMMOBILE) immobile++;
+            if (unit->currentmove && unit->currentmove->think != ai_stand)
+                active_orders++;
+            if (samples++ < 4) {
+                char detail[360];
+                snprintf(detail, sizeof(detail),
+                         "unit=%u raw=0x%08x owner=%u pos=(%.0f,%.0f) "
+                         "goal=(%.0f,%.0f) hp=%.0f speed=%.0f ai=0x%x "
+                         "paused=%u move=%s route_wait=%u unreachable=%u",
+                         (unsigned)unit->s.number, (unsigned)unit->class_id,
+                         (unsigned)unit->s.player,
+                         (double)unit->s.origin2.x, (double)unit->s.origin2.y,
+                         (double)(unit->goalentity ? unit->goalentity->s.origin2.x : 0.0f),
+                         (double)(unit->goalentity ? unit->goalentity->s.origin2.y : 0.0f),
+                         (double)unit->health.value, (double)unit->unitinfo.MoveSpeed,
+                         (unsigned)unit->aiflags, (unsigned)unit->paused,
+                         unit->currentmove && unit->currentmove->animation
+                             ? unit->currentmove->animation : "(none)",
+                         (unsigned)(unit->movement.flow_generation == 0 &&
+                                    !unit->movement.flow_direct && !unit->movement.path.valid),
+                         (unsigned)unit->movement.flow_unreachable);
+                jass_ordr_log_event(level.vm, "ORDR_ENEMY_MOVEMENT", detail);
+            }
+        }
+        char totals[120];
+        snprintf(totals, sizeof(totals), "owner5_mobile=%u active_orders=%u immobile=%u",
+                 count, active_orders, immobile);
+        jass_ordr_log_event(level.vm, "ORDR_ENEMY_SUMMARY", totals);
+    }
     /* A registered model is not proof of actual client visibility. Audit
      * the simulated camera, the render model indices and FOW separately.
      * The first sample happens after the 4-second menu-unit spawn and after
