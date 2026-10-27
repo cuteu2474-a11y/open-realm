@@ -1,17 +1,20 @@
 name: ORDR iPad SideStore IPA build
-# Manual verification only: never start expensive iPad builds or simulators
-# on incremental commits. Re-enable only after the known engine bugs are fixed.
+# SideStore IPA builds only on explicit [ipad-build] push or manual dispatch.
+# Ordinary commits skip the expensive build. No new workflow is required.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/ordr-singleplayer-compat
 
-# Avoid redundant builds when newer commits arrive on the same branch.
+# Do not cancel a requested build because other pushes arrive.
 concurrency:
   group: ordr-ipad-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   regression:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ipad-build]')
     name: ORDR JASS regressions
     runs-on: ubuntu-latest
     container:
