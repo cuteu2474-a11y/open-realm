@@ -1,9 +1,12 @@
 name: ORDR iPad simulator smoke
 
 # Independent, non-cancelling simulator workflow: do not interrupt IPA builds.
-# Manual verification only: never start expensive iPad builds or simulators
-# on incremental commits. Re-enable only after the known engine bugs are fixed.
+# Run only on explicit manual dispatch or a batch commit deliberately marked
+# [ordr-simulator]. Ordinary incremental pushes must not boot an iPad.
 on:
+  push:
+    branches:
+      - feature/ordr-singleplayer-compat
   workflow_dispatch:
 
 permissions:
@@ -15,7 +18,7 @@ concurrency:
 
 jobs:
   simulator:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ordr-simulator]')
     runs-on: macos-15-intel
     timeout-minutes: 90
     steps:

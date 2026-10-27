@@ -328,6 +328,54 @@ TEST(wc3_jass_map, integer_division_valid_operands_preserve_original_arithmetic)
     ));
 }
 
+/* ORDR's authored `360 / vP * EK` must multiply the quotient by EK.
+ * Right-associative parsing previously divided 360 by (vP * EK), crashing
+ * the first CV5 iteration (EK == 0) even though vP was nonzero. */
+TEST(wc3_jass_map, mixed_arithmetic_operators_evaluate_left_to_right) {
+    T_ASSERT(run_test_jass(
+        "function BFg takes integer Hv, integer Hw returns integer\n"
+        "  return Hv - Hv / Hw * Hw\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer vP = 10\n"
+        "  local integer EK = 0\n"
+        "  call BJassAssert(360 / vP * EK == 0, \"initial ring angle\")\n"
+        "  set EK = 1\n"
+        "  call BJassAssert(360 / vP * EK == 36, \"next ring angle\")\n"
+        "  call BJassAssert(24 / 4 / 2 == 3, \"chained division\")\n"
+        "  call BJassAssert(20 - 7 + 2 == 15, \"mixed addition subtraction\")\n"
+        "  call BJassAssert(20 - 7 - 2 == 11, \"chained subtraction\")\n"
+        "  call BJassAssert(20 / (2 * 5) == 2, \"explicit parentheses\")\n"
+        "  call BJassAssert(2 + 3 * 4 == 14, \"multiplication precedence\")\n"
+        "  call BJassAssert(BFg(7, 3) == 1, \"map grid remainder\")\n"
+        "endfunction\n"
+    ));
+}
+
+TEST(wc3_jass_map, boolean_operators_respect_precedence_and_short_circuit) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer visits = 0\n"
+        "endglobals\n"
+        "function Visited takes nothing returns boolean\n"
+        "  set visits = visits + 1\n"
+        "  return true\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(false and true or true, \"and before or\")\n"
+        "  call BJassAssert(not (true and false or false), \"left boolean group\")\n"
+        "  call BJassAssert(not (false or true and false), \"right boolean group\")\n"
+        "  call BJassAssert(true or false and false, \"or preserves true\")\n"
+        "  call BJassAssert(not (false and Visited()), \"false and skips\")\n"
+        "  call BJassAssert(true or Visited(), \"true or skips\")\n"
+        "  call BJassAssert(visits == 0, \"skipped branch has no effect\")\n"
+        "  call BJassAssert(true and Visited(), \"true and executes\")\n"
+        "  call BJassAssert(false or Visited(), \"false or executes\")\n"
+        "  call BJassAssert(visits == 2, \"required branches execute\")\n"
+        "endfunction\n"
+    ));
+}
+
 TEST(wc3_jass_map, array_assignment_and_access_evaluate_expressions) {
     T_ASSERT(run_test_jass(
         "globals\n"

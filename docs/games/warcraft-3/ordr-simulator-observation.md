@@ -9,3 +9,10 @@ This is a **loading and stability observation**, not a gameplay end-to-end pass:
 - No scripted physical taps, selection, beacon, unit spawning, terrain combat, or skill behavior are implemented.
 - Original MPQ game files and ORDR map remain only in private Drive and a temporary Runner Simulator container, never in the public repository or uploaded artifacts.
 - Later engine fixes must not edit the original ORDR map to evade failures.
+
+Run policy: a manual `workflow_dispatch` or an explicitly marked batch commit
+containing `[ordr-simulator]` on `feature/ordr-singleplayer-compat` starts the
+macOS iPad job. Unmarked incremental pushes skip the simulator job. A marked
+batch commit should come only after all identified engine fixes and focused
+regressions have been prepared; neither a workflow start nor a green job is
+proof of actual ORDR gameplay.

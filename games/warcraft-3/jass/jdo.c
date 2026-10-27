@@ -224,36 +224,6 @@ uint32_t __unm(jass_t *j) {
 JASS_NUMOP(__sub, -);
 JASS_NUMOP(__mul, *);
 
-/* ORDR CV5 divides by vP * EK. Resolve through the same global-then-
- * current-function-local lookup used by the JASS evaluator. Looking only at
- * globals incorrectly labels local operands "missing" in simulator logs.
- * Read numeric values without changing the map or invoking JASS again. */
-static void jass_ordr_log_divisor_value(jass_t *j, cstring_t name) {
-    jassVar_t *var = find_global(j, name);
-    cstring_t scope = "global";
-    char detail[160];
-    if (!var && j->stack_pointer && j->num_stack) {
-        var = find_dict(jass_stackvalue(j, 0)->env.locals, name);
-        scope = "local";
-    }
-    if (!var) {
-        snprintf(detail, sizeof(detail), "name=%s scope=unresolved state=missing", name);
-    } else if (!var->value) {
-        snprintf(detail, sizeof(detail), "name=%s scope=%s type=%s state=unset",
-                 name, scope, var->type ? var->type->name : "unknown");
-    } else if (jass_getvarbasetype(var) == jasstype_integer) {
-        snprintf(detail, sizeof(detail), "name=%s scope=%s type=integer value=%d",
-                 name, scope, *(int32_t *)var->value);
-    } else if (jass_getvarbasetype(var) == jasstype_real) {
-        snprintf(detail, sizeof(detail), "name=%s scope=%s type=real value=%.9g",
-                 name, scope, (double)*(float *)var->value);
-    } else {
-        snprintf(detail, sizeof(detail), "name=%s scope=%s state=non_numeric",
-                 name, scope);
-    }
-    jass_ordr_log_event(j, "DIVISOR_VALUE", detail);
-}
-
 /* C integer division raises SIGFPE for zero divisors and INT_MIN / -1.
  * A map arithmetic error must unwind through the JASS runtime boundary,
  * not kill the host app before the offending trigger can be diagnosed. */
@@ -264,10 +234,6 @@ uint32_t __div(jass_t *j) {
             char detail[96];
             snprintf(detail, sizeof(detail), "left=%d right=%d", left, right);
             jass_ordr_log_event(j, "ARITHMETIC_ERROR", detail);
-            if (!right) {
-                jass_ordr_log_divisor_value(j, "vP");
-                jass_ordr_log_divisor_value(j, "EK");
-            }
             jass_rterror(j, !right ? "integer division by zero" : "integer division overflow");
             return 0;
         }
@@ -2326,6 +2292,26 @@ uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassCFunction_t cf = NULL;
     uint32_t stacksize = j->num_stack;
+    /* JASS boolean operators short-circuit. Eager native argument evaluation
+     * previously ran a skipped condition, including calls with side effects. */
+    bool const logic_and = !strcmp(token->primary, "__and");
+    bool const logic_or = !strcmp(token->primary, "__or");
+    if (logic_and || logic_or) {
+        token_t const *arg = token->args;
+        if (!arg || !arg->next) {
+            jass_rterror(j, "missing boolean operand");
+            return 0;
+        }
+        if (!jass_dotoken(j, arg)) jass_pushnull(j);
+        bool result = jass_toboolean(j, -1);
+        jass_discard(j, j->num_stack - stacksize);
+        if ((logic_and && result) || (logic_or && !result)) {
+            if (!jass_dotoken(j, arg->next)) jass_pushnull(j);
+            result = jass_toboolean(j, -1);
+            jass_discard(j, j->num_stack - stacksize);
+        }
+        return jass_pushboolean(j, result);
+    }
     if (!strcmp(token->primary, "CommentString") && token->args) {
         fprintf(stdout, "%s\n", token->args->primary);
         return 0;
@@ -2371,31 +2357,8 @@ uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
             }
             args++;
         }
-        /* CV5's authored 360 / (vP * EK) aborts because a calculated
-         * operand is zero. Its values must be captured at the MUL AST, while
-         * the caller's expression stack still holds them; looking for these
-         * locals after entering the DIV native loses their scope. This is
-         * diagnostic only: never clamp the result or alter the map rule. */
-        if (jass_root(j) == ordr_flow_vm && !strcmp(token->primary, "__mul") &&
-            args == 2 && token->args && token->args->next &&
-            token->args->type == TT_IDENTIFIER &&
-            token->args->next->type == TT_IDENTIFIER &&
-            !strcmp(token->args->primary, "vP") &&
-            !strcmp(token->args->next->primary, "EK") &&
-            j->num_stack == stacksize + 3) {
-            char detail[240];
-            int left_type = (int)jass_gettype(j, -2);
-            int right_type = (int)jass_gettype(j, -1);
-            double left = (double)jass_checknumber(j, -2);
-            double right = (double)jass_checknumber(j, -1);
-            snprintf(detail, sizeof(detail),
-                     "vP=%.9g type=%d EK=%.9g type=%d product=%.9g",
-                     left, left_type, right, right_type, left * right);
-            jass_ordr_log_event(j, "DIVISOR_OPERANDS", detail);
-        }
-        /* Only report the failing ORDR division, after evaluating both operands.
-         * The AST signatures identify a zero-producing native/global without
-         * exporting the private map source or changing arithmetic semantics. */
+        /* Report any remaining ORDR division fault using bounded AST tokens;
+         * never export the private map source or alter arithmetic semantics. */
         if (jass_root(j) == ordr_flow_vm && !strcmp(token->primary, "__div") && args == 2 &&
             j->num_stack == stacksize + 3 && jass_gettype(j, -1) == jasstype_integer &&
             jass_gettype(j, -2) == jasstype_integer && jass_checkinteger(j, -1) == 0) {

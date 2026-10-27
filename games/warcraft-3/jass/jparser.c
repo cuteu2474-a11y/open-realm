@@ -66,12 +66,36 @@ bool is_compare_operator(cstring_t str) {
     return token_in(str, grammar, sizeof(grammar) / sizeof(*grammar));
 }
 
-bool is_logic_operator(wordExtractor_t *p, cstring_t str) {
-    static cstring_t const grammar[] = { "and", "or" };
-    static cstring_t const c_grammar[] = { "&&", "||", "|", "&", "^" };
+/* Operators at different logical/bitwise precedence levels must not be
+ * grouped into a single right-recursive production. */
+static bool is_logic_and(wordExtractor_t *p, cstring_t str) {
     (void)p;
-        return token_in(str, grammar, sizeof(grammar) / sizeof(*grammar)) ||
-            (c_operators && token_in(str, c_grammar, sizeof(c_grammar) / sizeof(*c_grammar)));
+    return !strcmp(str, "and") || (c_operators && !strcmp(str, "&&"));
+}
+
+static bool is_logic_or(wordExtractor_t *p, cstring_t str) {
+    (void)p;
+    return !strcmp(str, "or") || (c_operators && !strcmp(str, "||"));
+}
+
+static bool is_bitand(wordExtractor_t *p, cstring_t str) {
+    (void)p;
+    return c_operators && !strcmp(str, "&");
+}
+
+static bool is_bitxor(wordExtractor_t *p, cstring_t str) {
+    (void)p;
+    return c_operators && !strcmp(str, "^");
+}
+
+static bool is_bitor(wordExtractor_t *p, cstring_t str) {
+    (void)p;
+    return c_operators && !strcmp(str, "|");
+}
+
+static bool is_mul(wordExtractor_t *p, cstring_t str) {
+    (void)p;
+    return is_multiplicative_operator(str);
 }
 
 cstring_t jass_getoperator(cstring_t str) {
@@ -287,28 +311,29 @@ wordExtractor_t(read_single_identifier) {
     return left;
 }
 
-wordExtractor_t(parse_multiplicative_expression) {
-    token_t *left = read_single_identifier(p);
-    if (is_multiplicative_operator(peek_token(p))) {
+/* The arithmetic operators at a given precedence are left-associative.
+ * Right recursion parsed `360 / count * index` as `360 / (count * index)`,
+ * causing a false divide-by-zero in a valid map initialization loop. */
+static token_t *parse_left_binary(wordExtractor_t *p, grammarFunc_t operand,
+                                  bool (*operator_matches)(wordExtractor_t *, cstring_t)) {
+    token_t *left = operand(p);
+    while (left && operator_matches(p, peek_token(p))) {
         token_t *oper = parse_operator_token(p);
-        token_t *right = parse_multiplicative_expression(p);
+        token_t *right = operand(p);
+        if (!right) PARSER_THROW("missing binary operand at line %u", parser_line(p));
         PUSH_BACK(token_t, left, oper->args);
         PUSH_BACK(token_t, right, oper->args);
-        return oper;
+        left = oper;
     }
     return left;
 }
 
+wordExtractor_t(parse_multiplicative_expression) {
+    return parse_left_binary(p, read_single_identifier, is_mul);
+}
+
 wordExtractor_t(parse_additive_expression) {
-    token_t *left = parse_multiplicative_expression(p);
-    if (is_additive_operator(p, peek_token(p))) {
-        token_t *oper = parse_operator_token(p);
-        token_t *right = parse_additive_expression(p);
-        PUSH_BACK(token_t, left, oper->args);
-        PUSH_BACK(token_t, right, oper->args);
-        return oper;
-    }
-    return left;
+    return parse_left_binary(p, parse_multiplicative_expression, is_additive_operator);
 }
 
 wordExtractor_t(parse_comparison_expression) {
@@ -323,15 +348,24 @@ wordExtractor_t(parse_comparison_expression) {
     return left;
 }
 
+static token_t *parse_bitand_expression(wordExtractor_t *p) {
+    return parse_left_binary(p, parse_comparison_expression, is_bitand);
+}
+
+static token_t *parse_bitxor_expression(wordExtractor_t *p) {
+    return parse_left_binary(p, parse_bitand_expression, is_bitxor);
+}
+
+static token_t *parse_bitor_expression(wordExtractor_t *p) {
+    return parse_left_binary(p, parse_bitxor_expression, is_bitor);
+}
+
+static token_t *parse_logic_and_expression(wordExtractor_t *p) {
+    return parse_left_binary(p, parse_bitor_expression, is_logic_and);
+}
+
 wordExtractor_t(parse_logical_expression) {
-    token_t *left = parse_comparison_expression(p);
-    if (is_logic_operator(p, peek_token(p))) {
-        token_t *oper = parse_operator_token(p);
-        token_t *right = parse_logical_expression(p);
-        PUSH_BACK(token_t, left, oper->args);
-        PUSH_BACK(token_t, right, oper->args);
-        return oper;
-    }
+    token_t *left = parse_left_binary(p, parse_logic_and_expression, is_logic_or);
     if (eat_token(p, ",")) {
         left->next = parse_logical_expression(p);
         return left;
