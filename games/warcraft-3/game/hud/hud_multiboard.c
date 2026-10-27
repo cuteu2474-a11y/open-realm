@@ -10,6 +10,7 @@
 #define WC3_MB_HEADER_PAD 0.006f // FDF units; title strip padding above/below the text
 #define WC3_MB_PANEL_GAP 0.001f // FDF units; gap between the title strip and the body panel
 #define WC3_MB_TOP 0.040f // FDF units; stack origin below the top edge, before timer/leaderboard offsets
+#define WC3_ORDR_COUNTDOWN_STRIP 0.035f // FDF units; ORDR's top-right DzFrame round clock is not a stock TimerDialog
 
 static uint32_t MultiboardFont(void) {
     frameDef_t *title = hud.leaderboard.LeaderboardTitle;
@@ -291,9 +292,14 @@ void UI_WriteMultiboard(edict_t *ent) {
                     (minimized ? 0.0f : WC3_MB_PANEL_GAP + body_height)
                   : WC3_MB_HEADER_HEIGHT + body_height;
     x = UI_BASE_WIDTH - width - HUD_HERO_SHORTCUT_EDGE_X;
-    /* Timer, leaderboard, title and resources form one top-right stack. */
+    /* Timer, leaderboard, title and resources form one top-right stack.
+     * ORDR's separate DzFrame round countdown is absent from the stock
+     * TimerDialog registry, so it needs one reserved strip above its
+     * scripted score panel. Leave all other maps' HUD positions unchanged. */
     y = WC3_MB_TOP + UI_TimerDialogLeaderboardOffset(viewer)
-        + UI_LeaderboardMultiboardOffset(viewer);
+        + UI_LeaderboardMultiboardOffset(viewer)
+        + (board && strstr(level.map_path, "ORDR_S2_")
+            ? WC3_ORDR_COUNTDOWN_STRIP : 0.0f);
     UI_SetCurrentClient(client);
     UI_WriteStart(WC3_LAYER_MULTIBOARD);
     root = MultiboardRoot();

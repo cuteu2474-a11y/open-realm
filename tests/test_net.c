@@ -58,6 +58,7 @@ void SCR_LayoutDrawStatusbar(uiFrame_t const *frame, rect_t const *screen);
 void SCR_LayoutDrawSegmentedStatusbar(uiFrame_t const *frame, rect_t const *screen);
 void SCR_LayoutDrawTexture(uiFrame_t const *frame, rect_t const *screen);
 void SCR_LayoutDrawTextArea(uiFrame_t const *frame, rect_t const *screen);
+void layout_text(uiFrame_t const *frame, rect_t const *screen, cstring_t text);
 void SCR_LayoutDrawListBox(uiFrame_t const *frame, rect_t const *screen);
 void SCR_LayoutDrawSprite(uiFrame_t const *frame, rect_t const *screen);
 void SCR_LayoutDrawPortrait(uiFrame_t const *frame, rect_t const *screen);
@@ -815,6 +816,26 @@ TEST(net, layout_textarea_clips_to_inset_viewport) {
     T_FEQ(test_textarea_draw.clip.y, test_textarea_draw.rect.y, 0.0001f);
     T_FEQ(test_textarea_draw.clip.w, test_textarea_draw.rect.w, 0.0001f);
     T_FEQ(test_textarea_draw.clip.h, test_textarea_draw.rect.h, 0.0001f);
+}
+
+/* An authored STRING may be wider than a compact Warcraft HUD button or
+ * scoreboard label. Its drawing must stay inside the authored rectangle. */
+TEST(net, layout_string_clips_to_its_authored_frame) {
+    uiLabel_t label = { .font = 1 };
+    uiFrame_t frame = { .number = 1, .parent = UINT32_MAX,
+                        .flags.type = FT_STRING,
+                        .buffer = { &label, sizeof(label) } };
+    rect_t screen = MAKE(rect_t, 0.10f, 0.20f, 0.04f, 0.02f);
+
+    test_client_stubs_init(); test_textarea_draws = 0; re.DrawText = capture_textarea;
+    layout_text(&frame, &screen, "a long authored button caption");
+
+    T_EQ(test_textarea_draws, 1);
+    T_ASSERT(test_textarea_draw.flags & DRAW_CLIP);
+    T_FEQ(test_textarea_draw.clip.x, screen.x, 0.0001f);
+    T_FEQ(test_textarea_draw.clip.y, screen.y, 0.0001f);
+    T_FEQ(test_textarea_draw.clip.w, screen.w, 0.0001f);
+    T_FEQ(test_textarea_draw.clip.h, screen.h, 0.0001f);
 }
 
 TEST(net, layout_textarea_value_scrolls_wrapped_content_inside_clip) {

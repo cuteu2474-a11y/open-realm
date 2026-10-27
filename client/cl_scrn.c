@@ -1244,18 +1244,20 @@ void SCR_LayoutDrawCommandButton(uiFrame_t const *frame, rect_t const *screen) {
 
 void layout_text(uiFrame_t const *frame, rect_t const *screen, cstring_t text) {
     drawText_t dt = SCR_GetDrawText(frame, screen->w, text, frame->buffer.data);
+    uiFrame_t const *parent = frame->parent < SCR_NumFrames() ? SCR_Frame(frame->parent) : NULL;
+    bool const single_line = (!layout_current_window && layout_current_layer == LAYER_GAME_4) ||
+        (parent && (parent->flags.type == FT_GLUEBUTTON ||
+                    parent->flags.type == FT_GLUETEXTBUTTON ||
+                    parent->flags.type == FT_TEXTBUTTON));
     dt.rect = *screen;
-    /* WC3's game-4 overlay owns its authored multiboard cells. Treat
-     * each cell as one line: wrapping a long Korean value into the next
-     * row caused the score, player and unit-count columns to overlap.
-     * Clip only within this layout layer; ordinary dialogues keep wrap. */
-    if (!layout_current_window && layout_current_layer == LAYER_GAME_4) {
-        dt.flags &= ~DRAW_WORD_WRAP;
-        dt.flags |= DRAW_CLIP;
-        dt.clip = *screen;
-    } else {
-        dt.flags |= DRAW_WORD_WRAP;
-    }
+    /* Authored strings must not paint over adjacent buttons, the next
+     * scoreboard row or an unrelated game UI frame. Only multiboard cells
+     * and button captions must stay on a single line; dialogue still wraps
+     * inside its own authored rectangle. */
+    dt.flags |= DRAW_CLIP;
+    dt.clip = *screen;
+    if (single_line) dt.flags &= ~DRAW_WORD_WRAP;
+    else dt.flags |= DRAW_WORD_WRAP;
     re.DrawText(&dt);
 }
 
@@ -1304,7 +1306,10 @@ void SCR_LayoutDrawNameTag(uiFrame_t const *frame, rect_t const *screen) {
                   screen->w - tag->padding_x * 2, screen->h - tag->padding_y * 2 };
     drawText_t dt = SCR_GetDrawText(frame, text.w, SCR_GetStringValue(frame), &tag->text);
     SCR_LayoutDrawBackdrop2(frame, screen, &tag->background);
-    dt.rect = text; dt.flags |= DRAW_WORD_WRAP; re.DrawText(&dt);
+    dt.rect = text;
+    dt.flags |= DRAW_WORD_WRAP | DRAW_CLIP;
+    dt.clip = text;
+    re.DrawText(&dt);
 }
 
 void SCR_LayoutDrawTextArea(uiFrame_t const *frame, rect_t const *screen) {
