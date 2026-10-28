@@ -340,6 +340,12 @@ static void UI_WriteQuestIndicator(gameClient_t *client) {
     cstring_t model;
     uiFrame_t frame = { .flags.type = FT_SPRITE, .color = COLOR32_WHITE, .text = "Stand" };
     if (!client || client->quest_until <= level.time || !parent) return;
+    /* ORDR's imported QuestChangedParticles sprite renders as opaque white
+     * quads over the entire F9 label in iPad OpenGL (observed in the user's
+     * gameplay screenshot). Keep the functional Quests button and its normal
+     * texture, but omit only this optional decorative particle overlay until
+     * its imported sprite materials can be rendered faithfully. */
+    if (level.map_path && strstr(level.map_path, "ORDR_S2_")) return;
     model = Theme_PlayerString(client, "QuestChangedParticles", NULL);
     if (!model || !*model) {
         fprintf(stderr, "WC3: missing QuestChangedParticles skin model\n");
