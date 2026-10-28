@@ -1,5 +1,8 @@
 # OpenWarcraft3 on iPad
 
+**ORDR S2 2.323[C] note:** The current engine branch, device-tested status, open bugs and correct [ipad-test]/[ipad-build] workflow usage are documented in [ORDR iPad handoff](../../docs/games/warcraft-3/ordr-native-handoff.md). A successful generic IPA build does not mean enemy movement, wave count, facility buttons or UI overlap have been fixed. Always check the artifact's exact commit.
+
+
 An iPad app (one executable plus six embedded frameworks) built directly with
 Xcode SDK commands, following the `mapview/ui` Makefile workflow. No Xcode project or third-party
 iOS dependencies are required beyond the SDL2 release tarball (downloaded and

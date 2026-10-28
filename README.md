@@ -118,6 +118,16 @@ Open the in-game Quake-style console with backtick/tilde. Use `build/bin/mpqtool
 build/bin/mpqtool -mpq "/path/to/Warcraft III/War3.mpq" ls Maps/Campaign
 ```
 
+## ORDR S2 2.323[C] iPad port — current handoff
+
+The actively developed ORDR single-player iPad branch is **feature/ordr-singleplayer-compat**. The most recent general CI passed, but enemy wave movement, death/count updates, building commands and overlapping HUD text are **not yet verified as fixed on device**. Work must stay in the OpenRealm engine; the original map is unchanged.
+
+- [Single source of truth: ORDR iPad handoff, current defects and next work](docs/games/warcraft-3/ordr-native-handoff.md)
+- [Dz/FDF event and frame compatibility contract](docs/games/warcraft-3/ordr-dzapi-compat.md)
+- [Private simulator asset and execution policy](docs/games/warcraft-3/ordr-simulator-private-assets.md)
+
+This is separate from the Unity remake and other Android builds.
+
 ## Run on iPad
 
 The iPad build needs macOS with Xcode (for the iOS SDK, `xcrun`, and `devicectl`), CMake, and no Xcode project. SDL2 is downloaded and built automatically on first use.

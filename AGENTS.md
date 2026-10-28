@@ -50,8 +50,8 @@ This codebase is inspired by **Quake 2** (id Software). The developer is deeply 
 | WC3 naval movement, FLOAT/AMPH water pathing, collision domains, bridge semantics | [docs/games/warcraft-3/naval-movement.md](docs/games/warcraft-3/naval-movement.md) |
 | WC3 alarm/captain AI natives and full-screen model cinematic compatibility | [docs/games/warcraft-3/campaign-ai-model-cinematic.md](docs/games/warcraft-3/campaign-ai-model-cinematic.md) |
 | WC3 JASS native coverage, callback contracts, state ownership | [games/warcraft-3/jass-native-coverage.md](games/warcraft-3/jass-native-coverage.md) |
-| ORDR native audit, verified behavior and continuation commands | [docs/games/warcraft-3/ordr-native-handoff.md](docs/games/warcraft-3/ordr-native-handoff.md) |
-| ORDR DzAPI FDF frames, keyboard bridge, tested semantics and remaining input gaps | [docs/games/warcraft-3/ordr-dzapi-compat.md](docs/games/warcraft-3/ordr-dzapi-compat.md) |
+| **ORDR iPad single source of truth — current status, actual CI/IPA evidence, P0 bugs and handoff** | [docs/games/warcraft-3/ordr-native-handoff.md](docs/games/warcraft-3/ordr-native-handoff.md) |
+| ORDR Dz/FDF contracts (technical reference; not proof of gameplay completion) | [docs/games/warcraft-3/ordr-dzapi-compat.md](docs/games/warcraft-3/ordr-dzapi-compat.md) |
 | WC3 AI next-upgrade cost queries and `ShiftTownSpot` construction placement state | [docs/games/warcraft-3/ai-upgrade-costs-and-town-spot.md](docs/games/warcraft-3/ai-upgrade-costs-and-town-spot.md) |
 | WC3 event-trigger queueing, synchronous `TriggerExecute`, coroutine context | [docs/games/warcraft-3/trigger-events.md](docs/games/warcraft-3/trigger-events.md) |
 | WC3 JASS choice dialogs, modal input, event context, remaining retail gaps | [docs/games/warcraft-3/jass-dialogs.md](docs/games/warcraft-3/jass-dialogs.md) |

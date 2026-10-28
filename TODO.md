@@ -1,3 +1,7 @@
+# Current ORDR iPad development tasks
+
+The **authoritative prioritized ORDR bug list and progress criteria** are maintained in [ORDR iPad handoff](docs/games/warcraft-3/ordr-native-handoff.md). P0: enemy wave movement (owner 6), death-event/count updates, building command card and functional effects. P1: top-left overlapping text, wisp/beacon, performance and rendering. Do not duplicate the task list here; update that one document as problems are resolved.
+
 # TODO
 
 ## LAN Game Hosting
