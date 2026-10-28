@@ -324,7 +324,7 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
     bool const ordr_wave_death = evt->type == EVENT_PLAYER_UNIT_DEATH &&
         subject && subject->s.player == 6 && level.vm &&
         jass_functionbyname(level.vm, "CUN");
-    uint32_t wave_registrations = 0, wave_matched = 0;
+    uint32_t wave_registrations = 0, wave_matched = 0, wave_queued = 0;
     /* KillUnit followed by RemoveUnit still owes death notifications while the corpse exists. */
     if (evt->edict_spawn_tracked &&
         (!subject || !subject->inuse || subject->spawn_time != evt->edict_spawn_time ||
@@ -517,6 +517,7 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                     if (direct || owner_match) {
                         if (ordr_wave_death) wave_matched++;
                         bool queued = jass_calltriggerevent(level.vm, e->trigger, evt);
+                        if (ordr_wave_death && queued) wave_queued++;
                         if (misha_summon_event)
                             fprintf(stderr, "WC3_MISHA summon-handler-result event=%u trigger=%ld queued=%u enabled=%u\n",
                                     (unsigned)evt->type, (long)quest_trigger_ordinal,
@@ -555,8 +556,8 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
         if (dispatch_samples++ < 80) {
             char detail[174];
             snprintf(detail, sizeof(detail),
-                     "unit=%u owner=6 registrations=%u owner_matched=%u marker_A901=%u marker_A902=%u",
-                     (unsigned)subject->s.number, wave_registrations, wave_matched,
+                     "unit=%u owner=6 registrations=%u owner_matched=%u actions_queued=%u marker_A901=%u marker_A902=%u",
+                     (unsigned)subject->s.number, wave_registrations, wave_matched, wave_queued,
                      (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','1')),
                      (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','2')));
             jass_ordr_log_event(level.vm, "ORDR_WAVE_DEATH_DISPATCH", detail);

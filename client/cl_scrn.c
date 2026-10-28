@@ -1710,8 +1710,49 @@ void SCR_LayoutDrawOverlay(handle_t layout) {
     }
 }
 
+/* A touch-only device has no persistent world-hover. Show live HP of
+ * selected units using the server-authoritative, recipient-filtered snapshot.
+ * This is visual only and does not alter combat or original-map variables. */
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+static void SCR_DrawTouchSelectionHealthBars(void) {
+    viewDef_t const *view = &cl.viewDef;
+    if (cl.playerstate.client_ui_state != CLIENT_UI_GAME ||
+        !view->entities || !cl.selection.num_selected ||
+        !re.GetEntityOverheadPosition) return;
+
+    FOR_LOOP(i, cl.selection.num_selected) {
+        uint32_t const id = cl.selection.entity_nums[i];
+        if (!id || id >= MAX_CLIENT_ENTITIES) continue;
+        entityState_t const *state = &cl.ents[id].current;
+        if (state->number != id || (state->renderfx & RF_HIDDEN) ||
+            !(state->flags & EF_HOVER_HEALTH)) continue;
+        float const hp = BYTE2FLOAT(state->stats[ENT_HEALTH]);
+        if (hp <= 0.0f) continue;
+        FOR_LOOP(j, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[j];
+            vec3_t top;
+            vec2_t screen;
+            if (ent->number != id || !(ent->flags & RF_UNIT) ||
+                (ent->flags & RF_HIDDEN) ||
+                !re.GetEntityOverheadPosition(ent, &top) ||
+                !SCR_ProjectWorldPoint(&top, &screen)) continue;
+            rect_t background = {screen.x - 0.027f, screen.y - 0.008f, 0.054f, 0.006f};
+            rect_t foreground = {background.x + 0.001f, background.y + 0.001f,
+                                 (background.w - 0.002f) * MIN(1.0f, hp),
+                                 background.h - 0.002f};
+            re.DrawFill(&background, MAKE(color32_t, 0, 0, 0, 220));
+            re.DrawFill(&foreground, MAKE(color32_t, 58, 215, 77, 255));
+            break;
+        }
+    }
+}
+#endif
+
 void SCR_DrawLayout(void) {
     active_tooltip = NULL;
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    SCR_DrawTouchSelectionHealthBars();
+#endif
 
     FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
         uint32_t flags = cl.playerstate.uiflags;
@@ -2011,6 +2052,11 @@ static void SCR_LayoutApplyOrderQueueModifier(uiFrame_t const *frame, char *comm
     strlcat(command, " queue", size);
 }
 
+/* SDL's synthetic world press might never have armed the visible HUD button. */
+bool SCR_LayoutTouchPressArmed(void) {
+    return layout_press_frame != 0 || layout_held_command[0] != '\0';
+}
+
 bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     menuMouseEvent_t const event = mouse_event->event;
     int const x = mouse_event->x;
@@ -2025,7 +2071,8 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     if(SCR_LayoutPopupMouseEvent(event,&point,param))return true;
     layout_hovered = NULL;
     layout_hovered_number = 0;
-    FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
+    /* Hit-test the frontmost (last-painted) interactive layer first. */
+    for (uint32_t layer = MAX_LAYOUT_LAYERS; layer-- > 0;) {
         handle_t layout = layout_layers[layer];
         if (modal_layer >= 0 && (int)layer != modal_layer) continue;
         uint32_t flags = cl.playerstate.uiflags;

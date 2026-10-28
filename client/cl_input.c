@@ -495,7 +495,9 @@ static bool CL_TouchFallbackUI(vec2_t pos, bool mouse_down_seen) {
      * consumed a mouse edge or authored an actual client command. */
     uint32_t const message_before = cls.netchan.message.cursize;
     bool consumed = false;
-    if (!mouse_down_seen) {
+    if (!mouse_down_seen || (!window && !SCR_LayoutTouchPressArmed())) {
+        /* Re-arm a missed HUD press before finger-up; otherwise an actual
+         * building-command tap can be discarded as an unmatched release. */
         mouse.button = SDL_BUTTON_LEFT;
         consumed = CL_WindowMouseEventWithMods(MENU_MOUSE_DOWN, x, y, SDL_BUTTON_LEFT, 0);
         if (!consumed)

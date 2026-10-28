@@ -53,13 +53,19 @@ static FRAMEDEF MessageFrame(vec2_t const *pos, cstring_t message) {
      * Give multi-line or long notices space without relocating map Dz frames. */
     if (level.map_path && strstr(level.map_path, "ORDR_S2_") && message &&
         (strchr(message, '\n') || strlen(message) > 105)) {
-        UI_SetSize(&frame, 0.48f, 0.24f);
+        /* Keep long wave notifications clear of the bottom command area. */
+        UI_SetSize(&frame, 0.44f, 0.16f);
+        frame.Font.Size = 0.009f;
     }
     /* WC3 DisplayTextToPlayer standard position is center-left (y=0.30 from screen top).
      * JASS y=0 is the baseline; positive y shifts the text upward.
      * WarSmash anchors messages at FramePoint.LEFT, y=0 (screen center) regardless of JASS y. */
     if (pos && pos->x >= 0.0f && pos->x <= UI_BASE_WIDTH && pos->y >= 0.0f && pos->y <= UI_BASE_HEIGHT)
         UI_SetPoint(&frame, FRAMEPOINT_TOPLEFT, &hud.msg_root, FRAMEPOINT_TOPLEFT, pos->x, -(0.30f - pos->y));
+    if (level.map_path && strstr(level.map_path, "ORDR_S2_") && message &&
+        (strchr(message, '\n') || strlen(message) > 105) &&
+        (!pos || pos->y == 0.0f))
+        UI_SetPoint(&frame, FRAMEPOINT_TOPLEFT, &hud.msg_root, FRAMEPOINT_TOPLEFT, 0.05f, -0.21f);
     return frame;
 }
 
