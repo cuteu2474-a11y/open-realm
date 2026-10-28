@@ -9272,6 +9272,44 @@ TEST(wc3_api, player_unit_death_event_respects_distinct_wave_owners) {
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
+/* Filter parameter #4 is part of the retail player-unit event contract.
+ * Wave death registration may explicitly reject units by type/owner. */
+TEST(wc3_api, player_unit_death_filter_excludes_nonmatching_units) {
+    edict_t *included, *excluded;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer filteredDeaths = 0\n"
+        "endglobals\n"
+        "function filter_fools takes nothing returns boolean\n"
+        "  return GetUnitTypeId(GetFilterUnit()) == 'hfoo'\n"
+        "endfunction\n"
+        "function onFiltered takes nothing returns nothing\n"
+        "  set filteredDeaths = filteredDeaths + 1\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        "  call BJassAssert(filteredDeaths == 1, \"player-unit filter must exclude unrelated wave units\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(6), EVENT_PLAYER_UNIT_DEATH, Condition(function filter_fools))\n"
+        "  call TriggerAddAction(t, function onFiltered)\n"
+        "endfunction\n"));
+    included = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 64.0f, 64.0f);
+    excluded = alloc_test_unit(MAKEFOURCC('h','p','e','a'), 128.0f, 64.0f);
+    T_NOT_NULL(included);
+    T_NOT_NULL(excluded);
+    if (!included || !excluded) return;
+    included->s.player = 6;
+    excluded->s.player = 6;
+    G_PublishEvent(included, EVENT_PLAYER_UNIT_DEATH);
+    G_PublishEvent(excluded, EVENT_PLAYER_UNIT_DEATH);
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_api, death_events_drain_chained_corpse_removals) {
     setup_test_world();
     T_ASSERT(run_test_jass(

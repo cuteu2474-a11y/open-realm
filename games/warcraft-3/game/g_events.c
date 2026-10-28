@@ -543,6 +543,12 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                             (unsigned)direct, (unsigned)owner_match);
                     }
                     if (direct || owner_match) {
+                        /* The filter is evaluated in GetFilterUnit context,
+                         * just like TriggerRegisterEnterRegion. A rejected
+                         * filter must never run actions or update ORDR's
+                         * map-owned kill counters. */
+                        if (e->filter && !jass_evaluateboolexpr(level.vm, e->filter, subject))
+                            break;
                         if (ordr_wave_death) wave_matched++;
                         bool queued = jass_calltriggerevent(level.vm, e->trigger, evt);
                         if (ordr_wave_death && queued) wave_queued++;

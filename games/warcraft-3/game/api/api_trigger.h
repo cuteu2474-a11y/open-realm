@@ -376,7 +376,7 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
     if (!whichTrigger || whichTrigger->destroyed) return jass_pushnullhandle(j, "event");
     player_t *whichPlayer = jass_checkhandle(j, 2, "player");
     EVENTTYPE *whichPlayerUnitEvent = jass_checkhandle(j, 3, "playerunitevent");
-    //handle_t filter = jass_checkhandle(j, 4, "boolexpr");
+    jassFunc_t const *filter = jass_checkhandle(j, 4, "boolexpr");
     event_t *evt;
     /* BDN registers EVENT_PLAYER_UNIT_SELECTED for every player. A missing
      * event constant/player or exhausted registry used to be dereferenced. */
@@ -397,6 +397,10 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
      * NULL subjects incorrectly dispatched all player-unit deaths to every
      * AI player, corrupting map-authored wave counters. */
     evt->state = (uint32_t)PLAYER_NUM(whichPlayer);
+    /* This fourth parameter is an authored filter. Ignoring it caused the
+     * engine to dispatch every death/order to all player-unit callbacks,
+     * including callbacks the original ORDR map deliberately filtered. */
+    evt->filter = filter;
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
     if (WC3_TUTORIAL_DEBUG_ENABLED() &&
