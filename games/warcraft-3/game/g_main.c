@@ -1570,7 +1570,7 @@ static void G_ORDRShowFlowStatus(void) {
         FOR_LOOP(i, globals.num_edicts) {
             edict_t const *unit = &g_edicts[i];
             if (!unit->inuse || !(unit->svflags & SVF_MONSTER) ||
-                unit->s.player != 5 || G_UnitIsStructure(unit) || M_IsDead(unit))
+                unit->s.player != 6 || G_UnitIsStructure(unit) || M_IsDead(unit))
                 continue;
             count++;
             if (unit->aiflags & AI_IMMOBILE) immobile++;
@@ -1598,7 +1598,7 @@ static void G_ORDRShowFlowStatus(void) {
             }
         }
         char totals[120];
-        snprintf(totals, sizeof(totals), "owner5_mobile=%u active_orders=%u immobile=%u",
+        snprintf(totals, sizeof(totals), "owner6_mobile=%u active_orders=%u immobile=%u",
                  count, active_orders, immobile);
         jass_ordr_log_event(level.vm, "ORDR_ENEMY_SUMMARY", totals);
     }

@@ -486,6 +486,24 @@ static bool G_BuildHeroReviveButton(edict_t *altar, edict_t *hero, uint8_t slot,
     return true;
 }
 
+/* ORDR's authored facility units can keep the Birth presentation even though
+ * they are not construction/building metadata. Their ability/production card
+ * must remain available after creation. No command is invented: each entry
+ * still comes from the original UnitAbilities/UnitProfile rows and passes
+ * the normal authority checks. */
+static bool G_ORDRHasBirthFacilityCommands(edict_t const *unit) {
+    UnitProfile_t const *p;
+    UnitAbilities_t const *a;
+    if (!unit || !strstr(level.map_path, "ORDR_S2_") ||
+        !unit->data.UnitAbilities || !unit->class_id) return false;
+    p = G_UnitProfile(unit->class_id);
+    a = unit->data.UnitAbilities;
+    return (a->abilList && *a->abilList) ||
+           (p && ((p->trains && *p->trains) ||
+                  (p->researches && *p->researches) ||
+                  (p->builds && *p->builds)));
+}
+
 uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t max_buttons) {
     uint8_t count = 0;
     UnitBalance_t const *b;
@@ -530,7 +548,8 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
      * complete and usable. Only suppress the ordinary unit command card for
      * a mobile unit's birth presentation; the construction pointer above owns the
      * actual unfinished-building command state. */
-    if (ent->currentmove && ent->currentmove->think == ai_birth && !G_UnitIsStructure(ent)) {
+    if (ent->currentmove && ent->currentmove->think == ai_birth &&
+        !G_UnitIsStructure(ent) && !G_ORDRHasBirthFacilityCommands(ent)) {
         return 0;
     }
     if (S_AncientIsMorphing(ent)) return 0;

@@ -108,8 +108,13 @@ def inspect(report):
     # An accepted order is not movement. Compare position samples for the
     # same enemy entity across distinct game-time checkpoints.
     enemy_order_accepts = re.findall(
-        r"\[ORDR_SCRIPT_POINT_ORDER\s*\][^\r\n]*\bowner=5\b[^\r\n]*\baccepted=1\b",
+        r"\[ORDR_SCRIPT_POINT_ORDER\s*\][^\r\n]*\bowner=6\b[^\r\n]*\baccepted=1\b",
         jass)
+    wave_spawn_enter = re.findall(r"\[ORDR_WAVE_SPAWN_ENTER\s*\]", jass)
+    wave_death_queued = re.findall(
+        r"\[ORDR_WAVE_DEATH_QUEUED\s*\]([^\r\n]*)", jass)
+    wave_death_dispatch = re.findall(
+        r"\[ORDR_WAVE_DEATH_DISPATCH\s*\]([^\r\n]*)", jass)
     enemy_positions = {}
     for timestamp, unit, x, y in re.findall(
         r"^(\d+) ms\s+\[ORDR_ENEMY_MOVEMENT\s*\]\s+unit=(\d+)\b[^\r\n]*?"
@@ -216,6 +221,13 @@ def inspect(report):
         "attack_block_reasons": sorted(set(attack_block_reasons)),
         "attack_projectiles_stalled_count": len(projectiles_stalled),
         "attack_damage_verified": bool(attack_hp_applied),
+        "wave_spawn_region_enter_events": len(wave_spawn_enter),
+        "wave_death_events_queued": len(wave_death_queued),
+        "wave_death_events_dispatched": len(wave_death_dispatch),
+        "wave_death_missing_count_markers": sum(
+            "marker_A901=0" in line for line in wave_death_queued),
+        "wave_death_unmatched_handlers": sum(
+            "owner_matched=0" in line for line in wave_death_dispatch),
         "enemy_wave_sampled_units": len(enemy_positions),
         "enemy_wave_repeatedly_sampled_units": len(repeated_enemies),
         "enemy_wave_moving_units": sorted(moving_enemies),

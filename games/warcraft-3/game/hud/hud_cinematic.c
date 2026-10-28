@@ -47,6 +47,14 @@ static FRAMEDEF MessageFrame(vec2_t const *pos, cstring_t message) {
     FRAMEDEF frame = hud.msg_text;
     frame.Text = (string_t)message;
     frame.TextLength = strlen(message);
+    /* ORDR publishes many long multi-line notifications at (0,0), including
+     * wave and shop feedback. The stock single-line 0.145-high 0.30-wide
+     * text area clips/wraps these into each other on the compact iPad canvas.
+     * Give multi-line or long notices space without relocating map Dz frames. */
+    if (level.map_path && strstr(level.map_path, "ORDR_S2_") && message &&
+        (strchr(message, '\n') || strlen(message) > 105)) {
+        UI_SetSize(&frame, 0.48f, 0.24f);
+    }
     /* WC3 DisplayTextToPlayer standard position is center-left (y=0.30 from screen top).
      * JASS y=0 is the baseline; positive y shifts the text upward.
      * WarSmash anchors messages at FramePoint.LEFT, y=0 (screen center) regardless of JASS y. */

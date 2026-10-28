@@ -3515,6 +3515,7 @@ void G_SetEventSubject(event_t *, edict_t *);
 void G_SetPlayerEventSubject(event_t *, edict_t *);
 bool G_EventSubjectIsCurrent(event_t *);
 void G_UnitPositionChanged(edict_t *, vec2_t const *);
+void G_UnitSpawnedRegionEvents(edict_t *);
 void G_JassVariableChanged(cstring_t, float, float);
 bool G_LimitMatches(uint32_t, float, float);
 quest_t *G_MakeQuest(void);

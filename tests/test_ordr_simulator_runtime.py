@@ -22,6 +22,18 @@ class SimulatorRuntimeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             return completed.stdout
 
+    def test_spawn_region_and_death_dispatch_are_observed_separately(self):
+        report = json.loads(self.inspect(
+            "30000 ms [ORDR_WAVE_SPAWN_ENTER] unit=100 owner=6 registration=5\n"
+            "34100 ms [ORDR_WAVE_DEATH_QUEUED] unit=100 owner=6 killer=77 marker_A901=1 marker_A902=0\n"
+            "34200 ms [ORDR_WAVE_DEATH_DISPATCH] unit=100 owner=6 registrations=2 owner_matched=2 marker_A901=1 marker_A902=0\n",
+            "", "", ""))
+        self.assertEqual(report["wave_spawn_region_enter_events"], 1)
+        self.assertEqual(report["wave_death_events_queued"], 1)
+        self.assertEqual(report["wave_death_events_dispatched"], 1)
+        self.assertEqual(report["wave_death_missing_count_markers"], 0)
+        self.assertEqual(report["wave_death_unmatched_handlers"], 0)
+
     def test_attack_swing_without_enemy_hp_change_does_not_pass(self):
         report = json.loads(self.inspect(
             "22000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=5\n"

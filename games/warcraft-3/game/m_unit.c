@@ -522,6 +522,20 @@ void unit_die(edict_t *self, edict_t *attacker) {
      * (TriggerRegisterDeathEvent/UnitEvent); EVENT_PLAYER_UNIT_DEATH fires the
      * owner's player-unit-death triggers (TriggerRegisterPlayerUnitEvent), e.g.
      * the mission win check that counts the player's dying naga. */
+    if (self->s.player == 6 && level.vm &&
+        jass_functionbyname(level.vm, "CUN")) {
+        static unsigned death_samples;
+        if (death_samples++ < 80) {
+            char detail[196];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=6 killer=%u marker_A901=%u marker_A902=%u",
+                     (unsigned)self->s.number, (unsigned)self->class_id,
+                     attacker ? (unsigned)attacker->s.number : 0,
+                     (unsigned)G_UnitAbilityLevel(self, MAKEFOURCC('A','9','0','1')),
+                     (unsigned)G_UnitAbilityLevel(self, MAKEFOURCC('A','9','0','2')));
+            jass_ordr_log_event(level.vm, "ORDR_WAVE_DEATH_QUEUED", detail);
+        }
+    }
     G_PublishEventWithSource(self, EVENT_UNIT_DEATH, attacker);
     G_PublishEventWithSource(self, EVENT_PLAYER_UNIT_DEATH, attacker);
     self->svflags |= SVF_DEADMONSTER;
@@ -1470,6 +1484,7 @@ edict_t *unit_create(uint32_t player, uint32_t unitid, vec2_t const *location, f
     unit->s.angle = facing * M_PI / 180;
     G_ActivateUnitFood(unit);
     G_BotUnitReady(unit);
+    G_UnitSpawnedRegionEvents(unit);
     return unit;
 }
 

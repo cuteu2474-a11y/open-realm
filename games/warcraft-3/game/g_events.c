@@ -321,6 +321,10 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
     bool misha_summon_event = false;
     bool result_event = evt->type == EVENT_PLAYER_VICTORY || evt->type == EVENT_PLAYER_DEFEAT;
     uint32_t matching_handlers = 0, invoked_handlers = 0;
+    bool const ordr_wave_death = evt->type == EVENT_PLAYER_UNIT_DEATH &&
+        subject && subject->s.player == 6 && level.vm &&
+        jass_functionbyname(level.vm, "CUN");
+    uint32_t wave_registrations = 0, wave_matched = 0;
     /* KillUnit followed by RemoveUnit still owes death notifications while the corpse exists. */
     if (evt->edict_spawn_tracked &&
         (!subject || !subject->inuse || subject->spawn_time != evt->edict_spawn_time ||
@@ -432,6 +436,7 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                  *    context unit so GetTriggerUnit()/GetDyingUnit() resolve to
                  *    it (e.g. Naga_Victory_Check counts the dying naga). */
                 if (e->type == evt->type) {
+                    if (ordr_wave_death) wave_registrations++;
                     bool direct = subject && e->subject == subject;
                     /* Selection belongs to the player who clicked the
                      * unit, not the unit owner. The original ORDR menu
@@ -510,6 +515,7 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                             (unsigned)direct, (unsigned)owner_match);
                     }
                     if (direct || owner_match) {
+                        if (ordr_wave_death) wave_matched++;
                         bool queued = jass_calltriggerevent(level.vm, e->trigger, evt);
                         if (misha_summon_event)
                             fprintf(stderr, "WC3_MISHA summon-handler-result event=%u trigger=%ld queued=%u enabled=%u\n",
@@ -544,6 +550,18 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                 break;
         }
     }
+    if (ordr_wave_death) {
+        static unsigned dispatch_samples;
+        if (dispatch_samples++ < 80) {
+            char detail[174];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u owner=6 registrations=%u owner_matched=%u marker_A901=%u marker_A902=%u",
+                     (unsigned)subject->s.number, wave_registrations, wave_matched,
+                     (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','1')),
+                     (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','2')));
+            jass_ordr_log_event(level.vm, "ORDR_WAVE_DEATH_DISPATCH", detail);
+        }
+    }
     if (result_event) {
         G_GameResultDebug("execute event complete type=%s matching_handlers=%u invoked_handlers=%u",
             evt->type == EVENT_PLAYER_VICTORY ? "VICTORY" : "DEFEAT",
@@ -551,11 +569,15 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
     }
 }
 
-static void G_TouchTriggers(edict_t *ent) {
+/* Unit creation in a JASS-authored region is an enter, even when the new
+ * actor has never translated. ORDR spawns each Player(6) wave at the center
+ * of the first waypoint rect and expects that region event to issue Move.
+ * Existing movement crossings retain their former behavior. */
+static void G_TouchTriggers(edict_t *ent, bool just_spawned) {
     /* Original ORDR S2 2.323[C] uses BDQ(CH, CRy) for its random-wisp
      * beacon. CH = Rect(-3584,-9504,-3328,-9216), e0IX is the wisp.
      * Log just the actual boundary crossing, not each simulation tick. */
-    if (ent && level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
+    if (!just_spawned && ent && level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
         jass_functionbyname(level.vm, "CRy")) {
         static unsigned beacon_crossings_logged;
         bool const before = ent->old_origin.x >= -3584.0f &&
@@ -596,11 +618,26 @@ static void G_TouchTriggers(edict_t *ent) {
                 region = G_RegionFromHandle(evt->region);
                 spawn_time = ent->spawn_time;
                 if (region && G_RegionContains(region, &ent->s.origin2) &&
-                    !G_RegionContains(region, &ent->old_origin) && jass_evaluateboolexpr(level.vm, evt->filter, ent) &&
+                    (just_spawned || !G_RegionContains(region, &ent->old_origin)) &&
+                    jass_evaluateboolexpr(level.vm, evt->filter, ent) &&
                     ent->inuse && ent->spawn_time == spawn_time && !G_IsDeferredFree(ent) &&
                     G_EventFromHandle(event_handle) == evt && evt->region == region_handle)
                 {
                     G_PublishEventResponse(ent, EVENT_GAME_ENTER_REGION, evt);
+                    if (just_spawned && ent->s.player == 6 && level.vm &&
+                        jass_functionbyname(level.vm, "CUN")) {
+                        static unsigned sampled;
+                        if (sampled++ < 96) {
+                            char detail[170];
+                            snprintf(detail, sizeof(detail),
+                                     "unit=%u raw=0x%08x owner=%u x=%.0f y=%.0f registration=%u",
+                                     (unsigned)ent->s.number, (unsigned)ent->class_id,
+                                     (unsigned)ent->s.player, (double)ent->s.origin2.x,
+                                     (double)ent->s.origin2.y,
+                                     (unsigned)evt->registration_sequence);
+                            jass_ordr_log_event(level.vm, "ORDR_WAVE_SPAWN_ENTER", detail);
+                        }
+                    }
                     if (level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
                         jass_functionbyname(level.vm, "CRy")) {
                         static unsigned published;
@@ -618,6 +655,7 @@ static void G_TouchTriggers(edict_t *ent) {
                 break;
             }
             case EVENT_GAME_LEAVE_REGION: {
+                if (just_spawned) break; /* a spawn cannot leave a region */
                 handle_t event_handle = G_EventHandle(evt), region_handle = evt->region;
                 region_t *region = G_RegionFromHandle(evt->region);
                 uint32_t spawn_time = ent->spawn_time;
@@ -632,6 +670,7 @@ static void G_TouchTriggers(edict_t *ent) {
                 break;
             }
             case EVENT_UNIT_IN_RANGE:
+                if (just_spawned) break; /* entering unrelated range alarms needs its own creation contract */
                 if (!G_EventSubjectIsCurrent(evt)) break;
                 if (ent == evt->subject) {
                     edict_t *target;
@@ -668,11 +707,22 @@ static void G_TouchTriggers(edict_t *ent) {
 
 /* Explicit JASS position changes happen before G_RunEntities samples old_origin.
  * Evaluate the crossing here, then make the teleported position the next baseline. */
+/* New JASS-created units must receive initial rect-enter triggers exactly
+ * once. The queued callbacks run through the usual deferred G_RunEvents and
+ * jass_runevents sequence, after CreateUnit's caller finishes initializing
+ * ability markers and levels; this never directly issues a movement order. */
+void G_UnitSpawnedRegionEvents(edict_t *ent) {
+    if (!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) || !level.vm)
+        return;
+    ent->old_origin = ent->s.origin2;
+    G_TouchTriggers(ent, true);
+}
+
 void G_UnitPositionChanged(edict_t *ent, vec2_t const *old_position) {
     if (!ent || !ent->inuse || !old_position ||
         !memcmp(old_position, &ent->s.origin2, sizeof(*old_position))) return;
     ent->old_origin = *old_position;
-    G_TouchTriggers(ent);
+    G_TouchTriggers(ent, false);
     ent->old_origin = ent->s.origin2;
 }
 
@@ -732,7 +782,7 @@ void G_RunEntities(void) {
         if (!G_UnitIsWorldActive(ent)) continue;
         if (!memcmp(&ent->old_origin, &ent->s.origin2, sizeof(vec2_t)))
             continue;
-        G_TouchTriggers(ent);
+        G_TouchTriggers(ent, false);
     }
 }
 
