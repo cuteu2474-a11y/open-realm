@@ -206,6 +206,15 @@ TEST(wc3_multiboard, colored_korean_names_do_not_expand_scoreboard_columns) {
 }
 #endif
 
+/* Status/comment cell widths must account for visible glyphs, not only
+ * the authored column width. This helper is independent of map assets. */
+#ifdef BZ_TESTS
+TEST(wc3_multiboard, ordr_description_width_exceeds_short_number_column) {
+    T_ASSERT(MultiboardUTF8Chars("유닛 카운트 제한: 70") > MultiboardUTF8Chars("0점"));
+    T_ASSERT(MultiboardUTF8Chars("|cff22dd33한글|r") == 2);
+}
+#endif
+
 /* MultiboardSetItemWidth / MultiboardSetItemsWidth write per-cell widths.
  * The old renderer threw them away and drew every column at equal width:
  * ORDR score columns consequently overlap their neighboring values. Use the
@@ -218,6 +227,23 @@ static float MultiboardAuthoredColumnWidth(multiboard_t const *board,
         struct gmultiboardcell_s const *cell =
             &board->cells[row * MAX_MULTIBOARD_COLS + col];
         if (cell->width > authored) authored = cell->width;
+    }
+    /* An authored width of 0.05 FDF units is legal but it is NOT enough for
+     * many Korean descriptions/status rows used by ORDR. Previously the
+     * renderer let long values paint into the following columns, making the
+     * score panel illegible despite a successful layout build. Bound the
+     * source width by the widest visible string for that column. Preserve
+     * non-ORDR authored widths without altering their layout contract. */
+    if (level.map_path && strstr(level.map_path, "ORDR_S2_")) {
+        size_t max_glyphs = 0;
+        FOR_LOOP(row, MIN(board->rows, (uint32_t)MAX_MULTIBOARD_ROWS)) {
+            struct gmultiboardcell_s const *cell =
+                &board->cells[row * MAX_MULTIBOARD_COLS + col];
+            if (cell->show_value && cell->value[0])
+                max_glyphs = MAX(max_glyphs, MultiboardUTF8Chars(cell->value));
+        }
+        if (max_glyphs)
+            authored = MAX(authored, MIN(0.24f, max_glyphs * 0.0062f + 0.016f));
     }
     return authored > 0.0f ? MAX(0.014f, authored)
                             : (BZ_WC3_MB_WIDTH - 0.014f) / (float)cols;
