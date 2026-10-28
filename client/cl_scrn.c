@@ -336,10 +336,12 @@ void SCR_DrawScreenField(uint32_t msec) {
     if (cls.state == ca_active && cls.key_dest == key_game &&
         cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
         !CL_WindowModalActive() && !SCR_LayoutModalActive()) {
-        size2_t size = re.GetWindowSize();
-        rect_t chat_button = { .x = size.width - 110, .y = 16, .w = 94, .h = 46 };
-        re.DrawFill(&chat_button, MAKE(color32_t, 24, 34, 48, 220));
-        re.DrawString((int)chat_button.x + 17, (int)chat_button.y + 14, "CHAT");
+        /* Always provide a large CHAT key when a custom map hides the
+         * original upper-button bar. Reuse the stock chat_open flow. */
+        rect_t const button = SCR_iPadChatButtonRect(re.GetWindowSize());
+        re.DrawFill(&button, MAKE(color32_t, 23, 46, 73, 246));
+        re.DrawString((int)button.x + 36, (int)button.y + 10, "CHAT");
+        re.DrawString((int)button.x + 29, (int)button.y + 30, "ENTER");
     }
 #endif
     CON_DrawConsole();
@@ -417,6 +419,11 @@ static handle_t layout_layers[MAX_LAYOUT_LAYERS];
 static texture_t *layout_dynamic_pics[MAX_DYNAMIC_IMAGES];
 static char layout_dynamic_pic_names[MAX_DYNAMIC_IMAGES][512];
 static uint32_t layout_dynamic_pic_cursor;
+/* Window-pixel coordinates shared by the iPad renderer and touch hit test. */
+rect_t SCR_iPadChatButtonRect(size2_t size) {
+    return (rect_t){ .x = size.width - 148, .y = 18, .w = 128, .h = 54 };
+}
+
 static bool layout_left_down;
 /* Captured identity is layer+frame, since frame numbers repeat across layers. */
 static uint32_t layout_press_frame, layout_press_layer;

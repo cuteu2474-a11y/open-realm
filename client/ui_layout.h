@@ -46,6 +46,7 @@ bool SCR_LayoutFrameRowsVisible(uiFrame_t const *frame);
 uint32_t SCR_LayoutEditCaretAt(uiFrame_t const *edit_frame, cstring_t value, float x);
 bool SCR_LayoutModalActive(void);
 void SCR_LayoutClampSelectionRect(rect_t *rect);
+rect_t SCR_iPadChatButtonRect(size2_t size);
 void SCR_DrawLayout(void);
 void SCR_DrawLoadingLayout(void);
 bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *event);
