@@ -1053,6 +1053,58 @@ static uint32_t SelectedUnits(gameClient_t *client, edict_t * *out, uint32_t max
     return G_GetOrderedSelectedUnits(client, out, max_out);
 }
 
+/* Shop merchandise and ordinary producer abilities are built independently.
+ * Both may occupy authored slot 0,0. Preserve the shop card, and place each
+ * colliding secondary command in the next open cell of the 4x3 WC3 grid. */
+static void UI_ResolveMixedShopCommandPositions(gameCommandButton_t *buttons,
+                                                 uint8_t shop_count, uint8_t total_count) {
+    if (!buttons || shop_count >= total_count) return;
+    for (uint8_t i = shop_count; i < total_count; i++) {
+        bool collision = buttons[i].x >= 4 || buttons[i].y >= 3;
+        for (uint8_t j = 0; j < i && !collision; j++)
+            collision = buttons[j].x == buttons[i].x && buttons[j].y == buttons[i].y;
+        if (!collision) continue;
+        for (uint8_t slot = 0; slot < 12; slot++) {
+            uint8_t const x = slot % 4, y = slot / 4;
+            bool occupied = false;
+            for (uint8_t j = 0; j < i; j++) {
+                if (buttons[j].x == x && buttons[j].y == y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied) continue;
+            buttons[i].x = x;
+            buttons[i].y = y;
+            break;
+        }
+    }
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_shop, mixed_shop_buttons_do_not_hide_native_abilities) {
+    gameCommandButton_t buttons[4] = {0};
+    buttons[0].x = 0; buttons[0].y = 0;
+    buttons[1].x = 1; buttons[1].y = 0;
+    buttons[2].x = 0; buttons[2].y = 0;
+    buttons[3].x = 1; buttons[3].y = 0;
+    UI_ResolveMixedShopCommandPositions(buttons, 2, 4);
+    T_EQ(buttons[0].x, 0); T_EQ(buttons[1].x, 1);
+    T_EQ(buttons[2].x, 2); T_EQ(buttons[2].y, 0);
+    T_EQ(buttons[3].x, 3); T_EQ(buttons[3].y, 0);
+}
+TEST(wc3_shop, mixed_shop_keeps_free_authored_ability_positions) {
+    gameCommandButton_t buttons[3] = {0};
+    buttons[0].x = 0; buttons[0].y = 0;
+    buttons[1].x = 1; buttons[1].y = 1;
+    buttons[2].x = 3; buttons[2].y = 2;
+    UI_ResolveMixedShopCommandPositions(buttons, 1, 3);
+    T_EQ(buttons[1].x, 1); T_EQ(buttons[1].y, 1);
+    T_EQ(buttons[2].x, 3); T_EQ(buttons[2].y, 2);
+}
+#endif
+
 void Get_Commands_f(edict_t *ent) {
     edict_t *selected = ent && ent->client ? G_GetMainSelectedUnit(ent->client) : NULL;
     gameClient_t *previous_ui_client;
@@ -1100,6 +1152,7 @@ void Get_Commands_f(edict_t *ent) {
             buttons[count] = unit_buttons[i];
             count++;
         }
+        UI_ResolveMixedShopCommandPositions(buttons, shop_count, count);
     } else {
         count = G_GetCommandButtons(selected, buttons, 12);
     }
@@ -1132,6 +1185,25 @@ void Get_Commands_f(edict_t *ent) {
                 }
             }
             if (production) buttons[i].disabled = 1;
+        }
+    }
+    /* The low-level command-count trace excludes shop stock. Observe the
+     * final, combined and positioned iPad card before serializing buttons. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN") && selected &&
+        (G_UnitIsStructure(selected) || G_IsItemShop(selected) || G_IsUnitShop(selected))) {
+        static uint32_t samples;
+        if (samples++ < 96) {
+            char detail[192];
+            uint32_t disabled = 0;
+            FOR_LOOP(i, count) if (buttons[i].disabled) disabled++;
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x final_count=%u disabled=%u item_shop=%u unit_shop=%u first=%.24s second=%.24s",
+                     (unsigned)selected->s.number, (unsigned)selected->class_id,
+                     (unsigned)count, (unsigned)disabled,
+                     (unsigned)G_IsItemShop(selected), (unsigned)G_IsUnitShop(selected),
+                     count ? buttons[0].command : "",
+                     count > 1 ? buttons[1].command : "");
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_FINAL_CARD", detail);
         }
     }
     FOR_LOOP(i, count) {

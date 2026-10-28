@@ -176,6 +176,8 @@ void G_SetAllStockSlots(bool items, int32_t slots) {
             unit->stock->unit_slots = value;
             G_ResetUnitStock(unit);
         }
+        /* JASS slot changes must refresh an already-selected shop card. */
+        G_InvalidateUnitCommands(unit);
     }
 }
 
@@ -198,6 +200,7 @@ void G_SetStockSlots(edict_t *unit, bool items, int32_t slots) {
         unit->stock->unit_slots = value;
         G_ResetUnitStock(unit);
     }
+    G_InvalidateUnitCommands(unit);
 }
 
 /* Identifies live units whose authored merchandise makes them shops. */
@@ -534,6 +537,9 @@ bool G_AddItemStock(edict_t *shop, uint32_t item_id, int32_t current, int32_t ma
         .maximum = MAX(0, maximum),
     };
     G_StartItemRestock(shop, (uint32_t)index);
+    /* AddItemToStock changes the merchandise card immediately, even while
+     * the same shop remains selected in a map-authored JASS sequence. */
+    G_InvalidateUnitCommands(shop);
     return true;
 }
 
@@ -677,6 +683,7 @@ bool G_AddUnitStock(edict_t *shop, uint32_t unit_id, int32_t current, int32_t ma
         .maximum = MAX(0, maximum),
     };
     G_StartUnitRestock(shop, (uint32_t)index);
+    G_InvalidateUnitCommands(shop);
     return true;
 }
 
