@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 BUNDLE = Path(__file__).resolve().parents[1] / "bundle.py"
 spec = importlib.util.spec_from_file_location("ipad_bundle", BUNDLE)
@@ -19,6 +20,12 @@ class IpadOrientationTests(unittest.TestCase):
         self.assertEqual(options["UISupportedInterfaceOrientations~ipad"], expected)
         self.assertFalse(any("Portrait" in orientation
                              for values in options.values() for orientation in values))
+
+    def test_ci_build_number_advances_installed_app_version(self):
+        with patch.dict("os.environ", {"GITHUB_RUN_NUMBER": "524"}, clear=False):
+            self.assertEqual(bundle.app_build_version(), "524")
+        with patch.dict("os.environ", {"GITHUB_RUN_NUMBER": "not-a-number"}, clear=False):
+            self.assertEqual(bundle.app_build_version(), "1")
 
     def test_orientation_values_are_independent_lists(self):
         info = bundle.app_orientation_info()

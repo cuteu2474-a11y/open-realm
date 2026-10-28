@@ -677,6 +677,15 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                 if (ipad_chat_touch_down) {
                     ipad_chat_touch_down = false;
                     touch_pan.fallback_sent = true;
+                } else if (CL_iPadChatHit((int)touch_pan.start.x, (int)touch_pan.start.y) &&
+                           CL_iPadChatHit((int)pos.x, (int)pos.y) &&
+                           cls.state == ca_active && cls.key_dest == key_game &&
+                           cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
+                           !CL_WindowModalActive() && !SCR_LayoutModalActive()) {
+                    /* Recovered a finger tap whose first edge was swallowed
+                     * by UIKit/SDL. Do not also select a world object. */
+                    Cmd_ForwardToServer("chat_open");
+                    touch_pan.fallback_sent = true;
                 } else if (touch_pan.single_can_select &&
                     finger->timestamp - touch_pan.down_time >= 450 &&
                     finger->timestamp - touch_pan.down_time < 10000) {
@@ -2142,12 +2151,12 @@ TEST(client_input, final_shift_release_notifies_game_order_queue) {
 TEST(client_input, ipad_chat_key_hit_area_tracks_visible_rectangle) {
     size2_t size = { .width = 1024, .height = 768 };
     rect_t const rect = SCR_iPadChatButtonRect(size);
-    T_FEQ(rect.x, 876.0f, 0.01f);
-    T_FEQ(rect.y, 18.0f, 0.01f);
-    T_FEQ(rect.w, 128.0f, 0.01f);
-    T_FEQ(rect.h, 54.0f, 0.01f);
+    T_FEQ(rect.x, 830.0f, 0.01f);
+    T_FEQ(rect.y, 120.0f, 0.01f);
+    T_FEQ(rect.w, 174.0f, 0.01f);
+    T_FEQ(rect.h, 61.0f, 0.01f);
     size.width = 1366;
-    T_FEQ(SCR_iPadChatButtonRect(size).x, 1218.0f, 0.01f);
+    T_FEQ(SCR_iPadChatButtonRect(size).x, 1172.0f, 0.01f);
 }
 
 TEST(client_input, opt_in_game_key_edges_use_existing_string_command) {

@@ -147,6 +147,11 @@ static uint32_t UI_CommandButtonImage(gameCommandButton_t const *button) {
     PATHSTR path;
 
     if (!button->disabled) return gi.ImageIndex(button->art);
+    /* ORDR map-imported BTN textures often have no matching DIS artwork.
+     * Using that imaginary file renders the engine's pink checkerboard.
+     * The original art, dimmed below, preserves its icon when disabled. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN"))
+        return gi.ImageIndex(button->art);
     prefix = Theme_PlayerString(ui_current_client, "CommandButtonDisabledArtPath", NULL);
     if (!prefix || !*prefix) {
         fprintf(stderr, "UI_CommandButtonImage: missing CommandButtonDisabledArtPath for %s\n", button->art);
@@ -174,7 +179,9 @@ void UI_WriteCommandButtonFrame(gameCommandButton_t const *button) {
     memset(&frame, 0, sizeof(frame));
     memset(&state, 0, sizeof(state));
     frame.flags.type = FT_COMMANDBUTTON;
-    frame.color = COLOR32_WHITE;
+    frame.color = button->disabled && level.vm &&
+        jass_functionbyname(level.vm, "CUN")
+        ? MAKE(color32_t, 145, 145, 145, 255) : COLOR32_WHITE;
     frame.tex.index = UI_CommandButtonImage(button);
     frame.stat = button->active;
     frame.value = button->cooldown;

@@ -3362,6 +3362,8 @@ static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
     (void)argc;
     (void)argv;
     if (!ent || !ent->client || !ent->client->connected) return;
+    fprintf(stderr, "ORDR_CHAT_OPEN request player=%u\n",
+            (unsigned)ent->client->ps.number);
     UI_SetCurrentClient(ent->client);
     UI_WriteWindowStart(&MAKE(uiWindowDef_t,
         .id = BZ_WC3_WINDOW_CHAT, .class_id = BZ_WC3_WINDOW_CHAT,
@@ -3409,6 +3411,8 @@ static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
         "CANCEL", UI_WINDOW_CLOSE_ACTION,
         COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_SMALL_FONT_SIZE);
     UI_WriteWindowEnd(ent);
+    fprintf(stderr, "ORDR_CHAT_OPEN window_sent player=%u\n",
+            (unsigned)ent->client->ps.number);
     UI_SetCurrentClient(NULL);
 }
 

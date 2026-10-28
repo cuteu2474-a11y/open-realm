@@ -2,12 +2,23 @@
 """Package OpenWarcraft3 for iPad, using only SDK tools (no Xcode project)."""
 import argparse
 import json
+import os
 from pathlib import Path
 import plistlib
 import shutil
 import subprocess
 
 FRAMEWORKS = ('shared', 'jass', 'sheet', 'renderer', 'game', 'menu')
+
+def app_build_version():
+    """Assign each GitHub Actions iPad build a distinct installable revision.
+
+    Fixed CFBundleVersion=1 previously made every newer SideStore IPA look
+    identical to iPadOS. A workflow run number increases across IPA builds.
+    """
+    value = os.environ.get('GITHUB_RUN_NUMBER', '')
+    return value if value.isdecimal() and 0 < int(value) < 2147483647 else '1'
+
 
 
 # The port renders a landscape-only Warcraft III HUD. Allowing a portrait
@@ -98,7 +109,7 @@ def main():
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',
         'CFBundleShortVersionString': '1.0',
-        'CFBundleVersion': '1',
+        'CFBundleVersion': app_build_version(),
         'UIDeviceFamily': [2],
         'MinimumOSVersion': args.minimum,
         'CFBundleSupportedPlatforms': ['iPhoneOS' if args.sdk == 'iphoneos' else 'iPhoneSimulator'],
@@ -116,6 +127,7 @@ def main():
     })
     info.update(app_orientation_info())
     (target / 'Info.plist').write_bytes(plistlib.dumps(info))
+    print('iPad app build version: ' + info['CFBundleVersion'])
     (target / 'PkgInfo').write_bytes(b'APPL????')
     print('Packaged ' + str(target))
 

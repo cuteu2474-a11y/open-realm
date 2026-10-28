@@ -339,9 +339,11 @@ void SCR_DrawScreenField(uint32_t msec) {
         /* Always provide a large CHAT key when a custom map hides the
          * original upper-button bar. Reuse the stock chat_open flow. */
         rect_t const button = SCR_iPadChatButtonRect(re.GetWindowSize());
-        re.DrawFill(&button, MAKE(color32_t, 23, 46, 73, 246));
-        re.DrawString((int)button.x + 36, (int)button.y + 10, "CHAT");
-        re.DrawString((int)button.x + 29, (int)button.y + 30, "ENTER");
+        re.DrawFill(&button, MAKE(color32_t, 220, 170, 56, 255));
+        rect_t const inset = { button.x + 2, button.y + 2, button.w - 4, button.h - 4 };
+        re.DrawFill(&inset, MAKE(color32_t, 18, 39, 66, 255));
+        re.DrawString((int)button.x + 54, (int)button.y + 8, "CHAT");
+        re.DrawString((int)button.x + 24, (int)button.y + 29, "TAP TO TYPE");
     }
 #endif
     CON_DrawConsole();
@@ -421,7 +423,9 @@ static char layout_dynamic_pic_names[MAX_DYNAMIC_IMAGES][512];
 static uint32_t layout_dynamic_pic_cursor;
 /* Window-pixel coordinates shared by the iPad renderer and touch hit test. */
 rect_t SCR_iPadChatButtonRect(size2_t size) {
-    return (rect_t){ .x = size.width - 148, .y = 18, .w = 128, .h = 54 };
+    /* Move below stock resources and the ORDR timer; top bar painted over
+     * the previous y=18 button. This rect is shared with touch hit-testing. */
+    return (rect_t){ .x = size.width - 194, .y = 120, .w = 174, .h = 61 };
 }
 
 static bool layout_left_down;
