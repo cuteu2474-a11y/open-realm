@@ -36,9 +36,9 @@ class SimulatorRuntimeTests(unittest.TestCase):
 
     def test_attack_swing_without_enemy_hp_change_does_not_pass(self):
         report = json.loads(self.inspect(
-            "22000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=5\n"
-            "23000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=5\n"
-            "24000 ms [ORDR_ATTACK_BLOCKED_TARGET] attacker=11 owner=0 target=51 target_owner=5\n",
+            "22000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=6\n"
+            "23000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=6\n"
+            "24000 ms [ORDR_ATTACK_BLOCKED_TARGET] attacker=11 owner=0 target=51 target_owner=6\n",
             "", "", ""))
         self.assertEqual(report["attack_windup_count"], 1)
         self.assertEqual(report["attack_hit_attempt_count"], 1)
@@ -47,16 +47,31 @@ class SimulatorRuntimeTests(unittest.TestCase):
 
     def test_enemy_hp_mutation_is_required_for_damage_verification(self):
         report = json.loads(self.inspect(
-            "23000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=5\n"
-            "24000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=5\n"
-            "25000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=51 target_owner=5 amount=10 hp=90.0\n",
+            "23000 ms [ORDR_ATTACK_WINDUP_MELEE] attacker=11 owner=0 target=51 target_owner=6\n"
+            "24000 ms [ORDR_ATTACK_HIT_ATTEMPT] attacker=11 owner=0 target=51 target_owner=6\n"
+            "25000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=51 target_owner=6 amount=10 hp=90.0\n",
             "", "", ""))
         self.assertEqual(report["attack_enemy_hp_changed_count"], 1)
         self.assertTrue(report["attack_damage_verified"])
 
+    def test_non_wave_owner_does_not_falsely_prove_enemy_damage(self):
+        report = json.loads(self.inspect(
+            "25000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=51 target_owner=5 amount=10 hp=90.0\n"
+            "26000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=52 target_owner=6 amount=15 hp=85.0\n",
+            "", "", ""))
+        self.assertEqual(report["attack_enemy_hp_changed_count"], 1)
+        self.assertTrue(report["attack_damage_verified"])
+
+    def test_only_other_owner_damage_is_not_wave_damage(self):
+        report = json.loads(self.inspect(
+            "25000 ms [ORDR_ATTACK_HEALTH_APPLIED] attacker=11 owner=0 target=51 target_owner=5 amount=10 hp=90.0\n",
+            "", "", ""))
+        self.assertEqual(report["attack_enemy_hp_changed_count"], 0)
+        self.assertFalse(report["attack_damage_verified"])
+
     def test_enemy_movement_and_building_button_roundtrip(self):
         report = json.loads(self.inspect(
-            "22000 ms [ORDR_SCRIPT_POINT_ORDER] owner=5 accepted=1\n"
+            "22000 ms [ORDR_SCRIPT_POINT_ORDER] owner=6 accepted=1\n"
             "22000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(10,20) goal=(100,100)\n"
             "27000 ms [ORDR_ENEMY_MOVEMENT] unit=51 pos=(22,20) goal=(100,100)\n"
             "28000 ms [ORDR_BUILDING_SELECTION] unit=12 owner=0 player=0\n"

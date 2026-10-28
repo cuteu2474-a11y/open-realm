@@ -9226,6 +9226,52 @@ static void death_events_before_corpse_removal(bool queued) {
 TEST(wc3_api, death_events_survive_same_tick_corpse_removal) { death_events_before_corpse_removal(false); }
 TEST(wc3_api, death_events_survive_removal_after_frame_event_pass) { death_events_before_corpse_removal(true); }
 
+/* ORDR waves are Player(6), not Player(5). A death event must reach only
+ * the exact owning player's registered trigger, with a valid dying-unit
+ * context, even when events from both owners are queued in one tick. */
+TEST(wc3_api, player_unit_death_event_respects_distinct_wave_owners) {
+    edict_t *five, *six;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer fiveDeaths = 0\n"
+        "  integer sixDeaths = 0\n"
+        "endglobals\n"
+        "function onFive takes nothing returns nothing\n"
+        "  set fiveDeaths = fiveDeaths + 1\n"
+        "  call BJassAssert(GetPlayerId(GetOwningPlayer(GetDyingUnit())) == 5, \"Player 5 callback received another owner's death\")\n"
+        "endfunction\n"
+        "function onSix takes nothing returns nothing\n"
+        "  set sixDeaths = sixDeaths + 1\n"
+        "  call BJassAssert(GetPlayerId(GetOwningPlayer(GetDyingUnit())) == 6, \"Player 6 callback received another owner's death\")\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        "  call BJassAssert(fiveDeaths == 1, \"Player 5 death callback should run once\")\n"
+        "  call BJassAssert(sixDeaths == 1, \"Player 6 death callback should run once\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger five = CreateTrigger()\n"
+        "  local trigger six = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(five, Player(5), EVENT_PLAYER_UNIT_DEATH, null)\n"
+        "  call TriggerAddAction(five, function onFive)\n"
+        "  call TriggerRegisterPlayerUnitEvent(six, Player(6), EVENT_PLAYER_UNIT_DEATH, null)\n"
+        "  call TriggerAddAction(six, function onSix)\n"
+        "endfunction\n"));
+    five = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 64.0f, 64.0f);
+    six = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 128.0f, 64.0f);
+    T_NOT_NULL(five);
+    T_NOT_NULL(six);
+    if (!five || !six) return;
+    five->s.player = 5;
+    six->s.player = 6;
+    G_PublishEvent(five, EVENT_PLAYER_UNIT_DEATH);
+    G_PublishEvent(six, EVENT_PLAYER_UNIT_DEATH);
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_api, death_events_drain_chained_corpse_removals) {
     setup_test_world();
     T_ASSERT(run_test_jass(

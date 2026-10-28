@@ -1561,8 +1561,8 @@ static void G_ORDRShowFlowStatus(void) {
              (unsigned)choice_screen_units,
              (unsigned)globals.num_edicts);
     jass_ordr_log_event(level.vm, "STATE", message);
-    /* ORDR's first creep wave is owned by player 5 in the supplied iPad
-     * traces. Record a bounded live sample every five game seconds. This
+    /* ORDR S2 2.323[C] wave creeps are owned by Player(6).
+     * Keep this live trace aligned with the movement, damage and death probes. Record a bounded live sample every five game seconds. This
      * distinguishes no scripted order from a stalled route or an immobile
      * unit without forcing enemies to march or altering the original map. */
     if (level.time >= 15000) {

@@ -102,7 +102,7 @@ def inspect(report):
     attack_windups = re.findall(r"\[ORDR_ATTACK_WINDUP_(?:MELEE|RANGED)\s*\]", jass)
     attack_hit_attempts = re.findall(r"\[ORDR_ATTACK_HIT_ATTEMPT\s*\]", jass)
     attack_hp_applied = re.findall(
-        r"\[ORDR_ATTACK_HEALTH_(?:APPLIED|LETHAL)\s*\][^\r\n]*\btarget_owner=5\b", jass)
+        r"\[ORDR_ATTACK_HEALTH_(?:APPLIED|LETHAL)\s*\][^\r\n]*\btarget_owner=6\b", jass)
     attack_block_reasons = re.findall(r"\[(ORDR_ATTACK_BLOCKED_[A-Z_]+)\s*\]", jass)
     projectiles_stalled = re.findall(r"\[ORDR_PROJECTILE_STALLED\s*\]", jass)
     # An accepted order is not movement. Compare position samples for the
