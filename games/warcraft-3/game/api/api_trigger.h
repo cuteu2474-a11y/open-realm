@@ -392,6 +392,11 @@ uint32_t TriggerRegisterPlayerUnitEvent(jass_t *j) {
         return jass_pushnullhandle(j, "event");
     }
     G_SetPlayerEventSubject(evt, PLAYER_ENT(whichPlayer));
+    /* Unconnected AI players have no player edict. Preserve the owning slot
+     * even when PLAYER_ENT returns NULL; matching NULL subjects to other
+     * NULL subjects incorrectly dispatched all player-unit deaths to every
+     * AI player, corrupting map-authored wave counters. */
+    evt->state = (uint32_t)PLAYER_NUM(whichPlayer);
     evt->trigger = whichTrigger;
     QuestPeonStageLogRegistration(whichTrigger, *whichPlayerUnitEvent, evt->subject, "player-unit");
     if (WC3_TUTORIAL_DEBUG_ENABLED() &&

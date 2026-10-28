@@ -316,6 +316,28 @@ bool G_RemovePlayerWithResult(uint32_t player_num, uint32_t game_result) {
     return true;
 }
 
+/* Player-unit registrations use a numerical owner slot because player
+ * entities are not guaranteed to exist for unconnected/AI WC3 slots. Other
+ * event registrations have their own subject semantics. */
+static bool G_IsPlayerUnitRegistrationType(EVENTTYPE type) {
+    return (type >= EVENT_PLAYER_UNIT_ATTACKED && type <= EVENT_PLAYER_UNIT_LOADED) ||
+           (type >= EVENT_PLAYER_UNIT_SELL && type <= EVENT_PLAYER_UNIT_PAWN_ITEM) ||
+           type == EVENT_PLAYER_UNIT_DAMAGED;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_events, player_unit_event_type_limits) {
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_DEATH));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_SELECTED));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_SPELL_EFFECT));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_DAMAGED));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_UNIT_DEATH));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_PLAYER_CHAT));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_UNIT_SPELL_EFFECT));
+}
+#endif
+
 static void G_ExecuteEvent(gameEvent_t *evt) {
     edict_t *subject = evt->edict;
     bool misha_summon_event = false;
@@ -448,8 +470,14 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                         evt->type == EVENT_PLAYER_UNIT_DESELECTED;
                     uint32_t const event_player = player_selection && evt->dialog_player
                         ? evt->dialog_player - 1 : (subject ? subject->s.player : 0);
-                    bool owner_match = subject &&
-                        e->subject == G_GetPlayerEntityByNumber(event_player);
+                    /* Player-unit event registrations are anchored to a
+                     * numerical player slot, not a possibly-null player
+                     * edict. Match other player events only with a real
+                     * subject; NULL == NULL is never ownership. */
+                    bool const owner_match = subject &&
+                        (G_IsPlayerUnitRegistrationType(e->type)
+                         ? (!e->subject_spawn_tracked && e->state == event_player)
+                         : (e->subject && e->subject == G_GetPlayerEntityByNumber(event_player)));
                     int32_t quest_trigger_ordinal = e->trigger
                         ? (int32_t)(e->trigger - level.triggers) : -1L;
                     if (misha_summon_event) {

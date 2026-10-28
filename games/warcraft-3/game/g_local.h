@@ -2120,7 +2120,7 @@ struct gevent_s {
     handle_t region;
     uint32_t dialog_id, button_id; /* registration target, one-based */
     float range;
-    uint32_t state;
+    uint32_t state; /* player-unit registrations: numeric player slot; other events: state/filter payload */
     uint32_t limitop;
     float limitval;
     cstring_t variable;

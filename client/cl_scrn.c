@@ -1717,40 +1717,53 @@ void SCR_LayoutDrawOverlay(handle_t layout) {
     }
 }
 
-/* A touch-only device has no persistent world-hover. Show live HP of
- * selected units using the server-authoritative, recipient-filtered snapshot.
- * This is visual only and does not alter combat or original-map variables. */
+/* No persistent mouse hover exists on iPad. Show authoritative snapshot HP
+ * above selected or wounded combat units. World projection yields WC3 UI
+ * units; DrawFill expects *physical pixels*. Always convert both origin and
+ * size through the resolved window canvas, otherwise a ~0.05 pixel bar is
+ * effectively invisible on the iPad display. */
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+static rect_t SCR_iPadWorldHealthBarRect(vec2_t point, size2_t window, float canvas) {
+    float const sx = canvas > 0.0f ? (float)window.width / canvas : 0.0f;
+    float const sy = (float)window.height / UI_BASE_HEIGHT;
+    return (rect_t){(point.x - 0.028f) * sx, (point.y - 0.010f) * sy,
+                    0.056f * sx, 0.006f * sy};
+}
+
 static void SCR_DrawTouchSelectionHealthBars(void) {
     viewDef_t const *view = &cl.viewDef;
+    size2_t const window = re.GetWindowSize();
+    float const canvas = SCR_UICanvasWidth();
     if (cl.playerstate.client_ui_state != CLIENT_UI_GAME ||
-        !view->entities || !cl.selection.num_selected ||
-        !re.GetEntityOverheadPosition) return;
+        !view->entities || !re.GetEntityOverheadPosition ||
+        !window.width || !window.height || canvas <= 0.0f) return;
 
-    FOR_LOOP(i, cl.selection.num_selected) {
-        uint32_t const id = cl.selection.entity_nums[i];
-        if (!id || id >= MAX_CLIENT_ENTITIES) continue;
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        uint32_t const id = ent->number;
+        if (!id || id >= MAX_CLIENT_ENTITIES || !(ent->flags & RF_UNIT) ||
+            (ent->flags & RF_HIDDEN)) continue;
         entityState_t const *state = &cl.ents[id].current;
         if (state->number != id || (state->renderfx & RF_HIDDEN) ||
             !(state->flags & EF_HOVER_HEALTH)) continue;
         float const hp = BYTE2FLOAT(state->stats[ENT_HEALTH]);
         if (hp <= 0.0f) continue;
-        FOR_LOOP(j, view->num_entities) {
-            renderEntity_t const *ent = &view->entities[j];
-            vec3_t top;
-            vec2_t screen;
-            if (ent->number != id || !(ent->flags & RF_UNIT) ||
-                (ent->flags & RF_HIDDEN) ||
-                !re.GetEntityOverheadPosition(ent, &top) ||
-                !SCR_ProjectWorldPoint(&top, &screen)) continue;
-            rect_t background = {screen.x - 0.027f, screen.y - 0.008f, 0.054f, 0.006f};
-            rect_t foreground = {background.x + 0.001f, background.y + 0.001f,
-                                 (background.w - 0.002f) * MIN(1.0f, hp),
-                                 background.h - 0.002f};
-            re.DrawFill(&background, MAKE(color32_t, 0, 0, 0, 220));
-            re.DrawFill(&foreground, MAKE(color32_t, 58, 215, 77, 255));
-            break;
-        }
+        bool selected = false;
+        FOR_LOOP(j, cl.selection.num_selected)
+            if (cl.selection.entity_nums[j] == id) { selected = true; break; }
+        /* Injured units are meaningful even without a selected group; a
+         * full-health field army should not cover the screen in green bars. */
+        if (!selected && hp >= 0.995f) continue;
+        vec3_t top;
+        vec2_t screen;
+        if (!re.GetEntityOverheadPosition(ent, &top) ||
+            !SCR_ProjectWorldPoint(&top, &screen)) continue;
+        rect_t const bg = SCR_iPadWorldHealthBarRect(screen, window, canvas);
+        rect_t const fill = {bg.x + 1.0f, bg.y + 1.0f,
+                            MAX(0.0f, (bg.w - 2.0f) * MIN(1.0f, hp)),
+                            MAX(1.0f, bg.h - 2.0f)};
+        re.DrawFill(&bg, MAKE(color32_t, 0, 0, 0, 220));
+        re.DrawFill(&fill, MAKE(color32_t, 58, 215, 77, 255));
     }
 }
 #endif

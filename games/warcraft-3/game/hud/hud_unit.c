@@ -724,6 +724,18 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
                      (unsigned)count, count > 0 ? buttons[0].command : "",
                      count > 1 ? buttons[1].command : "");
             jass_ordr_log_event(level.vm, "ORDR_BUILDING_COMMAND_CARD", info);
+            if (!count) {
+                UnitProfile_t const *profile = G_UnitProfile(ent->class_id);
+                snprintf(info, sizeof(info),
+                         "unit=%u raw=0x%08x abilities=%.55s trains=%.40s researches=%.40s builds=%.40s stock_item=%u stock_unit=%u",
+                         (unsigned)ent->s.number, (unsigned)ent->class_id,
+                         a && a->abilList ? a->abilList : "",
+                         profile && profile->trains ? profile->trains : "",
+                         profile && profile->researches ? profile->researches : "",
+                         profile && profile->builds ? profile->builds : "",
+                         (unsigned)G_IsItemShop(ent), (unsigned)G_IsUnitShop(ent));
+                jass_ordr_log_event(level.vm, "ORDR_BUILDING_EMPTY_CARD", info);
+            }
         }
     }
     return count;
