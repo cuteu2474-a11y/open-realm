@@ -9309,6 +9309,8 @@ TEST(wc3_api, queued_unit_sales_preserve_sold_rawcode_and_buyer_player) {
     G_RunEvents();
     jass_runevents(level.vm);
     jass_callbyname(level.vm, "verify", false);
+    if (jass_rterror_pending(level.vm))
+        fprintf(stderr, "ORDR_SALE_EVENT_TEST_ERROR: %s\n", jass_rterror_message(level.vm));
     T_ASSERT(!jass_rterror_pending(level.vm));
 }
 
