@@ -9229,6 +9229,35 @@ TEST(wc3_api, death_events_survive_removal_after_frame_event_pass) { death_event
 /* ORDR waves are Player(6), not Player(5). A death event must reach only
  * the exact owning player's registered trigger, with a valid dying-unit
  * context, even when events from both owners are queued in one tick. */
+/* A wave kill is authoritative immediately, not when the decay model is
+ * finally removed. If this passes but ORDR's on-screen count is static, the
+ * missing link is its JASS callback / UI update, not GetPlayerUnitCount. */
+TEST(wc3_api, dead_wave_creeps_leave_native_player_unit_count_before_decay) {
+    edict_t *living, *dying;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "endfunction\n"
+        "function verify_two takes nothing returns nothing\n"
+        "  call BJassAssert(GetPlayerUnitCount(Player(6), true) == 2, \"initial wave count should include both enemies\")\n"
+        "endfunction\n"
+        "function verify_one takes nothing returns nothing\n"
+        "  call BJassAssert(GetPlayerUnitCount(Player(6), true) == 1, \"dead creep must be excluded before decay\")\n"
+        "endfunction\n"));
+    living = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 0.0f, 64.0f);
+    dying = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 64.0f, 64.0f);
+    T_NOT_NULL(living); T_NOT_NULL(dying);
+    if (!living || !dying) return;
+    living->s.player = 6;
+    dying->s.player = 6;
+    jass_callbyname(level.vm, "verify_two", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    unit_die(dying, NULL);
+    jass_callbyname(level.vm, "verify_one", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_ASSERT(dying->inuse); /* Retained corpse cannot still count as alive. */
+}
+
 TEST(wc3_api, player_unit_death_event_respects_distinct_wave_owners) {
     edict_t *five, *six;
     setup_test_world();
