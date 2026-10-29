@@ -9305,6 +9305,18 @@ TEST(wc3_api, queued_unit_sales_preserve_sold_rawcode_and_buyer_player) {
         second->value = (int32_t)expensive->s.number;
         second->dialog_player = 1;
     }
+    unsigned sale_registrations = 0;
+    FOR_EACH_EVENT(reg) {
+        if (reg->type == EVENT_PLAYER_UNIT_SELL) {
+            sale_registrations++;
+            fprintf(stderr, "WC3_SELL_REG event=%u owner=%u subject=%p trigger=%p\n",
+                    (unsigned)reg->type, (unsigned)reg->state,
+                    (void *)reg->subject, (void *)reg->trigger);
+        }
+    }
+    fprintf(stderr, "WC3_SELL_REG_SUMMARY count=%u queued=%u\n",
+            sale_registrations, (unsigned)(level.events.write - level.events.read));
+    T_ASSERT(sale_registrations > 0);
     eventsoldunit = expensive; /* simulate the global being overwritten */
     G_RunEvents();
     jass_runevents(level.vm);
