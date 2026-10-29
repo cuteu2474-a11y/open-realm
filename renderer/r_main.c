@@ -271,11 +271,13 @@ static texture_t *R_LoadTexturePath(cstring_t textureFilename, bool *found) {
         return texture;
     }
     fileSize = R_ReadTextureFile(textureFilename, load_path, &buffer);
-    if (fileSize < 0 || !buffer) {
+    if (fileSize < (int)sizeof(uint32_t) || !buffer) {
+        if (buffer) ri.FS_FreeFile(buffer);
         if (found) *found = false;
         return NULL;
     }
-    if (found) *found = true;
+    /* Decoding failure is not an asset hit: let the next map/tileset/base
+     * candidate supply its original icon instead of caching a pink placeholder. */
     switch (*(uint32_t *)buffer) {
         case ID_BLP1:
             texture = R_LoadTextureBLP1(buffer, fileSize);
@@ -298,7 +300,12 @@ static texture_t *R_LoadTexturePath(cstring_t textureFilename, bool *found) {
             break;
     }
     ri.FS_FreeFile(buffer);
-    if (!texture) texture = tr.texture[TEX_PLACEHOLDER];
+    if (!texture) {
+        fprintf(stderr, "R_LoadTexture: decode failed: %s\n", load_path);
+        if (found) *found = false;
+        return NULL;
+    }
+    if (found) *found = true;
     R_CacheLoadedTexture(textureFilename, texture);
     return texture;
 }

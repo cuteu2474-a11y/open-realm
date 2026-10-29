@@ -1304,6 +1304,32 @@ TEST(renderer_model, unknown_model_release_is_immediate) {
     R_ReleaseRegisteredModel(model); T_EQ(release_count, 1);
 }
 
+/* A .blp command icon reference must still load an imported TGA with the same
+ * name, without changing the original art path or making the importer case-sensitive. */
+static int test_icon_extension_read(cstring_t filename, void **buffer) {
+    static uint32_t fake_image = 0;
+    *buffer = NULL;
+    if (!strcasecmp(filename, "war3mapImported\\BTNCustom.tga")) {
+        *buffer = &fake_image;
+        return sizeof(fake_image);
+    }
+    return -1;
+}
+
+TEST(renderer_texture, imported_command_icon_uses_existing_tga_when_blp_missing) {
+    refImport_t saved = ri;
+    PATHSTR resolved;
+    void *buffer = NULL;
+
+    ri.FS_ReadFile = test_icon_extension_read;
+    T_EQ(R_ReadTextureFile("war3mapImported\\BTNCustom.blp", resolved, &buffer), 4);
+    T_STREQ(resolved, "war3mapImported\\BTNCustom.tga");
+    T_ASSERT(buffer != NULL);
+    T_EQ(R_ReadTextureFile("war3mapImported\\BTNCustom.tga", resolved, &buffer), 4);
+    T_STREQ(resolved, "war3mapImported\\BTNCustom.tga");
+    ri = saved;
+}
+
 TEST(renderer_texture, cached_registration_preserves_newer_texture_indices) {
     texture_t first = { .texid = 100 }, second = { .texid = 101 };
 
