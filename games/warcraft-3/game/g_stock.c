@@ -406,14 +406,13 @@ static void G_InitItemStock(edict_t *shop) {
         }
         memcpy(&item_id, item_name, sizeof(item_id));
         item = G_ItemData(item_id);
-        if (!item) {
+        if (!item || item->id != item_id) {
             fprintf(stderr, "WC3 shop: unresolved Sellitems item %.4s on unit %.4s\n", item_name, (cstring_t)&shop->class_id);
             continue;
         }
-        if (!item->file) {
-            fprintf(stderr, "WC3 shop: item %.4s on unit %.4s has no model\n", item_name, (cstring_t)&shop->class_id);
-            continue;
-        }
+        /* A model is display data, not item identity. Map-authored items with
+         * no MDX still occupy stock and can be purchased through real inventory
+         * and JASS event paths. */
 
         index = shop->stock->item_count++;
         shop->stock->items[index].id = item_id;
@@ -917,7 +916,7 @@ bool G_ShopPurchaseItem(edict_t *clent, edict_t *shop, uint32_t item_id) {
         return false;
     }
     item = G_ItemData(item_id);
-    if (!item || !item->file) return false;
+    if (!item || item->id != item_id) return false;
     {
         char reason[128] = {0};
         if (!G_ShopItemRequirementsSatisfied(client, item_id, reason, sizeof(reason))) {
@@ -1023,7 +1022,11 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     unit_ent = SP_SpawnAtLocationNoBirth(unit_id, client->ps.number, &shop->s.origin2);
     if (!unit_ent) return false;
     if (!SP_FindUnitExitPosition(shop, unit_ent, &exit_origin, &exit_angle)) {
+        /* Exit placement is a real sale requirement; don't charge the buyer or
+         * dispatch an invented SELL event when the unit cannot materialize.
+         * Previously a failed facility button did nothing visible on iPad. */
         G_FreeEdict(unit_ent);
+        G_ShowCommandErrorText(clent, "No space to place purchased unit.");
         return false;
     }
 

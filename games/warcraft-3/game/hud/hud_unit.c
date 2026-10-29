@@ -185,6 +185,7 @@ static bool G_BuildCommandButtonState(edict_t *ent, cstring_t code, bool researc
     cstring_t ubertip;
     cstring_t hotkey;
     ability_t const *ability;
+    UnitProfile_t const *unit_profile = NULL;
     abilityitem_t item;
     uint32_t ability_code = 0;
     bool toggle_on = false;
@@ -224,25 +225,46 @@ static bool G_BuildCommandButtonState(edict_t *ent, cstring_t code, bool researc
     }
     item = MAKE(abilityitem_t, .code = ability_code, .ability = ability);
     toggle_on = G_CommandButtonToggleOn(ent, &item, research, toggle_state);
+    /* Stock UnitFunc.ini contains buttons for retail types, but user-created
+     * W3U unit IDs are owned by the merged UnitProfile row. FindConfigValue
+     * cannot resolve those map-only IDs, which used to drop every train/shop
+     * command whose button art was otherwise authored correctly. UnitProfile
+     * is authoritative for unit types (including modifications of stock IDs),
+     * not for ability/item/Cmd buttons. */
+    if (!ability && strlen(code) == 4) {
+        UnitProfile_t const *candidate = G_UnitProfile(ability_code);
+        if (candidate && candidate->id) unit_profile = candidate;
+    }
     art = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_ART, research && !upgrade_research)),
+        unit_profile && unit_profile->art && *unit_profile->art
+            ? unit_profile->art : FindConfigValue(art_code, G_ResearchField(STR_ART, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNART) : NULL, toggle_on);
     buttonpos = G_CommandButtonValue(
         FindConfigValue(art_code, G_ResearchField(STR_BUTTONPOS, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNBUTTONPOS) : NULL, toggle_on);
     tip = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_TIP, research && !upgrade_research)),
+        unit_profile && unit_profile->tip && *unit_profile->tip
+            ? unit_profile->tip : FindConfigValue(art_code, G_ResearchField(STR_TIP, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNTIP) : NULL, toggle_on);
     ubertip = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_UBERTIP, research && !upgrade_research)),
+        unit_profile && unit_profile->uberTip && *unit_profile->uberTip
+            ? unit_profile->uberTip : FindConfigValue(art_code, G_ResearchField(STR_UBERTIP, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNUBERTIP) : NULL, toggle_on);
     hotkey = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_HOTKEY, research && !upgrade_research)),
+        unit_profile && unit_profile->hotkey && *unit_profile->hotkey
+            ? unit_profile->hotkey : FindConfigValue(art_code, G_ResearchField(STR_HOTKEY, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNHOTKEY) : NULL, toggle_on);
     UI_CopyString(art_level, sizeof(art_level), research ? G_StringForLevel(art, level) : art);
     art_path = G_UIArtPath(art_level);
 
-    if (buttonpos && *buttonpos) {
+    if (unit_profile && unit_profile->buttonPosX && unit_profile->buttonPosY &&
+        *unit_profile->buttonPosX && *unit_profile->buttonPosY) {
+        unsigned px, py;
+        if (sscanf(unit_profile->buttonPosX, "%u", &px) == 1 &&
+            sscanf(unit_profile->buttonPosY, "%u", &py) == 1) {
+            x = px; y = py;
+        }
+    } else if (buttonpos && *buttonpos) {
         sscanf(buttonpos, "%u,%u", &x, &y);
     }
 
