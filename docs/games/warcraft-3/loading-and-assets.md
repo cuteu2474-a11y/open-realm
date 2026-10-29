@@ -204,8 +204,10 @@ same boundary. Do not append a new campaign map to the previous terrain lists.
 
 The renderer attempts the authored icon path first. If that file is absent, a `.tga`
 reference may resolve to a same-stem `.blp`, and a `.blp` reference may resolve
-to a same-stem `.tga`; extensionless names try BLP then TGA. This applies to
-map-imported command-button art as well as stock skin art, without changing
+to a same-stem `.tga`; extensionless names try BLP then TGA.
+Extension parsing starts after the last slash, so a parent `.w3x` archive is
+not mistaken for an image extension. Other explicit extensions are not substituted.
+This applies to map-imported command-button art as well as stock skin art, without changing
 JASS/object data or inventing replacements. If a higher-priority map asset
 exists but cannot be decoded, the loader continues to tileset/base candidates
 instead of treating the broken image as an authoritative pink placeholder.

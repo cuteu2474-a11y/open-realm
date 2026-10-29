@@ -5,14 +5,19 @@
  * Prefer the exact authored file; only use the paired format if that file is absent.
  * In particular, stock UI art and map-imported BTN art share this lookup path. */
 int R_ReadTextureFile(cstring_t name, string_t path, void **buffer) {
-    cstring_t ext = strrchr(name, '.');
+    cstring_t filename, ext;
     int size, len;
     if (!name || !*name || !buffer) return -1;
+    /* The map archive may contain a .w3x suffix, but the leaf texture need not. */
+    filename = name;
+    for (cstring_t p = name; *p; ++p)
+        if (*p == '\\' || *p == '/') filename = p + 1;
+    ext = strrchr(filename, '.');
     *buffer = NULL;
     snprintf(path, sizeof(PATHSTR), "%s", name);
     size = ri.FS_ReadFile(path, buffer);
     if (size >= 0 && *buffer) return size;
-    if (ext && (!strcasecmp(ext, ".dds") || !strcasecmp(ext, ".pcx")))
+    if (ext && strcasecmp(ext, ".tga") && strcasecmp(ext, ".blp"))
         return size;
 
     len = ext && (!strcasecmp(ext, ".tga") || !strcasecmp(ext, ".blp"))
