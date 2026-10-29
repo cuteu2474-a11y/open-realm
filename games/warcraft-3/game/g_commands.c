@@ -412,7 +412,7 @@ static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
  * UnitBalance hit points. Zero *maximum* HP is not a death transition.
  * Permit selecting those authored units only in ORDR; keep actual corpses,
  * locust/unselectable units, and neutral decorations excluded. */
-static bool G_IsORDROwnedZeroHealthUnit(edict_t const *ent) {
+bool G_IsORDROwnedZeroHealthUnit(edict_t const *ent) {
     return ent && ent->inuse && level.vm &&
            jass_functionbyname(level.vm, "CUN") &&
            (ent->svflags & SVF_MONSTER) &&

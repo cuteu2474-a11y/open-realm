@@ -31,6 +31,12 @@
 - 사용자 2026-10-29 스크린샷의 도박소 "No eligible purchaser is nearby."는 일반 상점의 근접 인벤토리 구매자 판정 경로 때문임. 원본 도박 JASS의 판매 콜백 및 소비재 처리와 대조되지 않아 **재화를 임의로 지급하거나 인벤토리 조건을 전체 상점에서 해제하지 않음**. 실기기 기능은 여전히 미검증.
 - **최종 검증**: 후속 push에 `[ipad-test] [ipad-build]`를 한번만 넣어 기존 1회 iPad 시뮬레이터 + IPA + 일반 CI 실행. 통과 시에도 iPad 실기기 입력·구매·카운트 실효과 검증 필요.
 
+## 2026-10-30 추가 발견: 체력 0 특수 시설의 건물·상점 판정 불일치
+
+- 원작 ORDR의 일부 시설은 UnitBalance 최대 HP 0이며 일반 유닛처럼 선택 가능하다. `G_IsORDROwnedZeroHealthUnit`이 이 예외를 인정하나 `G_IsItemShop`/`G_IsUnitShop`은 여전히 `M_IsDead`로 거부했다. 선택한 시설이 상점인 경우 구매 버튼과 거래 기능이 모두 차단될 수 있다.
+- 기존 선택 판정을 상점 경로에서도 재사용하도록 `G_ShopUnitIsLive`을 적용했다. ORDR JASS가 존재하고 소유된 유효 EF_UNIT이며 실제 `SVF_DEADMONSTER`가 아닌 최대 HP 0 시설만 해당된다. 중립 시설, 일반 0HP 유닛, 진짜 시체는 차단.
+- `wc3_items.ordr_zero_maxhp_facility_remains_usable_shop_without_reviving_corpses`로 상점 버튼과 예외의 반례를 함께 검증한다. 모든 개별 건물이 이 조건에 해당한다는 뜻은 아니며 iPad 실기기 거래는 아직 미검증.
+
 ## 2026-10-30 건물·상점 기능 원본 데이터 바인딩 수정
 
 - 상점/생산 명령카드는 `UnitFunc.ini`의 `FindConfigValue`만으로 생성되지 않는다. 원본 W3U에 정의된 사용자 유닛은 `G_UnitProfile(unit_id)`의 `Art`, `Tip`, `Ubertip`, `Hotkey`, `ButtonposX/Y`에 올바른 정보가 있어도 이전 코드가 보지 않아 `G_BuildCommandButton`이 버튼을 생략했다. 해당 유닛 정보가 우선하도록 수정. 능력·아이템·시스템 명령은 기존 경로 유지.

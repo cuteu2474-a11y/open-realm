@@ -2204,6 +2204,55 @@ TEST(wc3_items, neutral_unit_shop_uses_non_inventory_patron_and_hires_immediatel
 /* ORDR-style owned unit shops sell transient units directly to JASS rather
  * than requiring an inventory hero near the gambling building. Exercise the
  * actual sale -> event queue -> GetSoldUnit -> script callback chain. */
+/* ORDR utility facilities may be authored with zero maximum HP. They are
+ * selectable and controllable, so their real shop stock must remain usable. */
+TEST(wc3_items, ordr_zero_maxhp_facility_remains_usable_shop_without_reviving_corpses) {
+    edict_t *shop, *player;
+    gameClient_t *client;
+    gameCommandButton_t buttons[12];
+    shopItemButtonsParams_t p;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function CUN takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "endfunction\n"));
+    player = &g_edicts[0];
+    client = player->client;
+    client->ps.number = 0;
+    client->ps.stats[PLAYERSTATE_RESOURCE_GOLD] = 500;
+    client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER] = 100;
+    client->ps.stats[PLAYERSTATE_RESOURCE_FOOD_CAP] = 20;
+    shop = make_unit_test_shop(0, 0);
+    shop->s.player = 0;
+    shop->s.flags |= EF_UNIT;
+    shop->health.value = 0.0f;
+    shop->health.max_value = 0.0f;
+    T_ASSERT(M_IsDead(shop));
+    T_ASSERT(G_IsORDROwnedZeroHealthUnit(shop));
+    T_ASSERT(G_CanUseUnitShop(client, shop));
+    p = (shopItemButtonsParams_t){ .client = client, .shop = shop, .buttons = buttons, .max_buttons = 12 };
+    level.time += 3000;
+    T_EQ(G_GetShopButtons(&p), 1);
+    T_ASSERT(!buttons[0].disabled);
+    /* The same zero-HP facility contract applies to item merchandise. */
+    UnitProfile_t item_profile = *shop->data.UnitProfile;
+    item_profile.sellItems = "spro";
+    shop->data.UnitProfile = &item_profile;
+    T_ASSERT(G_CanUseItemShop(client, shop));
+
+    shop->svflags |= SVF_DEADMONSTER;
+    T_ASSERT(!G_IsUnitShop(shop));
+    T_ASSERT(!G_IsItemShop(shop));
+    T_ASSERT(!G_CanUseUnitShop(client, shop));
+    shop->svflags &= ~SVF_DEADMONSTER;
+    shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_ASSERT(!G_IsUnitShop(shop));
+    shop->s.player = 0;
+    shop->health.max_value = 100.0f;
+    T_ASSERT(!G_IsUnitShop(shop));
+}
+
 TEST(wc3_items, owned_unit_shop_purchase_dispatches_sold_unit_to_jass) {
     edict_t *player, *shop;
     gameClient_t *client;

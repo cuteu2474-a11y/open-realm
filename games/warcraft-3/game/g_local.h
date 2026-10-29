@@ -3470,6 +3470,8 @@ bool G_FocusSelectedUnit(gameClient_t *, edict_t *);
 bool G_CycleSelectionSubgroup(gameClient_t *);
 void G_ResetSelectionFocus(gameClient_t *);
 bool G_UnitCanBeSelected(gameClient_t *, edict_t const *);
+/* The original ORDR JASS can keep owned facilities with no HP selectable. */
+bool G_IsORDROwnedZeroHealthUnit(edict_t const *);
 bool G_UnitCanControl(gameClient_t *, edict_t const *);
 bool G_UnitCanSpendResources(gameClient_t *, edict_t const *);
 bool G_CanViewTeamResources(uint32_t viewer, uint32_t owner);

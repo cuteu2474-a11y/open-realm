@@ -203,9 +203,18 @@ void G_SetStockSlots(edict_t *unit, bool items, int32_t slots) {
     G_InvalidateUnitCommands(unit);
 }
 
-/* Identifies live units whose authored merchandise makes them shops. */
+/* The original ORDR map contains selectable facility units with no authored
+ * maximum HP. Selection treats those as live, but M_IsDead rejects 0 HP.
+ * Use the same narrow ORDR-only exception for the merchandise pipeline; a
+ * genuinely dead unit (SVF_DEADMONSTER), normal 0-HP unit or neutral decor
+ * must still never serve as an active shop. */
+static bool G_ShopUnitIsLive(edict_t const *shop) {
+    return shop && shop->inuse && shop->class_id &&
+        (!M_IsDead(shop) || G_IsORDROwnedZeroHealthUnit(shop));
+}
+
 bool G_IsItemShop(edict_t const *shop) {
-    if (!shop || !shop->inuse || !shop->class_id || M_IsDead((edict_t *)shop)) return false;
+    if (!G_ShopUnitIsLive(shop)) return false;
     cstring_t items = G_GetShopItemList(shop);
     return (items && *items) || (shop->stock && shop->stock->items_initialized && shop->stock->item_count);
 }
@@ -213,7 +222,7 @@ bool G_IsItemShop(edict_t const *shop) {
 bool G_IsUnitShop(edict_t const *shop) {
     cstring_t units;
 
-    if (!shop || !shop->inuse || !shop->class_id || M_IsDead((edict_t *)shop)) return false;
+    if (!G_ShopUnitIsLive(shop)) return false;
     units = shop->data.UnitProfile ? shop->data.UnitProfile->sellUnits : NULL;
     return (units && *units) || (shop->stock && shop->stock->units_initialized && shop->stock->unit_count);
 }
