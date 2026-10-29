@@ -67,6 +67,16 @@ and override `BUILD_DIR` or `ARCH`.
   command line. The read-only `share/` tree resolves beside the executable
   inside the bundle via the existing `SDL_GetBasePath()` probe.
 
+## SideStore IPA from GitHub Actions
+
+The existing `.github/workflows/ordr-ipad-build.yml` workflow builds an
+unsigned iPad IPA from `feature/ordr-singleplayer-compat` on manual
+`workflow_dispatch` or a push with `[ipad-build]` in the commit message.
+Ordinary pushes do not spend a macOS IPA build. The `ORDR-iPad-SideStore-IPA`
+artifact contains `ORDR-iPad-SideStore-unsigned.ipa` and must be signed through
+SideStore before installation on a real iPad. The downloaded artifact is a ZIP
+containing the IPA; an Actions run being queued is not proof of a completed IPA.
+
 ## ORDR JASS diagnostics (iPad)
 
 When the ORDR single-player map starts executing JASS, OpenRealm writes an
