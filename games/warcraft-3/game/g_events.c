@@ -550,6 +550,13 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                         if (e->filter && !jass_evaluateboolexpr(level.vm, e->filter, subject))
                             break;
                         if (ordr_wave_death) wave_matched++;
+                        if (evt->type == EVENT_PLAYER_UNIT_SELL) {
+                            fprintf(stderr,
+                                    "WC3_SELL_DISPATCH unit=%u owner=%u reg_owner=%u value=%d trigger=%ld\n",
+                                    subject ? (unsigned)subject->s.number : 0,
+                                    subject ? (unsigned)subject->s.player : 0,
+                                    (unsigned)e->state, evt->value, (long)quest_trigger_ordinal);
+                        }
                         bool queued = jass_calltriggerevent(level.vm, e->trigger, evt);
                         if (ordr_wave_death && queued) wave_queued++;
                         if (misha_summon_event)

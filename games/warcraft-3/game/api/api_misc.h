@@ -787,7 +787,17 @@ static edict_t *G_EventSoldEntity(jass_t *j, bool item) {
            ctx->event_id == EVENT_PLAYER_UNIT_SELL_ITEM + 1)
         : (ctx->event_id == EVENT_UNIT_SELL + 1 ||
            ctx->event_id == EVENT_PLAYER_UNIT_SELL + 1);
-    if (!sale_event) return item ? eventsolditem : eventsoldunit;
+    if (!sale_event) {
+        if (!item && (ctx->event_id == EVENT_PLAYER_UNIT_SELL + 1 || ctx->event_id == EVENT_UNIT_SELL + 1))
+            fprintf(stderr, "WC3_SELL_CTX_UNEXPECTED id=%u value=%d\n", ctx->event_id, ctx->eventValue);
+        return item ? eventsolditem : eventsoldunit;
+    }
+    if (!item) {
+        static uint32_t inspected;
+        if (inspected++ < 48)
+            fprintf(stderr, "WC3_SELL_GET_SOLD_UNIT event=%u value=%d count=%u\n",
+                    ctx->event_id, ctx->eventValue, (unsigned)globals.num_edicts);
+    }
     if (ctx->eventValue <= 0) return NULL;
     id = (uint32_t)ctx->eventValue;
     if (id >= globals.num_edicts) return NULL;
