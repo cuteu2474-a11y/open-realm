@@ -435,6 +435,22 @@ void G_ApplyUnitAbilityTraits(edict_t *ent) {
  * Reads model path, scale, collision radius, HP, mana, and attack parameters
  * (type, weapon class, damage dice, range, projectile model/speed) for the
  * unit's class_id and stores them in the edict. */
+/* A missing modelScale SLK value parses as zero. The object editor's
+ * default scale is 1, so emitting a zero-scale drawable hides its body
+ * even when the correct MDX was registered. Explicit positive scales are
+ * retained; a later SetUnitScale remains authoritative. */
+static float G_ValidUnitModelScale(float value) {
+    return isfinite(value) && value > 0.0f ? value : 1.0f;
+}
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_unit, absent_unit_model_scale_is_renderable) {
+    T_FEQ(G_ValidUnitModelScale(0.0f), 1.0f, 0.001f);
+    T_FEQ(G_ValidUnitModelScale(-1.0f), 1.0f, 0.001f);
+    T_FEQ(G_ValidUnitModelScale(0.75f), 0.75f, 0.001f);
+}
+#endif
+
 void SP_SpawnUnit(edict_t *self) {
     PATHSTR model_filename;
     UnitBalance_t const *b = self->data.UnitBalance;
@@ -458,7 +474,7 @@ void SP_SpawnUnit(edict_t *self) {
     } else {
         M_SetUnitShadow(self);
     }
-    self->s.scale = ui->modelScale;
+    self->s.scale = G_ValidUnitModelScale(ui->modelScale);
     self->s.radius = ui->selectionScale * SEL_SCALE / 2;
     /* Unit-vs-unit separation uses the authentic collisionSize ('ucol') from
      * the unit data, matching WC3. Buildings have no meaningful collisionSize

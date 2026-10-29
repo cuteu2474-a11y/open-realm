@@ -237,14 +237,12 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
     if (!slash || (slash_forward && slash_forward > slash)) slash = slash_forward;
     dot = strrchr(authored, '.');
     if (dot && (!slash || dot > slash)) {
-        /* Warcraft custom UnitUI can refer to .mdl even when the MPQ
-         * contains only the binary .mdx version. Both the gameplay
-         * animation loader and the client model registry must use the
-         * actual .mdx filename. ORDR's u000-u00C selection buttons are
-         * such imported models (e.g. "Button Easy.mdl" -> ".mdx"). */
-        bool imported = !strncasecmp(authored, "war3mapImported\\", sizeof("war3mapImported\\") - 1) ||
-                        !strncasecmp(authored, "war3mapImported/", sizeof("war3mapImported/") - 1);
-        if (imported && !strcasecmp(dot, ".mdl")) {
+        /* The WC3 object editor authors .mdl model names, whereas the
+         * runtime MPQ generally ships compiled .mdx data. Imported ORDR
+         * buildings and standard model paths both need the same conversion.
+         * Previously only war3mapImported paths were converted, leaving
+         * other custom .mdl structures registered under an absent model. */
+        if (!strcasecmp(dot, ".mdl")) {
             size_t stem_len = (size_t)(dot - authored);
             if (stem_len + sizeof(".mdx") <= out_size) {
                 memcpy(out, authored, stem_len);
@@ -255,6 +253,20 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
     } else
         snprintf(out, out_size, "%s.mdx", authored);
 }
+
+#ifdef BZ_TESTS
+TEST(wc3_model, normalize_nonimported_mdl_to_runtime_mdx) {
+    char normalized[MAX_PATHLEN];
+    G_NormalizeModelFilename("Units\\Custom\\Shop.mdl", normalized, sizeof(normalized));
+    T_STREQ(normalized, "Units\\Custom\\Shop.mdx");
+    G_NormalizeModelFilename("war3mapImported\\Gamble.MDL", normalized, sizeof(normalized));
+    T_STREQ(normalized, "war3mapImported\\Gamble.mdx");
+    G_NormalizeModelFilename("war3mapImported\\Named Building", normalized, sizeof(normalized));
+    T_STREQ(normalized, "war3mapImported\\Named Building.mdx");
+    G_NormalizeModelFilename("Buildings\\Custom\\Shop.mdx", normalized, sizeof(normalized));
+    T_STREQ(normalized, "Buildings\\Custom\\Shop.mdx");
+}
+#endif
 
 int G_RegisterModel(cstring_t filename) {
     /* Units with a missile weapon but no authored Missileart have no model. */

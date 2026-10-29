@@ -1597,6 +1597,42 @@ static void G_ORDRShowFlowStatus(void) {
                 jass_ordr_log_event(level.vm, "ORDR_ENEMY_MOVEMENT", detail);
             }
         }
+        /* State evidence for genuine missing presentation: a live facility
+         * with a model index of zero cannot render at all. Log its authored
+         * UnitUI filename and runtime scale separately, without fabricating
+         * new artwork or changing the map. */
+        if (level.time >= 15000) {
+            static uint32_t logged_model_samples;
+            uint32_t missing = 0, scale_invalid = 0;
+            FOR_LOOP(k, globals.num_edicts) {
+                edict_t const *facility = &g_edicts[k];
+                if (!facility->inuse || !(facility->s.flags & EF_UNIT) ||
+                    facility->s.player != 0 || M_IsDead(facility) ||
+                    (!G_UnitIsStructure(facility) && !(facility->aiflags & AI_IMMOBILE)))
+                    continue;
+                if (!facility->s.model) missing++;
+                if (facility->s.scale <= 0.0f) scale_invalid++;
+                if ((!facility->s.model || facility->s.scale <= 0.0f) &&
+                    logged_model_samples++ < 45) {
+                    char message[255];
+                    snprintf(message, sizeof(message),
+                             "unit=%u raw=0x%08x model=%u scale=%.3f file=%.120s renderfx=0x%x",
+                             (unsigned)facility->s.number, (unsigned)facility->class_id,
+                             (unsigned)facility->s.model, (double)facility->s.scale,
+                             facility->data.UnitUI && facility->data.UnitUI->modelFile ?
+                                facility->data.UnitUI->modelFile : "(none)",
+                             (unsigned)facility->s.renderfx);
+                    jass_ordr_log_event(level.vm, "ORDR_MISSING_BUILDING_MODEL", message);
+                }
+            }
+            if (missing || scale_invalid) {
+                char message[105];
+                snprintf(message, sizeof(message),
+                         "owner0_missing_building_models=%u invalid_model_scales=%u",
+                         missing, scale_invalid);
+                jass_ordr_log_event(level.vm, "ORDR_BUILDING_MODEL_SUMMARY", message);
+            }
+        }
         char totals[120];
         snprintf(totals, sizeof(totals), "owner6_mobile=%u active_orders=%u immobile=%u",
                  count, active_orders, immobile);
