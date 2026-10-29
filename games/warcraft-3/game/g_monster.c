@@ -93,8 +93,14 @@ static float G_AuthoredUnitMaxHealth(UnitBalance_t const *balance) {
     return balance->baseHealth > 0 ? (float)balance->baseHealth : 0.0f;
 }
 
+/* The same authored ORDR utility units are selectable, can own shop stock
+ * and can receive native orders/spells. They have no maximum HP column, so
+ * the generic zero-HP death predicate must not silently block those paths
+ * after selection has already accepted them. Keep the exception narrow:
+ * actual death flags and ordinary zero-HP combat units remain dead. */
 bool M_IsDead(edict_t const *ent) {
-    return !ent || ent->health.value <= 0.0f || (ent->svflags & SVF_DEADMONSTER);
+    return !ent || (ent->svflags & SVF_DEADMONSTER) ||
+           (ent->health.value <= 0.0f && !G_IsORDROwnedZeroHealthUnit(ent));
 }
 
 #ifdef BZ_TESTS

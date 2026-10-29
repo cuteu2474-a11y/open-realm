@@ -526,6 +526,30 @@ static bool G_ORDRHasBirthFacilityCommands(edict_t const *unit) {
                   (p->builds && *p->builds)));
 }
 
+/* Keep the original command-card gating; a scripted map's passive abilities
+ * are not actionable buttons. Report missing active handlers with the authored
+ * rawcode and parent alias so they can be ported rather than silently forging
+ * a button that cannot dispatch its spell/order events. */
+static void G_ORDRLogNonCommandFacilityAbility(edict_t *ent, cstring_t code) {
+    ability_t const *ability;
+    static uint32_t samples;
+    char detail[192];
+    uint32_t rawcode;
+    if (!ent || !code || strlen(code) != 4 || !level.vm ||
+        !jass_functionbyname(level.vm, "CUN") ||
+        (!G_UnitIsStructure(ent) && !G_ORDRHasBirthFacilityCommands(ent)) ||
+        samples >= 96) return;
+    rawcode = FS_SLKKey(code);
+    ability = FindAbilityForCommand(code);
+    snprintf(detail, sizeof(detail),
+             "unit=%u class=0x%08x ability=%.4s parent=0x%08x registered=%u flags=0x%x has_proc=%u",
+             (unsigned)ent->s.number, (unsigned)ent->class_id, code,
+             (unsigned)G_AbilityCode(rawcode), (unsigned)(ability != NULL),
+             (unsigned)(ability ? ability->flags : 0), (unsigned)(ability && ability->proc != NULL));
+    jass_ordr_log_event(level.vm, "ORDR_FACILITY_NONCOMMAND_ABILITY", detail);
+    samples++;
+}
+
 uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t max_buttons) {
     uint8_t count = 0;
     UnitBalance_t const *b;
@@ -620,8 +644,11 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
             char ability_code[5] = {0};
             if (strlen(abil) != 4) continue;
             memcpy(ability_code, abil, 4);
-            if (G_IsImplementedAbility(ability_code) && G_ActorHasSkill(ent, ability_code))
+            if (!G_ActorHasSkill(ent, ability_code)) continue;
+            if (G_IsImplementedAbility(ability_code))
                 G_AddAbilityCommandButtons(ent, buttons, max_buttons, &count, ability_code);
+            else
+                G_ORDRLogNonCommandFacilityAbility(ent, ability_code);
         }
     }
     FOR_LOOP(i, ARRAY_COUNT(ent->abilities.added)) {
@@ -629,8 +656,11 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
         uint32_t const code = ent->abilities.added[i];
         if (!code) continue;
         memcpy(abil, &code, 4);
-        if (G_IsImplementedAbility(abil) && G_ActorHasSkill(ent, abil))
+        if (!G_ActorHasSkill(ent, abil)) continue;
+        if (G_IsImplementedAbility(abil))
             G_AddAbilityCommandButtons(ent, buttons, max_buttons, &count, abil);
+        else
+            G_ORDRLogNonCommandFacilityAbility(ent, abil);
     }
     FOR_LOOP(i, MAX_HERO_ABILITIES) {
         heroability_t const *ha = ent->heroabilities + i;

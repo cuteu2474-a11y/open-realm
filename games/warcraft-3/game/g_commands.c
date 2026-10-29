@@ -165,6 +165,7 @@ static bool G_SelectionListContains(edict_t *const *selection, uint32_t count, e
  * diagnostics only; do not rewrite their pathing, ownership, or JASS types. */
 static bool G_ORDRFacilityForDiagnostics(edict_t const *unit) {
     return unit && (G_UnitIsStructure(unit) ||
+        G_IsItemShop(unit) || G_IsUnitShop(unit) ||
         unit->class_id == MAKEFOURCC('H','0','C','4') ||
         unit->class_id == MAKEFOURCC('H','0','5','M'));
 }
@@ -1497,6 +1498,27 @@ CLIENTCOMMAND(Button) {
 
         if (!G_UnitCanSpendResources(client, producer) || strlen(classname) != 4) return;
         memcpy(&class_id, classname, sizeof(class_id));
+        {
+            char reason[128] = {0};
+            buildCommandState_t const state =
+                G_GetTrainCommandState(client, producer, class_id, reason, sizeof(reason));
+            if (state == BUILD_COMMAND_ABSENT || state == BUILD_COMMAND_HIDDEN) {
+                /* An unsupported custom ability must not fall through into
+                 * training just because its code is four characters long. */
+                if (level.vm && producer && G_ORDRFacilityForDiagnostics(producer)) {
+                    static uint32_t missing_dispatch_samples;
+                    if (missing_dispatch_samples++ < 80) {
+                        char detail[176];
+                        snprintf(detail, sizeof(detail),
+                                 "unit=%u class=0x%08x button=%.4s ability_parent=0x%08x no_native_or_train=1",
+                                 (unsigned)producer->s.number, (unsigned)producer->class_id,
+                                 classname, (unsigned)G_AbilityCode(FS_SLKKey(classname)));
+                        jass_ordr_log_event(level.vm, "ORDR_FACILITY_UNHANDLED_BUTTON", detail);
+                    }
+                }
+                return;
+            }
+        }
         SP_TrainUnit(producer, class_id);
     }
     if (!strcmp(argv[1], STR_CmdStop) || !strcmp(argv[1], STR_CmdHoldPos)) {

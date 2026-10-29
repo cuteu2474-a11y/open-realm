@@ -368,6 +368,13 @@ static edict_t *G_FindShopPatronInternal(gameClient_t *client, edict_t *shop, bo
             best_distance = distance;
         }
     }
+    /* If the owning structure itself carries a real inventory ability,
+     * it is a legitimate last-resort buyer when no other nearby inventory
+     * unit qualifies. Do not manufacture an inventory or bypass neutral-shop
+     * patron rules for buildings without that authored ability. */
+    if (!best && require_inventory && shop->s.player == client->ps.number &&
+        G_UnitHasInventory(shop) && G_ShopPatronEligible(shop, shop, true))
+        best = shop;
     return best;
 }
 

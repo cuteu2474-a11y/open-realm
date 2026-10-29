@@ -2226,10 +2226,12 @@ TEST(wc3_items, ordr_zero_maxhp_facility_remains_usable_shop_without_reviving_co
     shop = make_unit_test_shop(0, 0);
     shop->s.player = 0;
     shop->s.flags |= EF_UNIT;
+    shop->svflags |= SVF_MONSTER;
     shop->health.value = 0.0f;
     shop->health.max_value = 0.0f;
-    T_ASSERT(M_IsDead(shop));
     T_ASSERT(G_IsORDROwnedZeroHealthUnit(shop));
+    T_ASSERT(!M_IsDead(shop));
+    T_ASSERT(S_SpellIsAliveTarget(shop));
     T_ASSERT(G_CanUseUnitShop(client, shop));
     p = (shopItemButtonsParams_t){ .client = client, .shop = shop, .buttons = buttons, .max_buttons = 12 };
     level.time += 3000;
@@ -2242,15 +2244,44 @@ TEST(wc3_items, ordr_zero_maxhp_facility_remains_usable_shop_without_reviving_co
     T_ASSERT(G_CanUseItemShop(client, shop));
 
     shop->svflags |= SVF_DEADMONSTER;
+    T_ASSERT(M_IsDead(shop));
+    T_ASSERT(!S_SpellIsAliveTarget(shop));
     T_ASSERT(!G_IsUnitShop(shop));
     T_ASSERT(!G_IsItemShop(shop));
     T_ASSERT(!G_CanUseUnitShop(client, shop));
     shop->svflags &= ~SVF_DEADMONSTER;
     shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_ASSERT(M_IsDead(shop));
     T_ASSERT(!G_IsUnitShop(shop));
     shop->s.player = 0;
     shop->health.max_value = 100.0f;
+    T_ASSERT(M_IsDead(shop));
     T_ASSERT(!G_IsUnitShop(shop));
+}
+
+/* An owned item shop with an authored inventory may buy into its own
+ * inventory only if no other eligible nearby patron exists. This does not
+ * relax the neutral merchant or inventory-less facility contract. */
+TEST(wc3_items, owned_inventory_shop_uses_itself_only_as_last_resort_purchaser) {
+    static UnitAbilities_t const inventory_shop = { .abilList = "AInv,Asid" };
+    edict_t *shop;
+    gameClient_t *client;
+    setup_test_world();
+    client = g_edicts[0].client;
+    client->ps.number = 0;
+    shop = make_item_test_shop(0, 0);
+    shop->s.player = 0;
+    shop->data.UnitAbilities = &inventory_shop;
+    shop->health.value = shop->health.max_value = 100.0f;
+    T_ASSERT(G_UnitHasInventory(shop));
+    T_EQ(G_FindShopPatron(client, shop), shop);
+
+    shop->data.UnitAbilities = NULL;
+    T_NULL(G_FindShopPatron(client, shop));
+
+    shop->data.UnitAbilities = &inventory_shop;
+    shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_NULL(G_FindShopPatron(client, shop));
 }
 
 TEST(wc3_items, owned_unit_shop_purchase_dispatches_sold_unit_to_jass) {
