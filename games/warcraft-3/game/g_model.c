@@ -229,7 +229,7 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
 
     if (!out || !out_size) return;
     out[0] = '\0';
-    if (!authored || !*authored) return;
+    if (!authored || !*authored || !strcmp(authored, "_")) return;
 
     slash_back = strrchr(authored, '\\');
     slash_forward = strrchr(authored, '/');
@@ -237,12 +237,13 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
     if (!slash || (slash_forward && slash_forward > slash)) slash = slash_forward;
     dot = strrchr(authored, '.');
     if (dot && (!slash || dot > slash)) {
-        /* The WC3 object editor authors .mdl model names, whereas the
-         * runtime MPQ generally ships compiled .mdx data. Imported ORDR
-         * buildings and standard model paths both need the same conversion.
-         * Previously only war3mapImported paths were converted, leaving
-         * other custom .mdl structures registered under an absent model. */
-        if (!strcasecmp(dot, ".mdl")) {
+        /* Only map-imported .mdl aliases require an explicit .mdx rewrite.
+         * Stock game model identifiers remain in their source spelling:
+         * the resource loader resolves that namespace itself. Converting
+         * every stock .mdl breaks campaign object model references. */
+        bool const imported = !strncasecmp(authored, "war3mapImported\\", sizeof("war3mapImported\\") - 1) ||
+                              !strncasecmp(authored, "war3mapImported/", sizeof("war3mapImported/") - 1);
+        if (imported && !strcasecmp(dot, ".mdl")) {
             size_t stem_len = (size_t)(dot - authored);
             if (stem_len + sizeof(".mdx") <= out_size) {
                 memcpy(out, authored, stem_len);
@@ -258,13 +259,15 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
 TEST(wc3_model, normalize_nonimported_mdl_to_runtime_mdx) {
     char normalized[MAX_PATHLEN];
     G_NormalizeModelFilename("Units\\Custom\\Shop.mdl", normalized, sizeof(normalized));
-    T_STREQ(normalized, "Units\\Custom\\Shop.mdx");
+    T_STREQ(normalized, "Units\\Custom\\Shop.mdl");
     G_NormalizeModelFilename("war3mapImported\\Gamble.MDL", normalized, sizeof(normalized));
     T_STREQ(normalized, "war3mapImported\\Gamble.mdx");
     G_NormalizeModelFilename("war3mapImported\\Named Building", normalized, sizeof(normalized));
     T_STREQ(normalized, "war3mapImported\\Named Building.mdx");
     G_NormalizeModelFilename("Buildings\\Custom\\Shop.mdx", normalized, sizeof(normalized));
     T_STREQ(normalized, "Buildings\\Custom\\Shop.mdx");
+    G_NormalizeModelFilename("_", normalized, sizeof(normalized));
+    T_STREQ(normalized, "");
 }
 #endif
 
