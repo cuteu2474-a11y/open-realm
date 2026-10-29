@@ -570,6 +570,30 @@ static uint32_t G_ORDRResolveJassAbilityCode(jass_t *j, edict_t *unit, uint32_t 
     return G_UnitAbilityLevel(unit, swapped) ? swapped : code;
 }
 
+/* The protected ORDR script also passes big-endian numeric FourCCs to
+ * UnitAddAbility before the ability is present. The read helper above can
+ * resolve an already-owned ability but cannot resolve an insertion by checking
+ * ownership alone. Prefer actual AbilityData metadata; the two original
+ * wave-marker rawcodes are authored without requiring a stock ability row. */
+static uint32_t G_ORDRResolveJassAbilityCodeForAdd(jass_t *j, edict_t *unit, uint32_t code) {
+    uint32_t swapped;
+    if (!j || !unit || !code ||
+        !jass_functionbyname(j, "CUO") ||
+        !jass_functionbyname(j, "CUW") ||
+        !jass_functionbyname(j, "CUN")) return code;
+    if (G_UnitAbilityLevel(unit, code)) return code;
+    swapped = ((code & 0x000000ffu) << 24) |
+              ((code & 0x0000ff00u) << 8) |
+              ((code & 0x00ff0000u) >> 8) |
+              ((code & 0xff000000u) >> 24);
+    if (G_UnitAbilityLevel(unit, swapped)) return swapped;
+    if (G_AbilityData(code)->id == code) return code;
+    if (G_AbilityData(swapped)->id == swapped ||
+        swapped == MAKEFOURCC('A','9','0','1') ||
+        swapped == MAKEFOURCC('A','9','0','2')) return swapped;
+    return code;
+}
+
 uint32_t GetUnitAbilityLevel(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
     uint32_t const code = (uint32_t)jass_checkinteger(j, 2);
@@ -1243,18 +1267,36 @@ uint32_t UnitSuspendDecay(jass_t *j) {
 }
 uint32_t UnitAddAbility(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    uint32_t abilityId = jass_checkinteger(j, 2);
-    return jass_pushboolean(j, G_ActorAddSkill(whichUnit, abilityId));
+    uint32_t const authored = (uint32_t)jass_checkinteger(j, 2);
+    uint32_t const abilityId = G_ORDRResolveJassAbilityCodeForAdd(j, whichUnit, authored);
+    bool const added = G_ActorAddSkill(whichUnit, abilityId);
+    if (whichUnit && level.vm &&
+        (abilityId == MAKEFOURCC('A','9','0','1') || abilityId == MAKEFOURCC('A','9','0','2')) &&
+        jass_functionbyname(j, "CUN")) {
+        static unsigned marker_samples;
+        if (marker_samples++ < 96) {
+            char detail[168];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u owner=%u requested=0x%08x ability=%.4s added=%u level=%u",
+                     (unsigned)whichUnit->s.number, (unsigned)whichUnit->s.player,
+                     (unsigned)authored, (cstring_t)&abilityId, (unsigned)added,
+                     (unsigned)G_UnitAbilityLevel(whichUnit, abilityId));
+            jass_ordr_log_event(j, "ORDR_WAVE_MARKER_ADD", detail);
+        }
+    }
+    return jass_pushboolean(j, added);
 }
 uint32_t UnitRemoveAbility(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
-    uint32_t abilityId = jass_checkinteger(j, 2);
+    uint32_t const requested = (uint32_t)jass_checkinteger(j, 2);
+    uint32_t const abilityId = G_ORDRResolveJassAbilityCode(j, whichUnit, requested);
     return jass_pushboolean(j, G_ActorRemoveSkill(whichUnit, abilityId));
 }
 uint32_t UnitMakeAbilityPermanent(jass_t *j) {
     edict_t *whichUnit = jass_checkhandle(j, 1, "unit");
     bool permanent = jass_checkboolean(j, 2);
-    uint32_t abilityId = jass_checkinteger(j, 3);
+    uint32_t const requested = (uint32_t)jass_checkinteger(j, 3);
+    uint32_t const abilityId = G_ORDRResolveJassAbilityCode(j, whichUnit, requested);
     return jass_pushboolean(j, G_ActorSetSkillPermanent(whichUnit, abilityId, permanent));
 }
 static void WC3_RemoveBuffs(edict_t *unit, bool positive, bool negative,

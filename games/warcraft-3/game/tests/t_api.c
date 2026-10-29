@@ -7868,6 +7868,45 @@ TEST(wc3_api, unit_ability_mutation_has_set_semantics) {
     currentplayer = NULL;
 }
 
+/* The protected map supplies numeric (big-endian) FourCCs, while actor
+ * ability storage uses canonical little-endian MAKEFOURCC values. Without
+ * add-time normalization, death-event conditions cannot see their marker. */
+TEST(wc3_api, ordr_numeric_added_ability_survives_owner_six_death_event) {
+    reset_entities();
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit enemy = null\n"
+        "  integer alive = 1\n"
+        "endglobals\n"
+        "function CUO takes nothing returns nothing\nendfunction\n"
+        "function CUW takes nothing returns nothing\nendfunction\n"
+        "function CUN takes nothing returns nothing\nendfunction\n"
+        "function OnWaveDeath takes nothing returns nothing\n"
+        "  if GetDyingUnit() == enemy and GetUnitAbilityLevel(GetDyingUnit(), 0x41496e76) > 0 then\n"
+        "    set alive = alive - 1\n"
+        "  endif\n"
+        "endfunction\n"
+        "function VerifyWaveDeath takes nothing returns nothing\n"
+        "  call BJassAssert(alive == 0, \"original death-trigger count should decrease\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  set enemy = CreateUnit(Player(6), 'hfoo', 64.0, 64.0, 0.0)\n"
+        "  call BJassAssert(UnitAddAbility(enemy, 0x41496e76), \"numeric AInv must resolve on insertion\")\n"
+        "  call BJassAssert(GetUnitAbilityLevel(enemy, 'AInv') > 0, \"actor stores canonical ability\")\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(6), EVENT_PLAYER_UNIT_DEATH, null)\n"
+        "  call TriggerAddAction(t, function OnWaveDeath)\n"
+        "  call KillUnit(enemy)\n"
+        "endfunction\n"
+    ));
+    level.started = level.scriptsStarted = true;
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "VerifyWaveDeath", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_api, unit_invis_reports_intrinsic_active_state) {
     reset_entities();
     currentplayer = &game.clients[0].ps;

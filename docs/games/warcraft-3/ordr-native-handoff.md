@@ -31,6 +31,15 @@
 - 사용자 2026-10-29 스크린샷의 도박소 "No eligible purchaser is nearby."는 일반 상점의 근접 인벤토리 구매자 판정 경로 때문임. 원본 도박 JASS의 판매 콜백 및 소비재 처리와 대조되지 않아 **재화를 임의로 지급하거나 인벤토리 조건을 전체 상점에서 해제하지 않음**. 실기기 기능은 여전히 미검증.
 - **최종 검증**: 후속 push에 `[ipad-test] [ipad-build]`를 한번만 넣어 기존 1회 iPad 시뮬레이터 + IPA + 일반 CI 실행. 통과 시에도 iPad 실기기 입력·구매·카운트 실효과 검증 필요.
 
+## 2026-10-30 유닛 카운트/능력 코드 경로 추가 점검
+
+- **실기기 재현:** 몬스터 사망 뒤에도 카운트 감소가 나타나지 않는다는 사용자 보고가 계속됨. 이전 수정이 문제를 해결했다는 증거는 없음.
+- 엔진의 `GetUnitAbilityLevel`은 ORDR의 숫자형 big-endian rawcode를 이미 보정하나, `UnitAddAbility`는 보정 없이 `G_ActorAddSkill`에 전달했음. 신규 표지 능력을 추가하는 순간에는 기존 소유 능력이 없어 조회 기반 보정도 불가능함.
+- 원본 맵/JASS를 수정하지 않고 `api_unit.h`의 추가 경로가 AbilityData 기반으로 숫자형 능력 코드를 해석하고, ORDR의 `A901/A902` 표지 rawcode는 기존 ORDR 스크립트 식별 시에만 동일하게 해석하도록 보완함. 제거/영구화도 기존 소유 기반 보정을 재사용함.
+- 디버그 로그 `ORDR_WAVE_MARKER_ADD`는 `requested`, `ability`, `added`, `level`을 출력한다. `ORDR_WAVE_DEATH_QUEUED` 및 `ORDR_WAVE_DEATH_DISPATCH`와 함께 비교하여 사망 시 원작 트리거가 실제로 표지를 확인할 수 있는지 판정한다.
+- 회귀 테스트 `wc3_api.ordr_numeric_added_ability_survives_owner_six_death_event`는 플레이어 6, 숫자형 능력 삽입, 사망 이벤트 및 JASS 조건 카운트 변경을 연쇄 검증한다. 테스트에 쓰는 `AInv`는 stock fixture의 유효 능력이고 원작 표지 `A901` 자체는 비공개 원본 맵에서만 실기기 검증 가능하다.
+- 카운트 변수 하드코딩/무조건 감소 금지. 테스트 성공이라도 실제 ORDR 실기기 카운트 갱신은 확인 전까지 **미검증**.
+
 ## 2026-10-30 도박소 판매 이벤트 원본 검증 및 엔진 복원
 
 원본 사용자 소유의 `ORDR_S2_2.323[C](3).w3x`에서 **war3map.j 및 Units/UnitBalance.slk**를 읽어 다음을 확인했다. 원본은 절대 변경하지 않는다.
