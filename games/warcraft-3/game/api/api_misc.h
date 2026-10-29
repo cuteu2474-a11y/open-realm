@@ -775,11 +775,30 @@ uint32_t GetSellingUnit(jass_t *j) {
 uint32_t GetBuyingUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->source, "unit");
 }
+/* A sell event can be queued alongside other purchases. Read its own sold
+ * entity number rather than a mutable global "last sold unit". A legacy
+ * direct TriggerExecute call outside a sale event still uses that global. */
+static edict_t *G_EventSoldEntity(jass_t *j, bool item) {
+    jassContext_t const *ctx = jass_getcontext(j);
+    uint32_t id;
+    if (!ctx) return item ? eventsolditem : eventsoldunit;
+    bool const sale_event = item
+        ? (ctx->event_id == EVENT_UNIT_SELL_ITEM + 1 ||
+           ctx->event_id == EVENT_PLAYER_UNIT_SELL_ITEM + 1)
+        : (ctx->event_id == EVENT_UNIT_SELL + 1 ||
+           ctx->event_id == EVENT_PLAYER_UNIT_SELL + 1);
+    if (!sale_event) return item ? eventsolditem : eventsoldunit;
+    if (ctx->eventValue <= 0) return NULL;
+    id = (uint32_t)ctx->eventValue;
+    if (id >= globals.num_edicts) return NULL;
+    edict_t *ent = &globals.edicts[id];
+    return ent->inuse && !G_IsDeferredFree(ent) ? ent : NULL;
+}
 uint32_t GetSoldUnit(jass_t *j) {
-    return jass_pushlighthandle(j, eventsoldunit, "unit");
+    return jass_pushlighthandle(j, G_EventSoldEntity(j, false), "unit");
 }
 uint32_t GetSoldItem(jass_t *j) {
-    return jass_pushlighthandle(j, eventsolditem, "item");
+    return jass_pushlighthandle(j, G_EventSoldEntity(j, true), "item");
 }
 uint32_t StringLength(jass_t *j) {
     cstring_t s = jass_checkstring(j, 1);

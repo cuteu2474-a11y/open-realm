@@ -789,6 +789,29 @@ uint8_t G_GetShopItemButtons(shopItemButtonsParams_t *params) {
 }
 
 
+/* A player-owned production/shop building is the buyer itself for unit
+ * merchandise. Requiring a nearby mobile patron is only the neutral/public
+ * shop contract. ORDR's owned gambling buildings sell transient units to
+ * trigger EVENT_PLAYER_UNIT_SELL and immediately remove them in JASS. */
+static bool G_ShopUnitNeedsNearbyPatron(gameClient_t const *client, edict_t const *shop) {
+    return !client || !shop || shop->s.player != client->ps.number;
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_shop, owned_gambling_building_needs_no_external_purchaser) {
+    gameClient_t buyer = {0};
+    edict_t shop = {0};
+    buyer.ps.number = 0;
+    shop.s.player = 0;
+    T_ASSERT(!G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    shop.s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    shop.s.player = 1;
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(NULL, &shop));
+}
+#endif
+
 uint8_t G_GetShopUnitButtons(shopItemButtonsParams_t *params) {
     gameClient_t *client = params ? params->client : NULL;
     edict_t *shop = params ? params->shop : NULL;
@@ -818,7 +841,7 @@ uint8_t G_GetShopUnitButtons(shopItemButtonsParams_t *params) {
         unit = G_UnitBalance(shop->stock->units[i].id);
         if (shop->stock->units[i].maximum > 0) button->number = (uint32_t)MAX(0, shop->stock->units[i].current);
 
-        if (!patron) {
+        if (!patron && G_ShopUnitNeedsNearbyPatron(client, shop)) {
             G_DisableShopButton(button, "No eligible purchaser is nearby.");
         } else if (shop->stock->units[i].current <= 0) {
             G_DisableShopButton(button, "Out of stock.");
@@ -939,8 +962,16 @@ bool G_ShopPurchaseItem(edict_t *clent, edict_t *shop, uint32_t item_id) {
      * GetEventDamageSource — meaningful only while handling the sell event). */
     eventsolditem = item_ent;
     eventsoldunit = NULL;
-    G_PublishEventWithSource(shop, EVENT_UNIT_SELL_ITEM, patron);
-    G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL_ITEM, patron);
+    gameEvent_t *sold = G_PublishEventWithSource(shop, EVENT_UNIT_SELL_ITEM, patron);
+    if (sold) {
+        sold->value = (int32_t)item_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    sold = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL_ITEM, patron);
+    if (sold) {
+        sold->value = (int32_t)item_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
     return true;
 }
 
@@ -959,7 +990,7 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     stock_index = G_FindShopUnitStock(shop, unit_id);
     if (stock_index < 0) return false;
     patron = G_FindUnitShopPatron(client, shop);
-    if (!patron) {
+    if (!patron && G_ShopUnitNeedsNearbyPatron(client, shop)) {
         G_ShowCommandErrorText(clent, "No eligible purchaser is nearby.");
         return false;
     }
@@ -1011,6 +1042,37 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     shop->stock->units[stock_index].current--;
     G_StartUnitRestock(shop, (uint32_t)stock_index);
     G_InvalidateCommands(client);
+
+    /* Warcraft unit-shop purchases emit SELL and PLAYER_UNIT_SELL after
+     * creating the sold unit. ORDR listens to the latter for its h06F/H0AZ
+     * money-gambling rewards. Previously these events were never sent, so
+     * the authored JASS reward and temporary-unit removal were unreachable.
+     * Save sold entity ID in each event payload because several purchases may
+     * be queued before JASS callbacks drain. */
+    eventsolditem = NULL;
+    eventsoldunit = unit_ent;
+    gameEvent_t *sold = G_PublishEventWithSource(shop, EVENT_UNIT_SELL, patron);
+    if (sold) {
+        sold->value = (int32_t)unit_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    sold = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL, patron);
+    if (sold) {
+        sold->value = (int32_t)unit_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    if (level.vm && jass_functionbyname(level.vm, "CUN")) {
+        static uint32_t logged;
+        if (logged++ < 64) {
+            char detail[156];
+            snprintf(detail, sizeof(detail),
+                     "shop=%u sold_unit=%u raw=0x%08x buyer=%u price=%u gold stock=%d",
+                     (unsigned)shop->s.number, (unsigned)unit_ent->s.number,
+                     (unsigned)unit_ent->class_id, (unsigned)client->ps.number,
+                     (unsigned)gold, shop->stock->units[stock_index].current);
+            jass_ordr_log_event(level.vm, "ORDR_GAMBLE_UNIT_SOLD", detail);
+        }
+    }
     return true;
 }
 
