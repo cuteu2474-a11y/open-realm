@@ -9258,6 +9258,60 @@ TEST(wc3_api, dead_wave_creeps_leave_native_player_unit_count_before_decay) {
     T_ASSERT(dying->inuse); /* Retained corpse cannot still count as alive. */
 }
 
+/* The ORDR map's gambling handler is an EVENT_PLAYER_UNIT_SELL callback
+ * keyed by GetUnitTypeId(GetSoldUnit()). Two purchases may queue during the
+ * same frame, so each callback must receive the sale's own entity instead
+ * of the mutable last-sold global. */
+TEST(wc3_api, queued_unit_sales_preserve_sold_rawcode_and_buyer_player) {
+    edict_t *shop, *cheap, *expensive;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer cheapSales = 0\n"
+        "  integer expensiveSales = 0\n"
+        "endglobals\n"
+        "function sale takes nothing returns nothing\n"
+        "  call BJassAssert(GetPlayerId(GetTriggerPlayer()) == 0, \"seller event must resolve buyer player\")\n"
+        "  if GetUnitTypeId(GetSoldUnit()) == 'hfoo' then\n"
+        "    set cheapSales = cheapSales + 1\n"
+        "  elseif GetUnitTypeId(GetSoldUnit()) == 'hpea' then\n"
+        "    set expensiveSales = expensiveSales + 1\n"
+        "  endif\n"
+        "endfunction\n"
+        "function verify takes nothing returns nothing\n"
+        "  call BJassAssert(cheapSales == 1, \"cheap sale callback lost\")\n"
+        "  call BJassAssert(expensiveSales == 1, \"expensive sale callback lost\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELL, null)\n"
+        "  call TriggerAddAction(t, function sale)\n"
+        "endfunction\n"));
+    shop = alloc_test_unit(MAKEFOURCC('h','b','a','r'), 32.0f, 32.0f);
+    cheap = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 64.0f, 64.0f);
+    expensive = alloc_test_unit(MAKEFOURCC('h','p','e','a'), 128.0f, 64.0f);
+    T_NOT_NULL(shop); T_NOT_NULL(cheap); T_NOT_NULL(expensive);
+    if (!shop || !cheap || !expensive) return;
+    shop->s.player = cheap->s.player = expensive->s.player = 0;
+    gameEvent_t *first = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL, NULL);
+    T_NOT_NULL(first);
+    if (first) {
+        first->value = (int32_t)cheap->s.number;
+        first->dialog_player = 1;
+    }
+    gameEvent_t *second = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL, NULL);
+    T_NOT_NULL(second);
+    if (second) {
+        second->value = (int32_t)expensive->s.number;
+        second->dialog_player = 1;
+    }
+    eventsoldunit = expensive; /* simulate the global being overwritten */
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "verify", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_api, player_unit_death_event_respects_distinct_wave_owners) {
     edict_t *five, *six;
     setup_test_world();
