@@ -18,6 +18,12 @@ static struct {
 
 static bool smart_click_active;
 static bool ipad_chat_touch_down;
+static uint32_t ipad_chat_last_open_ms;
+static bool ipad_chat_ever_opened;
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+/* Desktop tests opt in explicitly; production desktop input has no iPad overlay. */
+static bool test_ipad_chat_enabled;
+#endif
 #define BZ_SELECT_DOUBLE_CLICK_MS 500 // milliseconds; shared opt-in same-entity double-click window
 static bool cam_west, cam_east, cam_north, cam_south;
 
@@ -432,6 +438,38 @@ static bool CL_TouchIsDirect(SDL_TouchID touch) {
 }
 static bool (*touch_is_direct)(SDL_TouchID) = CL_TouchIsDirect;
 
+/* Match the paint condition for the floating iPad CHAT button. A transient
+ * focus loss must not make a still-visible button inert: a fresh finger/mouse
+ * press is itself an input focus request. The modal and gameplay checks still
+ * prevent the button opening on top of a menu or an existing chat editor. */
+static bool CL_iPadChatAvailable(void) {
+    return cls.state == ca_active && cls.key_dest == key_game &&
+           cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
+           !CL_WindowModalActive() && !SCR_LayoutModalActive();
+}
+
+/* SDL on iOS can deliver direct FINGER events, synthetic TOUCH_MOUSE events,
+ * or a mixture whose order varies by OS/driver. A single tap needs one
+ * authoritative chat_open, regardless of the input representation. */
+static bool CL_iPadChatOpenFromTap(uint32_t timestamp) {
+    if (!CL_iPadChatAvailable()) return false;
+    /* A missing FINGERUP or synthetic MOUSEBUTTONUP must not leave this
+     * floating button stuck forever. A genuinely new press after half a
+     * second re-arms it; immediate duplicate edges remain suppressed. */
+    if (ipad_chat_touch_down && ipad_chat_ever_opened &&
+        (uint32_t)(timestamp - ipad_chat_last_open_ms) > 500u)
+        ipad_chat_touch_down = false;
+    if (ipad_chat_touch_down) return true;
+    ipad_chat_touch_down = true;
+    if (!ipad_chat_ever_opened || (uint32_t)(timestamp - ipad_chat_last_open_ms) > 250u) {
+        Cmd_ForwardToServer("chat_open");
+        ipad_chat_last_open_ms = timestamp;
+        ipad_chat_ever_opened = true;
+        fprintf(stderr, "ORDR_CHAT_TOUCH_DISPATCH open timestamp=%u\n", (unsigned)timestamp);
+    }
+    return true;
+}
+
 static vec2_t CL_TouchPanCenter(void) {
     return (vec2_t){ (touch_pan.pos[0].x + touch_pan.pos[1].x) * 0.5f,
                      (touch_pan.pos[0].y + touch_pan.pos[1].y) * 0.5f };
@@ -592,12 +630,9 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                     !CL_iPadChatHit((int)pos.x, (int)pos.y) &&
                     !CL_WindowMouseOver((int)pos.x, (int)pos.y) &&
                     !CL_TraceORDRChoiceCard(pos.x, pos.y, &(uint32_t){0});
-                if (cls.state == ca_active && CL_GameplayInputReady() &&
-                    CL_iPadChatHit((int)pos.x, (int)pos.y) && !ipad_chat_touch_down) {
-                    /* A direct finger also generates synthetic mouse presses.
-                     * Admit one chat-open request for the whole gesture. */
-                    ipad_chat_touch_down = true;
-                    Cmd_ForwardToServer("chat_open");
+                if (CL_iPadChatHit((int)pos.x, (int)pos.y)) {
+                    /* The same tap may also arrive as SDL_TOUCH_MOUSEID. */
+                    CL_iPadChatOpenFromTap(finger->timestamp);
                 }
             }
             touch_pan.id[touch_pan.count] = finger->fingerId;
@@ -679,12 +714,11 @@ static void CL_TouchFingerEvent(SDL_TouchFingerEvent const *finger) {
                     touch_pan.fallback_sent = true;
                 } else if (CL_iPadChatHit((int)touch_pan.start.x, (int)touch_pan.start.y) &&
                            CL_iPadChatHit((int)pos.x, (int)pos.y) &&
-                           cls.state == ca_active && cls.key_dest == key_game &&
-                           cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
-                           !CL_WindowModalActive() && !SCR_LayoutModalActive()) {
+                           CL_iPadChatAvailable()) {
                     /* Recovered a finger tap whose first edge was swallowed
                      * by UIKit/SDL. Do not also select a world object. */
-                    Cmd_ForwardToServer("chat_open");
+                    CL_iPadChatOpenFromTap(finger->timestamp);
+                    ipad_chat_touch_down = false;
                     touch_pan.fallback_sent = true;
                 } else if (touch_pan.single_can_select &&
                     finger->timestamp - touch_pan.down_time >= 450 &&
@@ -919,6 +953,34 @@ static bool CL_TouchGestureOwnsMouse(SDL_Event const *event) {
     if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP)
         return event->button.which == SDL_TOUCH_MOUSEID;
     return false;
+}
+
+/* IMPORTANT: this goes BEFORE CL_TouchGestureOwnsMouse in the event loop.
+ * After a direct finger has been seen, the generic touch-mouse deduplicator
+ * suppresses all SDL_TOUCH_MOUSEID events, even if subsequent taps arrive
+ * only as synthetic mouse (iPad keyboard/accessibility/SDL variations).
+ * That used to make a clearly drawn CHAT key impossible to press.
+ * Also accept physical mouse/trackpad clicks for the same visible rectangle. */
+static bool CL_iPadChatMouseEvent(SDL_Event const *event) {
+#if (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(BZ_TESTS)
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    if (!test_ipad_chat_enabled) return false;
+#endif
+    if ((event->type != SDL_MOUSEBUTTONDOWN && event->type != SDL_MOUSEBUTTONUP) ||
+        event->button.button != SDL_BUTTON_LEFT) return false;
+    if (event->type == SDL_MOUSEBUTTONUP) {
+        if (!ipad_chat_touch_down) return false;
+        ipad_chat_touch_down = false;
+        return true;
+    }
+    if (!CL_iPadChatAvailable() ||
+        !CL_iPadChatHit(event->button.x, event->button.y)) return false;
+    CL_iPadChatOpenFromTap(event->button.timestamp);
+    return true;
+#else
+    (void)event;
+    return false;
+#endif
 }
 
 static void CL_SendSmartPointCommand(float x, float y) {
@@ -1287,7 +1349,10 @@ static bool CL_MouseOverGameplayUIAt(int x, int y) {
 }
 
 static bool CL_iPadChatHit(int x, int y) {
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#if (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(BZ_TESTS)
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    if (!test_ipad_chat_enabled) return false;
+#endif
     rect_t const rect = SCR_iPadChatButtonRect(re.GetWindowSize());
     return x >= (int)rect.x && x < (int)(rect.x + rect.w) &&
            y >= (int)rect.y && y < (int)(rect.y + rect.h);
@@ -1338,6 +1403,11 @@ void CL_Input(void) {
             }
             continue;
         }
+        /* Handle the visible CHAT overlay before the generic touch-mouse
+         * filter. The screen button is a rendered primitive, not an FDF frame,
+         * so neither normal UI layout hit-testing nor world click dispatch
+         * can activate it. */
+        if (CL_iPadChatMouseEvent(&event)) continue;
         if (CL_TouchGestureOwnsMouse(&event)) continue;
         switch(event.type) {
             case SDL_FINGERDOWN:
@@ -1358,16 +1428,6 @@ void CL_Input(void) {
                     input.touch_pointer = touch_mouse;
                     mouse.origin.x = event.button.x;
                     mouse.origin.y = event.button.y;
-                    if (touch_mouse &&
-                        event.button.button == SDL_BUTTON_LEFT &&
-                        CL_GameplayInputReady() && CL_iPadChatHit(event.button.x, event.button.y)) {
-                        if (!ipad_chat_touch_down) {
-                            ipad_chat_touch_down = true;
-                            Cmd_ForwardToServer("chat_open");
-                        }
-                        /* Consume synthetic mouse-down as the same touch. */
-                        continue;
-                    }
                     if (mousevt && cls.key_dest != key_console) {
                         mouse_button_keys[event.button.button] = mousevt;
                         CL_InputKeyEvent(mousevt, CL_BindMods(SDL_GetModState()), true, event.button.timestamp);
@@ -1381,15 +1441,7 @@ void CL_Input(void) {
                         if (touch_pan.fallback_sent) continue;
                         touch_pan.synthetic_up_seen = true;
                     }
-                    if (ipad_chat_touch_down &&
-                        (event.button.which == SDL_TOUCH_MOUSEID ||
-                         false /* finger-only fallback handled synchronously */) &&
-                        event.button.button == SDL_BUTTON_LEFT) {
-                        ipad_chat_touch_down = false;
-                        touch_pan.fallback_sent = true;
-                        continue;
-                    }
-                    keyCode_t mousevt = event.button.button < sizeof(mouse_button_keys) / sizeof(*mouse_button_keys)
+                     keyCode_t mousevt = event.button.button < sizeof(mouse_button_keys) / sizeof(*mouse_button_keys)
                                       ? mouse_button_keys[event.button.button]
                                       : 0;
                     mouse.origin.x = event.button.x;
@@ -2148,6 +2200,156 @@ TEST(client_input, final_shift_release_notifies_game_order_queue) {
 /* WC3's DzAPI key binding needs raw key edges, including releases. The client
  * formats an opt-in command without embedding any game's key-code semantics. */
 /* Keep the paint rect and the touch target synchronized across window sizes. */
+/* Regression: once any native finger has been seen, the generic SDL duplicate
+ * filter discards touch-mouse edges. The floating CHAT button must intercept
+ * both touch-mouse and real pointer clicks before that filter, without sending
+ * multiple commands for one down/up gesture or eating unrelated UI clicks. */
+TEST(client_input, ipad_chat_tap_survives_native_finger_mouse_filter) {
+    uint8_t data[256];
+    char command[128];
+    sizeBuf_t const saved_message = cls.netchan.message;
+    refExport_t const saved_re = re;
+    int const saved_state = cls.state, saved_dest = cls.key_dest;
+    int const saved_ui = cl.playerstate.client_ui_state;
+    bool const saved_focus = input.focus;
+    __typeof__(touch_pan) const saved_pan = touch_pan;
+    bool const saved_down = ipad_chat_touch_down;
+    bool const saved_ever = ipad_chat_ever_opened;
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    bool const saved_enable = test_ipad_chat_enabled;
+#endif
+    uint32_t const saved_ms = ipad_chat_last_open_ms;
+    SDL_Event event = { .button = { .type = SDL_MOUSEBUTTONDOWN,
+        .which = SDL_TOUCH_MOUSEID, .button = SDL_BUTTON_LEFT,
+        .x = 900, .y = 145, .timestamp = 2000 } };
+
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    test_ipad_chat_enabled = true;
+#endif
+    cls.state = ca_active;
+    cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    input.focus = false; /* The key remains painted in this state. */
+    touch_pan.native_direct_seen = true;
+    touch_pan.count = 0;
+    ipad_chat_touch_down = false;
+    ipad_chat_ever_opened = false;
+    ipad_chat_last_open_ms = 0;
+    re.GetWindowSize = CL_TestWindowSize;
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    T_ASSERT(CL_TouchGestureOwnsMouse(&event));
+    T_ASSERT(CL_iPadChatMouseEvent(&event));
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "chat_open");
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+    T_ASSERT(CL_iPadChatMouseEvent(&event)); /* duplicate down is consumed */
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+    event.button.type = SDL_MOUSEBUTTONUP;
+    T_ASSERT(CL_iPadChatMouseEvent(&event));
+    T_ASSERT(!ipad_chat_touch_down);
+    event.button.type = SDL_MOUSEBUTTONDOWN;
+    event.button.x = 500; /* outside the painted control */
+    T_ASSERT(!CL_iPadChatMouseEvent(&event));
+    event.button.x = 900;
+    event.button.which = SDL_TOUCH_MOUSEID + 1; /* physical mouse/trackpad */
+    event.button.timestamp = 2501;
+    T_ASSERT(CL_iPadChatMouseEvent(&event));
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "chat_open");
+    /* The OS may omit mouse-up entirely. A later independent press must
+     * recover instead of leaving the CHAT key permanently disabled. */
+    event.button.type = SDL_MOUSEBUTTONDOWN;
+    event.button.timestamp = 3200;
+    T_ASSERT(CL_iPadChatMouseEvent(&event));
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "chat_open");
+    event.button.type = SDL_MOUSEBUTTONUP;
+    T_ASSERT(CL_iPadChatMouseEvent(&event));
+    cls.state = saved_state;
+    cls.key_dest = saved_dest;
+    cl.playerstate.client_ui_state = saved_ui;
+    input.focus = saved_focus;
+    touch_pan = saved_pan;
+    ipad_chat_touch_down = saved_down;
+    ipad_chat_ever_opened = saved_ever;
+    ipad_chat_last_open_ms = saved_ms;
+    cls.netchan.message = saved_message;
+    re = saved_re;
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    test_ipad_chat_enabled = saved_enable;
+#endif
+}
+
+/* The native normalized-finger path also requests exactly one chat_open.
+ * Unlike the simulator smoke helper, this test runs in every desktop CI. */
+static bool CL_TestAlwaysDirectChatTouch(SDL_TouchID id) {
+    (void)id;
+    return true;
+}
+TEST(client_input, ipad_chat_direct_finger_tap_sends_single_open) {
+    uint8_t data[256];
+    char command[128];
+    sizeBuf_t const saved_message = cls.netchan.message;
+    refExport_t const saved_re = re;
+    int const saved_state = cls.state, saved_dest = cls.key_dest;
+    int const saved_ui = cl.playerstate.client_ui_state;
+    bool const saved_focus = input.focus;
+    __typeof__(touch_pan) const saved_pan = touch_pan;
+    bool const saved_down = ipad_chat_touch_down;
+    bool const saved_ever = ipad_chat_ever_opened;
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    bool const saved_enable = test_ipad_chat_enabled;
+#endif
+    uint32_t const saved_ms = ipad_chat_last_open_ms;
+    bool (*saved_direct)(SDL_TouchID) = touch_is_direct;
+    SDL_TouchFingerEvent finger = { .type = SDL_FINGERDOWN,
+        .touchId = (SDL_TouchID)-9100, .fingerId = (SDL_FingerID)-9100,
+        .x = 900.0f / 1024.0f, .y = 145.0f / 768.0f,
+        .timestamp = 4000 };
+
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    test_ipad_chat_enabled = true;
+#endif
+    cls.state = ca_active;
+    cls.key_dest = key_game;
+    cl.playerstate.client_ui_state = CLIENT_UI_GAME;
+    input.focus = true;
+    re.GetWindowSize = CL_TestWindowSize;
+    ipad_chat_touch_down = false;
+    ipad_chat_ever_opened = false;
+    ipad_chat_last_open_ms = 0;
+    touch_pan.native_direct_seen = false;
+    touch_pan.count = 0;
+    touch_is_direct = CL_TestAlwaysDirectChatTouch;
+    SZ_Init(&cls.netchan.message, data, sizeof(data));
+    CL_TouchFingerEvent(&finger);
+    T_EQ(MSG_ReadByte(&cls.netchan.message), clc_stringcmd);
+    MSG_ReadString(&cls.netchan.message, command);
+    T_STREQ(command, "chat_open");
+    finger.type = SDL_FINGERUP;
+    finger.timestamp += 42;
+    CL_TouchFingerEvent(&finger);
+    T_ASSERT(!ipad_chat_touch_down);
+    T_EQ(cls.netchan.message.readcount, cls.netchan.message.cursize);
+    touch_is_direct = saved_direct;
+    cls.state = saved_state;
+    cls.key_dest = saved_dest;
+    cl.playerstate.client_ui_state = saved_ui;
+    input.focus = saved_focus;
+    touch_pan = saved_pan;
+    ipad_chat_touch_down = saved_down;
+    ipad_chat_ever_opened = saved_ever;
+    ipad_chat_last_open_ms = saved_ms;
+    cls.netchan.message = saved_message;
+    re = saved_re;
+#if defined(BZ_TESTS) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    test_ipad_chat_enabled = saved_enable;
+#endif
+}
+
 TEST(client_input, ipad_chat_key_hit_area_tracks_visible_rectangle) {
     size2_t size = { .width = 1024, .height = 768 };
     rect_t const rect = SCR_iPadChatButtonRect(size);

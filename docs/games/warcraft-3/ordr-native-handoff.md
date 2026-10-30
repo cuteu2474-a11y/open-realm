@@ -37,6 +37,14 @@
 - 회귀 테스트에서 소유/중립 및 인벤토리 능력 유무를 확인한다. 일반 인벤토리 없는 도박 건물에 임의 구매자를 생성하지 않는다.
 - 또한 특수 시설의 `S_SpellIsAliveTarget`을 정상/시체로 분리해 스킬 검증도 확인한다.
 
+## 2026-10-30 iPad CHAT 버튼 터치 불능 복구
+
+- 렌더러가 CHAT 버튼을 별도 사각형으로 그리지만 서버 명령은 SDL_FINGERDOWN 또는 SDL_TOUCH_MOUSEID 좌클릭에서만 발생했다.
+- iOS에서 직접 손가락을 한번 인식한 뒤에는 \`CL_TouchGestureOwnsMouse\`가 이후 SDL_TOUCH_MOUSEID를 전부 조기 제거한다. 화면은 정상이어도 특정 입력 경로에서 채팅 클릭이 아예 도달하지 못한다.
+- 채팅 버튼 클릭을 `CL_TouchGestureOwnsMouse` **이전**에 판정하고 실제 마우스/트랙패드 좌클릭도 같은 사각형에서 허용했다. 직접 FINGERDOWN과 synthetic mouse의 중복은 터치 상태/250ms 디바운스로 제한하며, iPadOS가 손가락 또는 마우스 UP 이벤트를 누락한 뒤에도 500ms 후 새 터치를 허용한다. 채팅창/메뉴가 열린 경우는 차단하고, 화면에 버튼이 나타나는 조건과 입력 가능 조건을 일치시켰다.
+- 네이티브 손가락·SDL_TOUCH_MOUSEID·실제 포인터의 \`chat_open\` 송신을 검사하는 회귀 테스트 2개를 추가했다. \`ORDR_CHAT_TOUCH_DISPATCH\`(클라이언트) → \`ORDR_CHAT_OPEN request/window_sent\`(게임 서버) 로그로 실제 입력 경로 추적 가능.
+- 실제 iPad의 터치/키보드 동작은 **새 IPA 설치 후 실기기 검증 필요**.
+
 ## 2026-10-30 건물 기능 연관 원인 묶음 검사
 
 - 능력 버튼: `G_GetCommandButtons`는 원래 실행 불가능한 수동 능력과 패시브를 표시하지 않는다. 원본에 없는 명령을 임의 합성하지 않고, ORDR 시설의 명령 미지원 여부를 `ORDR_FACILITY_NONCOMMAND_ABILITY`로 진단(능력 rawcode, 부모 별칭, 구현 프로시저 여부)한다.
