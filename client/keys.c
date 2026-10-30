@@ -1,5 +1,8 @@
 #include "client.h"
 #include "keys_name.h"
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
 
 static UINAME keybindings[KEY_MOD_COUNT][MAX_KEYS];
 static uint8_t key_down_mods[MAX_KEYS];
@@ -138,6 +141,20 @@ void Key_Event(keyCode_t key, uint32_t mods, bool down, uint32_t time) {
 
     /* Key-up still reaches +command releases so focusing a window cannot leave an earlier gameplay command stuck. */
     if (cls.key_dest == key_game && down && CL_WindowKeyEvent(key, mods)) return;
+    if (cls.key_dest == key_game && down && SCR_LayoutEditKeyEvent(key, mods)) return;
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* On iPad, Return opens the same edit window as the touch CHAT key.
+     * When the editor is already active, the window handles Return as Send. */
+    if (cls.key_dest == key_game && key == K_ENTER &&
+        !CL_WindowTextInputActive() && !SCR_LayoutTextInputActive() &&
+        !CL_WindowModalActive() && !SCR_LayoutModalActive() &&
+        !(mods & (KEY_MOD_CTRL | KEY_MOD_ALT | KEY_MOD_SHIFT))) {
+        if (down && CL_GameplayInputReady())
+            Cmd_ForwardToServer("chat_open");
+        return;
+    }
+#endif
 
     if (down) {
         key_down_mods[key] = (uint8_t)(mods & KEY_MOD_MASK);

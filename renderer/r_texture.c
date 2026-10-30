@@ -1,19 +1,39 @@
 #include "r_local.h"
 #include <ctype.h>
 
-/* Asset references may retain a .tga source name after conversion to BLP; actual TGA files take precedence. */
+/* Source names and imported icon files may differ only in their BLP/TGA extension.
+ * Prefer the exact authored file; only use the paired format if that file is absent.
+ * In particular, stock UI art and map-imported BTN art share this lookup path. */
 int R_ReadTextureFile(cstring_t name, string_t path, void **buffer) {
-    static cstring_t const exact[] = { ".blp", ".dds", ".pcx" };
-    cstring_t ext = strrchr(name, '.');
+    cstring_t filename, ext;
+    int size, len;
+    if (!name || !*name || !buffer) return -1;
+    /* The map archive may contain a .w3x suffix, but the leaf texture need not. */
+    filename = name;
+    for (cstring_t p = name; *p; ++p)
+        if (*p == '\\' || *p == '/') filename = p + 1;
+    ext = strrchr(filename, '.');
+    *buffer = NULL;
     snprintf(path, sizeof(PATHSTR), "%s", name);
-    int size = ri.FS_ReadFile(path, buffer);
+    size = ri.FS_ReadFile(path, buffer);
     if (size >= 0 && *buffer) return size;
-    FOR_LOOP(i, sizeof(exact) / sizeof(exact[0]))
-        if (ext && !strcasecmp(ext, exact[i])) return size;
-    /* Previously only extensionless names found BLPs, leaving authored .tga references unresolved. */
-    int len = ext && !strcasecmp(ext, ".tga") ? (int)(ext - name) : (int)strlen(name);
-    snprintf(path, sizeof(PATHSTR), "%.*s.blp", len, name);
-    return ri.FS_ReadFile(path, buffer);
+    if (ext && strcasecmp(ext, ".tga") && strcasecmp(ext, ".blp"))
+        return size;
+
+    len = ext && (!strcasecmp(ext, ".tga") || !strcasecmp(ext, ".blp"))
+        ? (int)(ext - name) : (int)strlen(name);
+    snprintf(path, sizeof(PATHSTR), "%.*s%s", len, name,
+             ext && !strcasecmp(ext, ".blp") ? ".tga" : ".blp");
+    *buffer = NULL;
+    size = ri.FS_ReadFile(path, buffer);
+    if (size >= 0 && *buffer) return size;
+    if (!ext) {
+        /* Bare Warcraft texture references prefer BLP, then TGA. */
+        snprintf(path, sizeof(PATHSTR), "%s.tga", name);
+        *buffer = NULL;
+        return ri.FS_ReadFile(path, buffer);
+    }
+    return size;
 }
 
 /* texid -> texture index for model texture resolution; the cache below owns the texture memory. */

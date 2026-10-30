@@ -165,6 +165,37 @@ void fire_rocket(edict_t *ent, rocketDesc_t const *desc) {
 //    gi.linkentity (rocket);
 }
 
+/* Original ORDR scripts are large enough that animation alone does not prove
+ * a damaging attack. Bound these records and log combat stages separately:
+ * swing -> resolved hit -> health mutation (or a concrete block reason).
+ * Never mutate authored damage, defense, unit HP or the map. */
+static void ordr_trace_combat(cstring_t stage, edict_t const *attacker,
+                              edict_t const *target, int damage) {
+    static unsigned samples;
+    char detail[336];
+    if (samples >= 192 || !level.vm ||
+        !jass_functionbyname(level.vm, "CUN")) return;
+    samples++;
+    snprintf(detail, sizeof(detail),
+             "attacker=%u raw=0x%08x owner=%u target=%u target_raw=0x%08x "
+             "target_owner=%u amount=%d hp=%.2f maxhp=%.2f invulnerable=%u "
+             "target_dead=%u target_paused=%u attacker_wait=%.3f",
+             attacker ? (unsigned)attacker->s.number : 0,
+             attacker ? (unsigned)attacker->class_id : 0,
+             attacker ? (unsigned)attacker->s.player : 255u,
+             target ? (unsigned)target->s.number : 0,
+             target ? (unsigned)target->class_id : 0,
+             target ? (unsigned)target->s.player : 255u,
+             damage, target ? (double)target->health.value : -1.0,
+             target ? (double)target->health.max_value : -1.0,
+             (unsigned)(target && (target->invulnerable ||
+                 unit_hasstatusstate(target, WC3_STATUS_STATE_INVULNERABLE))),
+             (unsigned)(target && M_IsDead((edict_t *)target)),
+             (unsigned)(target && target->paused),
+             attacker ? (double)attacker->wait : -1.0);
+    jass_ordr_log_event(level.vm, stage, detail);
+}
+
 static float ai_rolldamage1(edict_t *self, int weapon) {
     unitAttack_t const *atk = ACTIVE_ATTACK(self);
     float damageBase = atk->damageBase;
@@ -366,6 +397,7 @@ void T_Damage(edict_t *target, edict_t *attacker, int damage) {
     if (!target || target->invulnerable ||
         unit_hasstatusstate(target, WC3_STATUS_STATE_INVULNERABLE) ||
         S_UnitIsCycloned(target) || M_IsDead(target)) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_TARGET", attacker, target, damage);
         return;
     }
     /* Instant-kill follows the same combat path for units and attackable destructables; the old
@@ -375,6 +407,8 @@ void T_Damage(edict_t *target, edict_t *attacker, int damage) {
                     (G_IsDestructable(target) && G_DestructableCanBeAttackedBy(attacker, target))) &&
                    G_PlayerInstantKill(attacker->s.player);
     damage = S_ManaShieldDamage(target, damage);
+    if (damage <= 0 && !instant_kill)
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_SHIELD", attacker, target, damage);
     if (instant_kill) damage = MAX(damage, (int)ceilf(target->health.value));
     if (damage <= 0) return;
     if (G_IsDestructable(target)) {
@@ -384,7 +418,10 @@ void T_Damage(edict_t *target, edict_t *attacker, int damage) {
         return;
     }
     damage = S_SpiritLinkRedirect(target, attacker, damage);
-    if (damage <= 0) return;
+    if (damage <= 0) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_REDIRECT", attacker, target, damage);
+        return;
+    }
     /* GetEventDamage / GetEventDamageSource read value/source from these events. */
     G_PublishEventWithValue(target, EVENT_UNIT_DAMAGED, attacker, damage);
     G_PublishEventWithValue(target, EVENT_PLAYER_UNIT_DAMAGED, attacker, damage);
@@ -402,12 +439,14 @@ void T_Damage(edict_t *target, edict_t *attacker, int damage) {
     G_CreepGuardCallForHelp(target, attacker);
     if (target->health.value <= damage) {
         G_SetHealth(target, 0);
+        ordr_trace_combat("ORDR_ATTACK_HEALTH_LETHAL", attacker, target, damage);
         unit_leavecombat(target);
         target->die(target, attacker);
         attack_finish_after_combat(attacker, target, "target_killed");
         return;
     }
     G_AddHealth(target, -damage);
+    ordr_trace_combat("ORDR_ATTACK_HEALTH_APPLIED", attacker, target, damage);
     G_CreepGuardDamaged(target);
     /* Only a survivor reacts to the hit. A killing blow goes straight to die();
      * dispatching first would let Awan start a flee Move that death tears down. */
@@ -438,9 +477,21 @@ bool S_AttackHitAllowed(edict_t const *attacker, edict_t const *primary, edict_t
 }
 
 void S_ResolveAttackHit(edict_t *attacker, edict_t *target, int damage) {
-    if (!S_AttackHitAllowed(attacker, target, target)) return;
-    if (S_EvasionRoll(target)) return;
-    { float const miss = S_CurseMissChance(attacker); if (miss > 0.0f && (float)(rand() % 100) < miss * 100.0f) return; }
+    ordr_trace_combat("ORDR_ATTACK_HIT_ATTEMPT", attacker, target, damage);
+    if (!S_AttackHitAllowed(attacker, target, target)) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_ETHEREAL", attacker, target, damage);
+        return;
+    }
+    if (S_EvasionRoll(target)) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_EVASION", attacker, target, damage);
+        return;
+    }
+    { float const miss = S_CurseMissChance(attacker);
+      if (miss > 0.0f && (float)(rand() % 100) < miss * 100.0f) {
+          ordr_trace_combat("ORDR_ATTACK_BLOCKED_CURSE", attacker, target, damage);
+          return;
+      }
+    }
     S_HumanBreakInvisibility(attacker);
     S_PermanentInvisibilityReveal(attacker);
     damage = S_OrbAnnihilationDamage(attacker,
@@ -450,7 +501,10 @@ void S_ResolveAttackHit(edict_t *attacker, edict_t *target, int damage) {
                                          + unit_status_modifier_total(attacker, WC3_STATUS_MOD_ATTACK_DAMAGE_PERCENT)
                                          - S_SoulBurnDamageReduction(attacker)));
     damage = S_HumanAttackDamage(attacker, target, damage);
-    if (damage <= 0) return;
+    if (damage <= 0) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_MODIFIER", attacker, target, damage);
+        return;
+    }
     { abilityAliasRef_t bash = S_ResolveAbilityAlias(attacker, MAKEFOURCC('A', 'H', 'b', 'h'));
     if (bash.alias && bash.level && (float)(rand() % 100) < S_SpellData(bash.alias, bash.level, 1)) {
         damage += (int)S_SpellData(bash.alias, bash.level, 3);
@@ -460,7 +514,10 @@ void S_ResolveAttackHit(edict_t *attacker, edict_t *target, int damage) {
     S_UnitStatusAbilityEvent(attacker, A_ATTACK_LANDED, NULL);
     damage = S_PossessionDamageTaken(target, damage);
     damage = S_HardenedSkinDamage(target, damage);
-    if (damage <= 0) return;
+    if (damage <= 0) {
+        ordr_trace_combat("ORDR_ATTACK_BLOCKED_ARMOR_SKIN", attacker, target, damage);
+        return;
+    }
     G_WC3_AttackAlert(target, attacker);
     G_PlayCombatImpactSound(attacker, target);
     S_IncinerateOnHit(attacker, target);
@@ -950,7 +1007,14 @@ void attack_melee_cooldown(edict_t *self) {
     /* The next swing must satisfy both authored gates: weapon cooldown from
      * swing start and backswing after damage point.  If both have already
      * elapsed, transition explicitly instead of parking on wait==0. */
-    if (self->wait <= 0.0f) attack_melee(self);
+    if (self->wait <= 0.0f) {
+        /* Zero-cooldown weapons without a finite attack animation must not
+         * recursively start a second instantaneous swing in the same tick. */
+        if (ACTIVE_ATTACK(self)->cooldown <= 0.0f &&
+            ACTIVE_ATTACK(self)->backswingPoint <= 0.0f)
+            self->wait = FRAMETIME / 1000.0f;
+        else attack_melee(self);
+    }
 }
 
 void attack_melee(edict_t *self) {
@@ -958,7 +1022,14 @@ void attack_melee(edict_t *self) {
     S_PermanentInvisibilityReveal(self);
     attack_set_cooldown(self, ACTIVE_ATTACK(self)->cooldown / divisor);
     unit_setmove(self, &attack_move_melee);
+    /* There is no sub-frame callback: one simulation step is the closest
+     * possible scheduling of an authored zero DamagePoint. Preserve the
+     * "attack" animation for its entire first frame and commit a single hit
+     * on the next think tick (unit_runwait consumes positive waits only). */
     self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    if (self->wait <= 0.0f) self->wait = FRAMETIME / 1000.0f;
+    ordr_trace_combat("ORDR_ATTACK_WINDUP_MELEE", self, self->goalentity,
+                      (int)ACTIVE_ATTACK(self)->damageBase);
 }
 
 void attack_ranged_cooldown(edict_t *self) {
@@ -972,7 +1043,12 @@ void attack_ranged_cooldown(edict_t *self) {
     unit_setmove(self, &attack_move_ranged_cooldown);
     self->wait = MAX(self->attack_cooldown_remaining,
                      attack_backswing_remaining(self));
-    if (self->wait <= 0.0f) attack_ranged(self);
+    if (self->wait <= 0.0f) {
+        if (ACTIVE_ATTACK(self)->cooldown <= 0.0f &&
+            ACTIVE_ATTACK(self)->backswingPoint <= 0.0f)
+            self->wait = FRAMETIME / 1000.0f;
+        else attack_ranged(self);
+    }
 }
 
 void attack_ranged(edict_t *self) {
@@ -981,6 +1057,9 @@ void attack_ranged(edict_t *self) {
     attack_set_cooldown(self, ACTIVE_ATTACK(self)->cooldown / divisor);
     unit_setmove(self, &attack_move_ranged);
     self->wait = ACTIVE_ATTACK(self)->damagePoint / divisor;
+    if (self->wait <= 0.0f) self->wait = FRAMETIME / 1000.0f;
+    ordr_trace_combat("ORDR_ATTACK_WINDUP_RANGED", self, self->goalentity,
+                      (int)ACTIVE_ATTACK(self)->damageBase);
 }
 
 /* ---- Attack Ground --------------------------------------------------------
@@ -1097,6 +1176,7 @@ static void attack_ground_ranged(edict_t *ent) {
     S_PermanentInvisibilityReveal(ent);
     unit_setmove(ent, &attack_ground_move_ranged);
     ent->wait = ent->attack1.damagePoint / divisor;
+    if (ent->wait <= 0.0f) ent->wait = FRAMETIME / 1000.0f;
     if (ent->sound.attack) G_PlaySound(NULL, ent, CHAN_WEAPON, ent->sound.attack, 1.0f, 1.0f, 0.0f);
 }
 

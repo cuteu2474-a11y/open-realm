@@ -104,6 +104,22 @@ void SV_Physics_Toss(edict_t *ent) {
 
     if (!fixed_target && (!ent->goalentity || !ent->goalentity->inuse)) { G_FreeEdict(ent); return; }
     distance = ent->velocity * FRAMETIME;
+    /* A zero-speed missile cannot ever reach the hit branch; leave its
+     * authored travel behavior unchanged pending source-data verification,
+     * but make the no-damage symptom explicit in ORDR diagnostics. */
+    if (distance <= 0.0f && level.vm && jass_functionbyname(level.vm, "CUN")) {
+        static unsigned stalled_missiles;
+        if (stalled_missiles++ < 24) {
+            char detail[192];
+            snprintf(detail, sizeof(detail),
+                     "missile=%u owner=%u victim=%u velocity=%.3f rawdamage=%d",
+                     (unsigned)ent->s.number,
+                     ent->owner ? (unsigned)ent->owner->s.number : 0,
+                     ent->goalentity ? (unsigned)ent->goalentity->s.number : 0,
+                     (double)ent->velocity, ent->damage);
+            jass_ordr_log_event(level.vm, "ORDR_PROJECTILE_STALLED", detail);
+        }
+    }
     if (fixed_target) {
         assert(ent->channel);
         target = MAKE(vec3_t, ent->channel->origin.x, ent->channel->origin.y,

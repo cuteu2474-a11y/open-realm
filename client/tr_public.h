@@ -159,6 +159,7 @@ typedef struct {
     uint16_t effect_flags;
     model_t const *effect_model;
     float angle;        /* Canonical actor heading in radians, independent of height anchoring. */
+    uint32_t look_at_packed; /* WC3 model bone aim, never changes combat facing */
     float scale;
     float radius;
     float splatsize;
@@ -279,6 +280,8 @@ typedef struct {
     void (*Shutdown)(void);
     void (*RegisterMap)(cstring_t mapFileName);
     void (*SetAssetScope)(cstring_t scope);
+    void (*SetWaterBaseColor)(color32_t color, bool enabled);
+    void (*SetOcclusionEnabled)(bool enabled);
     void (*RenderFrame)(viewDef_t const *viewdef);
     texture_t * (*LoadTexture)(cstring_t fileName);
     /* NULL releases the renderer-owned cinematic texture. */

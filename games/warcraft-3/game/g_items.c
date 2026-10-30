@@ -118,11 +118,15 @@ void SP_SpawnItem(edict_t *self) {
     cstring_t model;
     float scale;
 
-    if (!self || !(model = self->data.ItemData->file)) {
-        return;
+    if (!self || !self->data.ItemData) return;
+    model = self->data.ItemData->file;
+    /* Custom map items may be intentionally model-less. Their item handle,
+     * inventory ownership, charges and sell/pickup events must still exist;
+     * returning before TARG_ITEM initialization made shop purchases fail. */
+    if (model && *model) {
+        strlcpy(model_filename, model, sizeof(model_filename));
+        self->s.model = G_RegisterModel(model_filename);
     }
-    strlcpy(model_filename, model, sizeof(model_filename));
-    self->s.model = G_RegisterModel(model_filename);
     scale = self->data.ItemData->scale;
     if (scale > 0) {
         self->s.scale = scale;
@@ -144,7 +148,7 @@ void SP_SpawnItem(edict_t *self) {
     self->item->inventory_slot = -1;
     self->item->in_world = true;
     self->item->drop_id = 0;
-    self->item->charges = (uint32_t)MAX(0, (int32_t)(G_ItemData(self->class_id) ? G_ItemData(self->class_id)->uses : 0));
+    self->item->charges = (uint32_t)MAX(0, (int32_t)self->data.ItemData->uses);
 }
 
 bool G_IsItem(edict_t const *item) {

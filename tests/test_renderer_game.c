@@ -49,6 +49,7 @@ static color32_t test_splat_color;
 static vec2_t test_splat_uv_mins, test_splat_uv_maxs;
 static texture_t test_splat_texture;
 static float test_walkable_hit_z;
+static uint32_t test_walkable_trace_calls;
 static uint32_t test_alpha_draw_order, test_water_alpha_order, test_unit_alpha_order;
 
 TEST(renderer_game, null_splat_sound_is_treated_as_an_empty_optional_field) {
@@ -275,8 +276,49 @@ void R_RenderFlatRectSplat(vec2_t const *mins, vec2_t const *maxs, float z,
 bool R_TestWalkableSurfaceTrace(renderEntity_t const *surface, line3_t const *line, vec3_t *hit) {
     (void)line;
     if (!surface || !(surface->flags & RF_GROUND_SURFACE) || !hit) return false;
+    test_walkable_trace_calls++;
     hit->z = test_walkable_hit_z;
     return true;
+}
+
+TEST(renderer_game, walkable_surface_candidates_skip_unrelated_and_hidden_entities) {
+    model_t model = {0};
+    renderEntity_t entities[80] = {0};
+    uint32_t indices[3] = {0};
+    viewDef_t view = { .entities = entities, .num_entities = 80 };
+
+    FOR_LOOP(i, 80) entities[i].model = &model;
+    entities[1].flags = RF_GROUND_SURFACE;
+    entities[18].flags = RF_GROUND_SURFACE | RF_HIDDEN;
+    entities[42].flags = RF_GROUND_SURFACE;
+    entities[61].flags = RF_GROUND_CONFORM;
+    entities[61].ground_offset = 7.0f;
+    entities[70].flags = RF_GROUND_SURFACE;
+    entities[70].model = NULL;
+
+    T_EQ(R_W3CollectWalkableSurfaces(&view, indices, 3), 2u);
+    T_EQ(indices[0], 1u);
+    T_EQ(indices[1], 42u);
+    T_EQ(R_W3CollectWalkableSurfaces(&view, indices, 1), 2u);
+    test_walkable_hit_z = 55.0f;
+    test_walkable_trace_calls = 0;
+    R_ConformGroundSurfaces(&view);
+    T_EQ(test_walkable_trace_calls, 2u);
+    T_ASSERT(entities[61].flags & RF_GROUND_SURFACE_SUPPORT);
+    T_FEQ(entities[61].origin.z, 62.0f, 0.001f);
+
+    view.rdflags = RDF_NOWORLDMODEL;
+    test_walkable_trace_calls = 0;
+    R_ConformGroundSurfaces(&view);
+    T_EQ(test_walkable_trace_calls, 0u);
+
+    view.rdflags = 0;
+    entities[1].flags = entities[42].flags = 0;
+    T_EQ(R_W3CollectWalkableSurfaces(&view, indices, 3), 0u);
+    R_ConformGroundSurfaces(&view);
+    T_EQ(test_walkable_trace_calls, 0u);
+    T_ASSERT(!(entities[61].flags & RF_GROUND_SURFACE_SUPPORT));
+    T_FEQ(entities[61].origin.z, 62.0f, 0.001f);
 }
 
 bool R_TestSetEntityAnimationFrame(model_t const *model, cstring_t anim, renderEntity_t *entity) {

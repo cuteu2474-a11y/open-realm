@@ -54,8 +54,13 @@ static void CL_RegisterImageConfigString(uint32_t index, bool replace, cstring_t
 static void CL_RegisterFontConfigString(uint32_t index, bool replace, cstring_t olds) {
     uint32_t font = index - CS_FONTS;
     cstring_t spec = cl.configstrings[index];
-    if (cl.fonts[font]) return;
-    if (replace && CL_SameResource(cl.fonts[font], olds, spec)) return;
+    if (replace) {
+        if (CL_SameResource(cl.fonts[font], olds, spec)) return;
+        /* A reused slot may now name a different face or size. Font objects
+         * are renderer-cached (there is no ReleaseFont API), but the live
+         * client slot must point at the newly requested glyph atlas. */
+        cl.fonts[font] = NULL;
+    } else if (cl.fonts[font]) return;
     if (*spec) {
         cstring_t split = strstr(spec, ",");
         if (split) {
@@ -82,7 +87,30 @@ void CL_RegisterConfigString(uint32_t index) {
     else if (index > CS_FONTS && index < CS_FONTS + MAX_FONTSTYLES) CL_RegisterFontConfigString(index, false, NULL);
 }
 
+/* Server-authored WC3 visuals and sound reach the renderer and SDL mixer,
+ * rather than remaining inert configstring text. */
+void CL_ApplyWorldPresentationConfig(void) {
+    int r, g, b, a;
+    cstring_t const color = cl.configstrings[CS_WC3_WATER_RGBA];
+    if (re.SetWaterBaseColor) {
+        bool const valid = color && sscanf(color, "%d %d %d %d", &r, &g, &b, &a) == 4;
+        color32_t rgba = {0};
+        if (valid) {
+            rgba.r = (uint8_t)MAX(0, MIN(255, r));
+            rgba.g = (uint8_t)MAX(0, MIN(255, g));
+            rgba.b = (uint8_t)MAX(0, MIN(255, b));
+            rgba.a = (uint8_t)MAX(0, MIN(255, a));
+        }
+        re.SetWaterBaseColor(rgba, valid);
+    }
+    if (re.SetOcclusionEnabled)
+        re.SetOcclusionEnabled(*cl.configstrings[CS_WC3_OCCLUSION] != '0');
+    S_SetSoundEnvironment(cl.configstrings[CS_WC3_SOUND_ENV]);
+}
+
 void CL_UpdateConfigString(uint32_t index, cstring_t olds) {
+    if (index == CS_WC3_WATER_RGBA || index == CS_WC3_OCCLUSION || index == CS_WC3_SOUND_ENV)
+        CL_ApplyWorldPresentationConfig();
     if (index == CS_ORDER_MARKER && strcmp(olds, cl.configstrings[index])) CL_RegisterOrderMarker();
     if (index > CS_MODELS && index < CS_MODELS + MAX_MODELS) CL_RegisterModelConfigString(index, true, olds);
     else if (index > CS_IMAGES && index < CS_IMAGES + MAX_IMAGES) CL_RegisterImageConfigString(index, true, olds);

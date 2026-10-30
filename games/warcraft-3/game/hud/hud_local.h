@@ -6,7 +6,8 @@
 
 /* One svc_layout message replaces one client layer, so every server-authored
  * HUD surface that may be visible at the same time needs its own layer. */
-_Static_assert(WC3_LAYER_MULTIBOARD != WC3_LAYER_COMMAND_ERROR &&
+_Static_assert(WC3_LAYER_MULTIBOARD != WC3_LAYER_DZ &&
+               WC3_LAYER_MULTIBOARD != WC3_LAYER_COMMAND_ERROR &&
                WC3_LAYER_MULTIBOARD != WC3_LAYER_LEADERBOARD &&
                WC3_LAYER_MULTIBOARD != WC3_LAYER_TIMERDIALOG &&
                WC3_LAYER_LEADERBOARD != WC3_LAYER_TIMERDIALOG &&

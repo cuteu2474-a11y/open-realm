@@ -427,7 +427,18 @@ static bool CL_ParseTerrainMaskChunk(sizeBuf_t *msg) {
 
 /* Handle the svc_frame header and its game-owned datagram, then snapshot entity
  * states into "prev" so the renderer can interpolate the current scene. */
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+extern void CL_ORDRTrace(cstring_t stage);
+#else
+/* The SC2/Warcraft unity test includes both parsers in one translation unit.
+ * Use a no-op macro so no duplicate static or missing linked trace symbol. */
+#ifndef CL_ORDRTrace
+#define CL_ORDRTrace(stage) ((void)(stage))
+#endif
+#endif
 void CL_ParseFrame(sizeBuf_t *msg) {
+    static unsigned ordr_frame_trace_count;
+    if (ordr_frame_trace_count++ < 8) CL_ORDRTrace("SERVER_FRAME_RECEIVED");
     int const previous_frame = cl.frame.serverframe;
     bool const had_frame = cl.frame.valid;
     cl.frame.serverframe = MSG_ReadLong(msg);
@@ -463,6 +474,7 @@ void CL_ParseFrame(sizeBuf_t *msg) {
         Cbuf_InsertFromDefer();
         cl.playerstate.client_ui_state = CLIENT_UI_GAME;
         SCR_EndLoadingPlaque();
+        CL_ORDRTrace("CLIENT_ACTIVATED_LOADING_CLEARED");
         SAFE_DELETE(cl.layout[LAYER_LOADING], MemFree);
         SCR_ClearLayoutLayer(LAYER_LOADING);
         CL_SetGameplayInput();
@@ -1072,6 +1084,12 @@ static void CL_ParseSetSelection(sizeBuf_t *msg) {
 static void CL_ParseSound(sizeBuf_t *msg) {
     uint32_t flags = (uint32_t)MSG_ReadByte(msg);
     int sound_index = MSG_ReadShort(msg), channel = 0, entity = 0;
+    /* JASS StopSound uses a control packet with no play/position payload. */
+    if (flags & SND_STOP) {
+        if (sound_index > 0 && sound_index < MAX_SOUNDS)
+            S_StopSoundPacket(cl.configstrings[CS_SOUNDS + sound_index]);
+        return;
+    }
     float volume = DEFAULT_SOUND_PACKET_VOLUME, attenuation = DEFAULT_SOUND_PACKET_ATTENUATION, timeofs = 0.0f;
     vec3_t origin = { 0 };
     cstring_t path;

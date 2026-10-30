@@ -5,6 +5,25 @@
 #include "g_local.h"
 #include "skills/s_skills.h"
 
+/* Stock entries must be valid gameplay objects; a missing *display* model
+ * is not a reason to hide an item/unit from a custom map's merchandise.
+ * OpenRealm already accepts modeled and model-less UnitBalance entries at
+ * spawn. Real stock/charges/costs/exit placement still gate purchases. */
+static bool G_ShopUnitRowValid(UnitBalance_t const *unit, uint32_t id) {
+    return unit && unit->id == id;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_shop, model_missing_does_not_invalidate_unit_stock_row) {
+    UnitBalance_t valid = {0};
+    valid.id = MAKEFOURCC('h','f','o','o');
+    T_ASSERT(G_ShopUnitRowValid(&valid, valid.id));
+    T_ASSERT(!G_ShopUnitRowValid(&valid, MAKEFOURCC('h','b','a','r')));
+    T_ASSERT(!G_ShopUnitRowValid(NULL, valid.id));
+}
+#endif
+
 #define SHOP_DEFAULT_ACTIVATION_RADIUS 450.0f // world units; retail custom-data interaction fallback; used when Aneu/Aall DataA is absent
 
 /* Warsmash and retail unit data treat Makeitems as merchandise alongside
@@ -157,6 +176,8 @@ void G_SetAllStockSlots(bool items, int32_t slots) {
             unit->stock->unit_slots = value;
             G_ResetUnitStock(unit);
         }
+        /* JASS slot changes must refresh an already-selected shop card. */
+        G_InvalidateUnitCommands(unit);
     }
 }
 
@@ -179,11 +200,21 @@ void G_SetStockSlots(edict_t *unit, bool items, int32_t slots) {
         unit->stock->unit_slots = value;
         G_ResetUnitStock(unit);
     }
+    G_InvalidateUnitCommands(unit);
 }
 
-/* Identifies live units whose authored merchandise makes them shops. */
+/* The original ORDR map contains selectable facility units with no authored
+ * maximum HP. Selection treats those as live, but M_IsDead rejects 0 HP.
+ * Use the same narrow ORDR-only exception for the merchandise pipeline; a
+ * genuinely dead unit (SVF_DEADMONSTER), normal 0-HP unit or neutral decor
+ * must still never serve as an active shop. */
+static bool G_ShopUnitIsLive(edict_t const *shop) {
+    return shop && shop->inuse && shop->class_id &&
+        (!M_IsDead(shop) || G_IsORDROwnedZeroHealthUnit(shop));
+}
+
 bool G_IsItemShop(edict_t const *shop) {
-    if (!shop || !shop->inuse || !shop->class_id || M_IsDead((edict_t *)shop)) return false;
+    if (!G_ShopUnitIsLive(shop)) return false;
     cstring_t items = G_GetShopItemList(shop);
     return (items && *items) || (shop->stock && shop->stock->items_initialized && shop->stock->item_count);
 }
@@ -191,7 +222,7 @@ bool G_IsItemShop(edict_t const *shop) {
 bool G_IsUnitShop(edict_t const *shop) {
     cstring_t units;
 
-    if (!shop || !shop->inuse || !shop->class_id || M_IsDead((edict_t *)shop)) return false;
+    if (!G_ShopUnitIsLive(shop)) return false;
     units = shop->data.UnitProfile ? shop->data.UnitProfile->sellUnits : NULL;
     return (units && *units) || (shop->stock && shop->stock->units_initialized && shop->stock->unit_count);
 }
@@ -337,6 +368,13 @@ static edict_t *G_FindShopPatronInternal(gameClient_t *client, edict_t *shop, bo
             best_distance = distance;
         }
     }
+    /* If the owning structure itself carries a real inventory ability,
+     * it is a legitimate last-resort buyer when no other nearby inventory
+     * unit qualifies. Do not manufacture an inventory or bypass neutral-shop
+     * patron rules for buildings without that authored ability. */
+    if (!best && require_inventory && shop->s.player == client->ps.number &&
+        G_UnitHasInventory(shop) && G_ShopPatronEligible(shop, shop, true))
+        best = shop;
     return best;
 }
 
@@ -384,14 +422,13 @@ static void G_InitItemStock(edict_t *shop) {
         }
         memcpy(&item_id, item_name, sizeof(item_id));
         item = G_ItemData(item_id);
-        if (!item) {
+        if (!item || item->id != item_id) {
             fprintf(stderr, "WC3 shop: unresolved Sellitems item %.4s on unit %.4s\n", item_name, (cstring_t)&shop->class_id);
             continue;
         }
-        if (!item->file) {
-            fprintf(stderr, "WC3 shop: item %.4s on unit %.4s has no model\n", item_name, (cstring_t)&shop->class_id);
-            continue;
-        }
+        /* A model is display data, not item identity. Map-authored items with
+         * no MDX still occupy stock and can be purchased through real inventory
+         * and JASS event paths. */
 
         index = shop->stock->item_count++;
         shop->stock->items[index].id = item_id;
@@ -515,6 +552,9 @@ bool G_AddItemStock(edict_t *shop, uint32_t item_id, int32_t current, int32_t ma
         .maximum = MAX(0, maximum),
     };
     G_StartItemRestock(shop, (uint32_t)index);
+    /* AddItemToStock changes the merchandise card immediately, even while
+     * the same shop remains selected in a map-authored JASS sequence. */
+    G_InvalidateUnitCommands(shop);
     return true;
 }
 
@@ -561,7 +601,6 @@ static void G_InitUnitStock(edict_t *shop) {
     PARSE_LIST(units, unit_name, parse_segment) {
         uint32_t unit_id;
         UnitBalance_t const *unit;
-        UnitUI_t const *ui;
         uint32_t index;
         uint32_t start_delay;
 
@@ -572,15 +611,11 @@ static void G_InitUnitStock(edict_t *shop) {
         }
         memcpy(&unit_id, unit_name, sizeof(unit_id));
         unit = G_UnitBalance(unit_id);
-        if (!unit || unit->id != unit_id) {
+        if (!G_ShopUnitRowValid(unit, unit_id)) {
             fprintf(stderr, "WC3 shop: unresolved Sellunits %.4s on %.4s\n", unit_name, (cstring_t)&shop->class_id);
             continue;
         }
-        ui = G_UnitUI(unit_id);
-        if (!ui || !ui->modelFile || !*ui->modelFile) {
-            fprintf(stderr, "WC3 shop: unit %.4s on unit %.4s has no model\n", unit_name, (cstring_t)&shop->class_id);
-            continue;
-        }
+        /* Valid UnitBalance rows remain saleable even without a visual model. */
         /* Taverns also use Sellunits, but Hero availability/limits are a
          * separate neutral-Hero contract. Do not silently sell them as ordinary mercenaries. */
         if (unit->strength > 0 || unit->agility > 0 || unit->intelligence > 0) {
@@ -663,6 +698,7 @@ bool G_AddUnitStock(edict_t *shop, uint32_t unit_id, int32_t current, int32_t ma
         .maximum = MAX(0, maximum),
     };
     G_StartUnitRestock(shop, (uint32_t)index);
+    G_InvalidateUnitCommands(shop);
     return true;
 }
 
@@ -768,6 +804,29 @@ uint8_t G_GetShopItemButtons(shopItemButtonsParams_t *params) {
 }
 
 
+/* A player-owned production/shop building is the buyer itself for unit
+ * merchandise. Requiring a nearby mobile patron is only the neutral/public
+ * shop contract. ORDR's owned gambling buildings sell transient units to
+ * trigger EVENT_PLAYER_UNIT_SELL and immediately remove them in JASS. */
+static bool G_ShopUnitNeedsNearbyPatron(gameClient_t const *client, edict_t const *shop) {
+    return !client || !shop || shop->s.player != client->ps.number;
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_shop, owned_gambling_building_needs_no_external_purchaser) {
+    gameClient_t buyer = {0};
+    edict_t shop = {0};
+    buyer.ps.number = 0;
+    shop.s.player = 0;
+    T_ASSERT(!G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    shop.s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    shop.s.player = 1;
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(&buyer, &shop));
+    T_ASSERT(G_ShopUnitNeedsNearbyPatron(NULL, &shop));
+}
+#endif
+
 uint8_t G_GetShopUnitButtons(shopItemButtonsParams_t *params) {
     gameClient_t *client = params ? params->client : NULL;
     edict_t *shop = params ? params->shop : NULL;
@@ -797,7 +856,7 @@ uint8_t G_GetShopUnitButtons(shopItemButtonsParams_t *params) {
         unit = G_UnitBalance(shop->stock->units[i].id);
         if (shop->stock->units[i].maximum > 0) button->number = (uint32_t)MAX(0, shop->stock->units[i].current);
 
-        if (!patron) {
+        if (!patron && G_ShopUnitNeedsNearbyPatron(client, shop)) {
             G_DisableShopButton(button, "No eligible purchaser is nearby.");
         } else if (shop->stock->units[i].current <= 0) {
             G_DisableShopButton(button, "Out of stock.");
@@ -873,7 +932,7 @@ bool G_ShopPurchaseItem(edict_t *clent, edict_t *shop, uint32_t item_id) {
         return false;
     }
     item = G_ItemData(item_id);
-    if (!item || !item->file) return false;
+    if (!item || item->id != item_id) return false;
     {
         char reason[128] = {0};
         if (!G_ShopItemRequirementsSatisfied(client, item_id, reason, sizeof(reason))) {
@@ -918,8 +977,16 @@ bool G_ShopPurchaseItem(edict_t *clent, edict_t *shop, uint32_t item_id) {
      * GetEventDamageSource — meaningful only while handling the sell event). */
     eventsolditem = item_ent;
     eventsoldunit = NULL;
-    G_PublishEventWithSource(shop, EVENT_UNIT_SELL_ITEM, patron);
-    G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL_ITEM, patron);
+    gameEvent_t *sold = G_PublishEventWithSource(shop, EVENT_UNIT_SELL_ITEM, patron);
+    if (sold) {
+        sold->value = (int32_t)item_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    sold = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL_ITEM, patron);
+    if (sold) {
+        sold->value = (int32_t)item_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
     return true;
 }
 
@@ -928,7 +995,6 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     edict_t *patron;
     edict_t *unit_ent;
     UnitBalance_t const *unit;
-    UnitUI_t const *ui;
     int32_t stock_index;
     uint32_t gold;
     uint32_t lumber;
@@ -939,14 +1005,13 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     stock_index = G_FindShopUnitStock(shop, unit_id);
     if (stock_index < 0) return false;
     patron = G_FindUnitShopPatron(client, shop);
-    if (!patron) {
+    if (!patron && G_ShopUnitNeedsNearbyPatron(client, shop)) {
         G_ShowCommandErrorText(clent, "No eligible purchaser is nearby.");
         return false;
     }
 
     unit = G_UnitBalance(unit_id);
-    ui = G_UnitUI(unit_id);
-    if (!unit || unit->id != unit_id || !ui || !ui->modelFile || !*ui->modelFile) return false;
+    if (!G_ShopUnitRowValid(unit, unit_id)) return false;
     if (shop->stock->units[stock_index].current <= 0) {
         G_ShowCommandErrorKey(clent, "Outofstock", "Out of stock.");
         return false;
@@ -973,7 +1038,11 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     unit_ent = SP_SpawnAtLocationNoBirth(unit_id, client->ps.number, &shop->s.origin2);
     if (!unit_ent) return false;
     if (!SP_FindUnitExitPosition(shop, unit_ent, &exit_origin, &exit_angle)) {
+        /* Exit placement is a real sale requirement; don't charge the buyer or
+         * dispatch an invented SELL event when the unit cannot materialize.
+         * Previously a failed facility button did nothing visible on iPad. */
         G_FreeEdict(unit_ent);
+        G_ShowCommandErrorText(clent, "No space to place purchased unit.");
         return false;
     }
 
@@ -992,6 +1061,37 @@ bool G_ShopPurchaseUnit(edict_t *clent, edict_t *shop, uint32_t unit_id) {
     shop->stock->units[stock_index].current--;
     G_StartUnitRestock(shop, (uint32_t)stock_index);
     G_InvalidateCommands(client);
+
+    /* Warcraft unit-shop purchases emit SELL and PLAYER_UNIT_SELL after
+     * creating the sold unit. ORDR listens to the latter for its h06F/H0AZ
+     * money-gambling rewards. Previously these events were never sent, so
+     * the authored JASS reward and temporary-unit removal were unreachable.
+     * Save sold entity ID in each event payload because several purchases may
+     * be queued before JASS callbacks drain. */
+    eventsolditem = NULL;
+    eventsoldunit = unit_ent;
+    gameEvent_t *sold = G_PublishEventWithSource(shop, EVENT_UNIT_SELL, patron);
+    if (sold) {
+        sold->value = (int32_t)unit_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    sold = G_PublishEventWithSource(shop, EVENT_PLAYER_UNIT_SELL, patron);
+    if (sold) {
+        sold->value = (int32_t)unit_ent->s.number;
+        sold->dialog_player = client->ps.number + 1;
+    }
+    if (level.vm && jass_functionbyname(level.vm, "CUN")) {
+        static uint32_t logged;
+        if (logged++ < 64) {
+            char detail[156];
+            snprintf(detail, sizeof(detail),
+                     "shop=%u sold_unit=%u raw=0x%08x buyer=%u price=%u gold stock=%d",
+                     (unsigned)shop->s.number, (unsigned)unit_ent->s.number,
+                     (unsigned)unit_ent->class_id, (unsigned)client->ps.number,
+                     (unsigned)gold, shop->stock->units[stock_index].current);
+            jass_ordr_log_event(level.vm, "ORDR_GAMBLE_UNIT_SOLD", detail);
+        }
+    }
     return true;
 }
 

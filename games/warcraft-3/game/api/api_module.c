@@ -1,4 +1,5 @@
 #include "jass/jass.h"
+#include "common/ui_constants.h"
 
 #include "api_ai.h"
 #include "api_test.h"
@@ -18,8 +19,54 @@
 #include "api_quest.h"
 #include "api_cinefilter.h"
 #include "api_hashtable.h"
+#include "api_ordr_singleplayer.h"
+#include "api_ordr_singleplayer_extra.h"
 
 jassModule_t jass_funcs[] = {
+    { "SetTextTagPos", SetTextTagPos },
+    { "GetAbilityEffectById", GetAbilityEffectById },
+    { "DecUnitAbilityLevel", DecUnitAbilityLevel },
+    { "DzFrameSetPoint", DzFrameSetPoint },
+    { "DzGetTriggerUIEventFrame", DzGetTriggerUIEventFrame },
+    { "DzFrameSetScriptByCode", DzFrameSetScriptByCode },
+    { "DzFrameSetFont", DzFrameSetFont },
+    { "DzGetTriggerUIEventPlayer", DzGetTriggerUIEventPlayer },
+    { "DzSyncData", DzSyncData },
+    { "DzGetTriggerSyncPlayer", DzGetTriggerSyncPlayer },
+    { "DzGetTriggerSyncData", DzGetTriggerSyncData },
+    { "DzTriggerRegisterSyncData", DzTriggerRegisterSyncData },
+    { "DzFrameClearAllPoints", DzFrameClearAllPoints },
+    { "DzLoadToc", DzLoadToc },
+    { "JNStringRegex", JNStringRegex },
+    { "DzFrameSetAbsolutePoint", DzFrameSetAbsolutePoint },
+    { "DzFrameSetModel", DzFrameSetModel },
+    { "DzFrameSetPriority", DzFrameSetPriority },
+    { "DzFrameSetTextAlignment", DzFrameSetTextAlignment },
+    { "DzGetTriggerKeyPlayer", DzGetTriggerKeyPlayer },
+    { "DzTriggerRegisterKeyEventByCode", DzTriggerRegisterKeyEventByCode },
+    { "JNLogin", JNLogin },
+    { "JNObjectCharacterGetInt", JNObjectCharacterGetInt },
+    { "JNObjectCharacterGetString", JNObjectCharacterGetString },
+    { "JNObjectCharacterInit", JNObjectCharacterInit },
+    { "JNObjectCharacterSave", JNObjectCharacterSave },
+    { "JNObjectCharacterSetInt", JNObjectCharacterSetInt },
+    { "JNObjectCharacterSetString", JNObjectCharacterSetString },
+    { "JNUse", JNUse },
+    { "DzGetGameUI", DzGetGameUI },
+    { "DzCreateFrame", DzCreateFrame },
+    { "DzCreateFrameByTagName", DzCreateFrameByTagName },
+    { "DzFrameShow", DzFrameShow },
+    { "DzFrameSetEnable", DzFrameSetEnable },
+    { "DzFrameSetText", DzFrameSetText },
+    { "DzFrameGetText", DzFrameGetText },
+    { "DzFrameSetTexture", DzFrameSetTexture },
+    { "DzFrameSetSize", DzFrameSetSize },
+    { "DzFrameSetAlpha", DzFrameSetAlpha },
+    { "DzFrameFindByName", DzFrameFindByName },
+    { "DzFrameSetFocus", DzFrameSetFocus },
+    { "JNStringCount", ORDR_JNStringCount },
+    { "JNStringSplit", JNStringSplit },
+    { "JNStringReplace", JNStringReplace },
     { "DisplayText", DisplayText },
     { "DisplayTextI", DisplayTextI },
     { "DisplayTextII", DisplayTextII },
@@ -506,6 +553,8 @@ jassModule_t jass_funcs[] = {
     { "SetUnitPosition", SetUnitPosition },
     { "SetUnitPositionLoc", SetUnitPositionLoc },
     { "SetUnitFacing", SetUnitFacing },
+    /* ORDR EX compatibility: preserve the native Warcraft III behavior. */
+    { "EXSetUnitFacing", SetUnitFacing },
     { "SetUnitFacingTimed", SetUnitFacingTimed },
     { "SetUnitMoveSpeed", SetUnitMoveSpeed },
     { "SetUnitFlyHeight", SetUnitFlyHeight },
@@ -566,6 +615,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitExploded", SetUnitExploded },
     { "SetUnitInvulnerable", SetUnitInvulnerable },
     { "PauseUnit", PauseUnit },
+    { "EXPauseUnit", PauseUnit },
     { "IsUnitPaused", IsUnitPaused },
     { "SetUnitPathing", SetUnitPathing },
     { "ClearSelection", ClearSelection },
@@ -1214,6 +1264,7 @@ jassModule_t jass_funcs[] = {
     { "SetUnitAbilityLevel", SetUnitAbilityLevel },
     { "IncUnitAbilityLevel", IncUnitAbilityLevel },
     { "UnitDamageTarget", UnitDamageTarget },
+    { "UnitDamagePoint", UnitDamagePoint },
     { "GetUnitCurrentOrder", GetUnitCurrentOrder },
     { "GetUnitLevel", GetUnitLevel },
     { "UnitAddType", UnitAddType },
@@ -1235,6 +1286,11 @@ jassModule_t jass_funcs[] = {
     { "IsItemVisible", IsItemVisible },
     { "IsItemOwned", IsItemOwned },
     { "IsItemPowerup", IsItemPowerup },
+    { "IsItemIdPowerup", IsItemIdPowerup },
+    { "IsItemIdSellable", IsItemIdSellable },
+    { "IsItemIdPawnable", IsItemIdPawnable },
+    { "IsItemSellable", IsItemSellable },
+    { "IsItemPawnable", IsItemPawnable },
     { "SetItemPawnable", SetItemPawnable },
     { "UnitDropItemPoint", UnitDropItemPoint },
     { "UnitDropItemTarget", UnitDropItemTarget },

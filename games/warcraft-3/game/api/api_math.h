@@ -168,7 +168,9 @@ uint32_t Location(jass_t *j) {
     return 1;
 }
 uint32_t RemoveLocation(jass_t *j) {
-    //handle_t whichLocation = jass_checkhandle(j, 1, "location");
+    /* Owned Location() handles are destroyed; engine-owned location views
+     * (GetUnitPositionLoc) are light handles and cannot be freed by scripts. */
+    jass_destroyownedhandle(j, 1, "location");
     return 0;
 }
 uint32_t MoveLocation(jass_t *j) {

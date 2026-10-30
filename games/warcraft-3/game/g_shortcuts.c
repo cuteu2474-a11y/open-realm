@@ -26,6 +26,7 @@ static bool G_ShortcutIsControlledMonster(gameClient_t *client, edict_t const *e
 
 static bool G_UnitHasWorkerShortcutCapability(edict_t const *ent) {
     cstring_t builds;
+    cstring_t name;
 
     if (!ent || !ent->data.UnitProfile) return false;
     builds = ent->data.UnitProfile->builds;
@@ -33,7 +34,20 @@ static bool G_UnitHasWorkerShortcutCapability(edict_t const *ent) {
      * harvest-capable custom workers without a build menu. This avoids
      * hard-coding race/unit rawcodes while keeping combat-only resource
      * gatherers out unless their data explicitly makes them builders. */
-    return (builds && *builds) || G_ActorHasSkill((edict_t *)ent, "Ahar");
+    if ((builds && *builds) || G_ActorHasSkill((edict_t *)ent, "Ahar")) return true;
+
+    /* ORDR uses selectable custom Wisps as combination resources; they may
+     * intentionally have neither a construction list nor Harvest. They are
+     * still idle workers in the WC3 HUD when waiting for player input. Match
+     * the named Wisp family, not every ORDR combat unit or summoned actor. */
+    name = ent->data.UnitProfile->name ? G_LevelString(ent->data.UnitProfile->name) : NULL;
+    if (ent->data.UnitProfile->id == MAKEFOURCC('e','w','s','p')) return true;
+    if (name && strstr(name, "위습")) return true;
+    if (name) {
+        for (cstring_t c = name; *c; c++)
+            if (!strncasecmp(c, "wisp", 4)) return true;
+    }
+    return false;
 }
 
 bool G_UnitShowsHeroShortcut(gameClient_t *client, edict_t const *ent) {

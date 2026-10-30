@@ -228,6 +228,91 @@ static edict_t *make_unit_shop_patron(float x, float y, uint32_t player) {
     return unit;
 }
 
+/* A map-owned UnitProfile may be the only source of a custom unit's
+ * command-card art. UnitFunc.ini has no section for that rawcode. */
+TEST(wc3_items, custom_unit_profile_supplies_shop_and_train_button_art) {
+    static cstring_t const profile_slk =
+        "ID;PWXL;N;E\n"
+        "B;X5;Y2;D0\n"
+        "C;X1;Y1;K\"id\"\n"
+        "C;X2;K\"Art\"\n"
+        "C;X3;K\"Tip\"\n"
+        "C;X4;K\"Ubertip\"\n"
+        "C;X5;K\"Hotkey\"\n"
+        "C;X1;Y2;K\"h0QA\"\n"
+        "C;X2;K\"TestUI\\Textures\\solid_white.blp\"\n"
+        "C;X3;K\"Custom Unit\"\n"
+        "C;X4;K\"Map-authored unit button\"\n"
+        "C;X5;K\"Q\"\n"
+        "E\n";
+    slkTestData_t *rows, *old;
+    edict_t *producer;
+    gameCommandButton_t button;
+    setup_test_world();
+    rows = parse_slk_string(profile_slk);
+    T_NOT_NULL(rows);
+    if (!rows) return;
+    old = G_SetProfileRows(rows);
+    producer = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 0, 0);
+    T_ASSERT(G_BuildCommandButton(producer, "h0QA", false, 0, &button));
+    T_STREQ(button.art, "TestUI\\Textures\\solid_white.blp");
+    T_STREQ(button.tooltip, "Custom Unit");
+    T_STREQ(button.ubertip, "Map-authored unit button");
+    T_EQ(button.hotkey, 'Q');
+    T_STREQ(button.command, "h0QA");
+    G_SetProfileRows(old);
+    free_slk_rows(rows);
+}
+
+/* Absence of a world model must not remove item identity or its purchase
+ * callback. Such items are common in scripted map shops. */
+TEST(wc3_items, model_less_world_item_keeps_inventory_identity) {
+    static ItemData_t const model_less = {
+        .id = MAKEFOURCC('I','0','Q','A'), .uses = 3, .stockMax = 1
+    };
+    edict_t *item;
+    setup_test_world();
+    item = alloc_test_unit(MAKEFOURCC('s','p','r','o'), 32, 64);
+    item->data.ItemData = &model_less;
+    SP_SpawnItem(item);
+    T_ASSERT(G_IsItem(item));
+    T_ASSERT(item->item->in_world);
+    T_EQ(item->targtype, TARG_ITEM);
+    T_EQ(G_ItemCharges(item), 3);
+}
+
+/* Test the actual stock initialization, not a copied model predicate. */
+TEST(wc3_items, model_less_custom_item_remains_saleable_stock) {
+    static cstring_t const item_slk =
+        "ID;PWXL;N;E\n"
+        "B;X3;Y2;D0\n"
+        "C;X1;Y1;K\"itemID\"\n"
+        "C;X2;K\"stockMax\"\n"
+        "C;X3;K\"file\"\n"
+        "C;X1;Y2;K\"I0QA\"\n"
+        "C;X2;K2\n"
+        "E\n";
+    static UnitAbilities_t const abilities = { .abilList = "Asid" };
+    UnitProfile_t profile = { .sellItems = "I0QA" };
+    edict_t *shop;
+    slkTestData_t *rows, *old;
+    setup_test_world();
+    rows = parse_slk_string(item_slk);
+    T_NOT_NULL(rows);
+    if (!rows) return;
+    old = G_SetSLKRows("ItemData", rows);
+    shop = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 0, 0);
+    shop->data.UnitProfile = &profile;
+    shop->data.UnitAbilities = &abilities;
+    shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    G_SetStockSlots(shop, true, 3);
+    T_EQ(G_UpdateShopItemStock(shop), 1);
+    T_EQ(shop->stock->items[0].id, MAKEFOURCC('I','0','Q','A'));
+    T_EQ(shop->stock->items[0].current, 2);
+    G_SetSLKRows("ItemData", old);
+    free_slk_rows(rows);
+}
+
 TEST(wc3_items, spawn_initializes_world_state) {
     edict_t *item = alloc_test_unit(MAKEFOURCC('r','a','t','f'), 32, 64);
 
@@ -2113,6 +2198,134 @@ TEST(wc3_items, neutral_unit_shop_uses_non_inventory_patron_and_hires_immediatel
     T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 75);
     T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_FOOD_USED], 2);
     T_EQ(shop->stock->unit_count, 1);
+    T_EQ(shop->stock->units[0].current, 0);
+}
+
+/* ORDR-style owned unit shops sell transient units directly to JASS rather
+ * than requiring an inventory hero near the gambling building. Exercise the
+ * actual sale -> event queue -> GetSoldUnit -> script callback chain. */
+/* ORDR utility facilities may be authored with zero maximum HP. They are
+ * selectable and controllable, so their real shop stock must remain usable. */
+TEST(wc3_items, ordr_zero_maxhp_facility_remains_usable_shop_without_reviving_corpses) {
+    edict_t *shop, *player;
+    gameClient_t *client;
+    gameCommandButton_t buttons[12];
+    shopItemButtonsParams_t p;
+    setup_test_world();
+    T_ASSERT(run_test_jass(
+        "function CUN takes nothing returns nothing\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "endfunction\n"));
+    player = &g_edicts[0];
+    client = player->client;
+    client->ps.number = 0;
+    client->ps.stats[PLAYERSTATE_RESOURCE_GOLD] = 500;
+    client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER] = 100;
+    client->ps.stats[PLAYERSTATE_RESOURCE_FOOD_CAP] = 20;
+    shop = make_unit_test_shop(0, 0);
+    shop->s.player = 0;
+    shop->s.flags |= EF_UNIT;
+    shop->svflags |= SVF_MONSTER;
+    shop->health.value = 0.0f;
+    shop->health.max_value = 0.0f;
+    T_ASSERT(G_IsORDROwnedZeroHealthUnit(shop));
+    T_ASSERT(!M_IsDead(shop));
+    T_ASSERT(S_SpellIsAliveTarget(shop));
+    T_ASSERT(G_CanUseUnitShop(client, shop));
+    p = (shopItemButtonsParams_t){ .client = client, .shop = shop, .buttons = buttons, .max_buttons = 12 };
+    level.time += 3000;
+    T_EQ(G_GetShopButtons(&p), 1);
+    T_ASSERT(!buttons[0].disabled);
+    /* The same zero-HP facility contract applies to item merchandise. */
+    UnitProfile_t item_profile = *shop->data.UnitProfile;
+    item_profile.sellItems = "spro";
+    shop->data.UnitProfile = &item_profile;
+    T_ASSERT(G_CanUseItemShop(client, shop));
+
+    shop->svflags |= SVF_DEADMONSTER;
+    T_ASSERT(M_IsDead(shop));
+    T_ASSERT(!S_SpellIsAliveTarget(shop));
+    T_ASSERT(!G_IsUnitShop(shop));
+    T_ASSERT(!G_IsItemShop(shop));
+    T_ASSERT(!G_CanUseUnitShop(client, shop));
+    shop->svflags &= ~SVF_DEADMONSTER;
+    shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_ASSERT(M_IsDead(shop));
+    T_ASSERT(!G_IsUnitShop(shop));
+    shop->s.player = 0;
+    shop->health.max_value = 100.0f;
+    T_ASSERT(M_IsDead(shop));
+    T_ASSERT(!G_IsUnitShop(shop));
+}
+
+/* An owned item shop with an authored inventory may buy into its own
+ * inventory only if no other eligible nearby patron exists. This does not
+ * relax the neutral merchant or inventory-less facility contract. */
+TEST(wc3_items, owned_inventory_shop_uses_itself_only_as_last_resort_purchaser) {
+    static UnitAbilities_t const inventory_shop = { .abilList = "AInv,Asid" };
+    edict_t *shop;
+    gameClient_t *client;
+    setup_test_world();
+    client = g_edicts[0].client;
+    client->ps.number = 0;
+    shop = make_item_test_shop(0, 0);
+    shop->s.player = 0;
+    shop->data.UnitAbilities = &inventory_shop;
+    shop->health.value = shop->health.max_value = 100.0f;
+    T_ASSERT(G_UnitHasInventory(shop));
+    T_EQ(G_FindShopPatron(client, shop), shop);
+
+    shop->data.UnitAbilities = NULL;
+    T_NULL(G_FindShopPatron(client, shop));
+
+    shop->data.UnitAbilities = &inventory_shop;
+    shop->s.player = PLAYER_NEUTRAL_PASSIVE;
+    T_NULL(G_FindShopPatron(client, shop));
+}
+
+TEST(wc3_items, owned_unit_shop_purchase_dispatches_sold_unit_to_jass) {
+    edict_t *player, *shop;
+    gameClient_t *client;
+    setup_test_world();
+    player = &g_edicts[0];
+    client = player->client;
+    client->ps.number = 0;
+    client->connected = true;
+    client->ps.stats[PLAYERSTATE_RESOURCE_GOLD] = 500;
+    client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER] = 100;
+    client->ps.stats[PLAYERSTATE_RESOURCE_FOOD_CAP] = 20;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer soldCount = 0\n"
+        "  integer soldType = 0\n"
+        "endglobals\n"
+        "function OnSale takes nothing returns nothing\n"
+        "  set soldCount = soldCount + 1\n"
+        "  set soldType = GetUnitTypeId(GetSoldUnit())\n"
+        "  call RemoveUnit(GetSoldUnit())\n"
+        "endfunction\n"
+        "function VerifySale takes nothing returns nothing\n"
+        "  call BJassAssert(soldCount == 1, \"owned shop must dispatch one sale\")\n"
+        "  call BJassAssert(soldType == 'nmer', \"GetSoldUnit must be the purchased unit\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELL, null)\n"
+        "  call TriggerAddAction(t, function OnSale)\n"
+        "endfunction\n"
+    ));
+    shop = make_unit_test_shop(0, 0);
+    shop->s.player = 0;
+    T_NULL(G_FindUnitShopPatron(client, shop));
+    level.time += 3000;
+    T_ASSERT(G_ShopPurchaseUnit(player, shop, MAKEFOURCC('n','m','e','r')));
+    G_RunEvents();
+    jass_runevents(level.vm);
+    jass_callbyname(level.vm, "VerifySale", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_GOLD], 350);
+    T_EQ(client->ps.stats[PLAYERSTATE_RESOURCE_LUMBER], 75);
     T_EQ(shop->stock->units[0].current, 0);
 }
 

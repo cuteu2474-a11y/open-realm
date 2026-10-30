@@ -82,9 +82,40 @@ bool player_pay(player_t *ps, uint32_t project) {
     return true;
 }
 
-bool M_IsDead(edict_t const *ent) {
-    return ent->health.value <= 0;
+/* Retail maps may author 'HP' without the optional 'realHP' SLK column.
+ * ORDR's e0IX/e0HP wisps are HP=10, realHP=(empty): treating a missing
+ * derived column as zero made every wisp an instant corpse. The same defect
+ * blocked IssuePointOrder (M_IsDead), region-enter rewards and enemy waves.
+ * Preserve explicit positive realHP, otherwise use the map's actual HP. */
+static float G_AuthoredUnitMaxHealth(UnitBalance_t const *balance) {
+    if (!balance) return 0.0f;
+    if (balance->maxHealth > 0.0f) return balance->maxHealth;
+    return balance->baseHealth > 0 ? (float)balance->baseHealth : 0.0f;
 }
+
+/* The same authored ORDR utility units are selectable, can own shop stock
+ * and can receive native orders/spells. They have no maximum HP column, so
+ * the generic zero-HP death predicate must not silently block those paths
+ * after selection has already accepted them. Keep the exception narrow:
+ * actual death flags and ordinary zero-HP combat units remain dead. */
+bool M_IsDead(edict_t const *ent) {
+    return !ent || (ent->svflags & SVF_DEADMONSTER) ||
+           (ent->health.value <= 0.0f && !G_IsORDROwnedZeroHealthUnit(ent));
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_unit, absent_realhp_uses_authored_hp) {
+    UnitBalance_t balance = {0};
+    balance.baseHealth = 10;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 10.0f);
+    balance.maxHealth = 150.0f;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 150.0f);
+    balance.baseHealth = 0;
+    balance.maxHealth = 0.0f;
+    T_ASSERT(G_AuthoredUnitMaxHealth(&balance) == 0.0f);
+}
+#endif
 
 /* Advance the unit's animation frame by its scaled simulation timestep.
  * If the new frame would exceed the animation's end interval, the current
@@ -410,6 +441,22 @@ void G_ApplyUnitAbilityTraits(edict_t *ent) {
  * Reads model path, scale, collision radius, HP, mana, and attack parameters
  * (type, weapon class, damage dice, range, projectile model/speed) for the
  * unit's class_id and stores them in the edict. */
+/* A missing modelScale SLK value parses as zero. The object editor's
+ * default scale is 1, so emitting a zero-scale drawable hides its body
+ * even when the correct MDX was registered. Explicit positive scales are
+ * retained; a later SetUnitScale remains authoritative. */
+static float G_ValidUnitModelScale(float value) {
+    return isfinite(value) && value > 0.0f ? value : 1.0f;
+}
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_unit, absent_unit_model_scale_is_renderable) {
+    T_FEQ(G_ValidUnitModelScale(0.0f), 1.0f, 0.001f);
+    T_FEQ(G_ValidUnitModelScale(-1.0f), 1.0f, 0.001f);
+    T_FEQ(G_ValidUnitModelScale(0.75f), 0.75f, 0.001f);
+}
+#endif
+
 void SP_SpawnUnit(edict_t *self) {
     PATHSTR model_filename;
     UnitBalance_t const *b = self->data.UnitBalance;
@@ -433,7 +480,7 @@ void SP_SpawnUnit(edict_t *self) {
     } else {
         M_SetUnitShadow(self);
     }
-    self->s.scale = ui->modelScale;
+    self->s.scale = G_ValidUnitModelScale(ui->modelScale);
     self->s.radius = ui->selectionScale * SEL_SCALE / 2;
     /* Unit-vs-unit separation uses the authentic collisionSize ('ucol') from
      * the unit data, matching WC3. Buildings have no meaningful collisionSize
@@ -457,8 +504,11 @@ void SP_SpawnUnit(edict_t *self) {
     }
     self->mana.max_value = b->maxMana;
     self->mana.value = MIN(self->mana.max_value, b->initialMana);
-    self->health.value = b->maxHealth;
-    self->health.max_value = b->maxHealth;
+    /* Use the authored base HP when 'realHP' is absent in the map SLK.
+     * Never invent a constant 1 HP: the map specifies 10 HP for both
+     * ORDR wisps, and valid combat units have different base HP values. */
+    self->health.value = G_AuthoredUnitMaxHealth(b);
+    self->health.max_value = self->health.value;
     G_InitStockSlots(self);
     self->invulnerable = G_ActorHasSkill(self, "Avul");
     G_ApplyUnitAbilityTraits(self);

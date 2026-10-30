@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "skills/s_skills.h"
+#include "hud/hud_local.h"
 
 #define CLIENTCOMMAND(NAME) void CMD_##NAME(edict_t *clent, uint32_t argc, cstring_t argv[])
 /* Server authority and HUD share the same WC3-only selection policy. Only the
@@ -159,6 +160,71 @@ static bool G_SelectionListContains(edict_t *const *selection, uint32_t count, e
     return false;
 }
 
+/* These two ORDR facilities have building models and selectable command
+ * cards but are authored as zero-speed UNITs (not structures). Treat this as
+ * diagnostics only; do not rewrite their pathing, ownership, or JASS types. */
+static bool G_ORDRFacilityForDiagnostics(edict_t const *unit) {
+    return unit && (G_UnitIsStructure(unit) ||
+        G_IsItemShop(unit) || G_IsUnitShop(unit) ||
+        unit->class_id == MAKEFOURCC('H','0','C','4') ||
+        unit->class_id == MAKEFOURCC('H','0','5','M'));
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_ordr, facility_diagnostics_accept_unit_based_structures) {
+    edict_t unit = {0};
+    unit.class_id = MAKEFOURCC('H','0','C','4');
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+    unit.class_id = MAKEFOURCC('H','0','5','M');
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+    unit.class_id = MAKEFOURCC('h','f','o','o');
+    T_ASSERT(!G_ORDRFacilityForDiagnostics(&unit));
+    unit.s.flags |= EF_BUILDING;
+    T_ASSERT(G_ORDRFacilityForDiagnostics(&unit));
+}
+#endif
+
+/* Selection is initiated by the viewer, not by the selected unit's
+ * owner. An ORDR difficulty button belongs to Neutral Passive (player 15)
+ * but TriggerRegisterPlayerUnitEvent(Player(0), SELECTED) and
+ * GetTriggerPlayer() must observe the local selecting player (0). */
+static void G_PublishPlayerSelectionEvent(gameClient_t *client, edict_t *unit,
+                                         EVENTTYPE type) {
+    gameEvent_t *evt;
+    if (!client || !unit) return;
+    evt = G_PublishEventWithSource(unit, type,
+                                   G_GetPlayerEntityByNumber(client->ps.number));
+    if (type == EVENT_PLAYER_UNIT_SELECTED && G_ORDRFacilityForDiagnostics(unit) &&
+        level.vm && jass_functionbyname(level.vm, "CUN")) {
+        static unsigned n;
+        if (n++ < 48) {
+            char detail[155];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u player=%u controlled=%u",
+                     (unsigned)unit->s.number, (unsigned)unit->class_id,
+                     (unsigned)unit->s.player, (unsigned)client->ps.number,
+                     (unsigned)G_UnitCanControl(client, unit));
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_SELECTION", detail);
+        }
+    }
+    if (evt) evt->dialog_player = client->ps.number + 1;
+    if (evt && level.vm && jass_functionbyname(level.vm, "CUO") &&
+        jass_functionbyname(level.vm, "CUW") &&
+        unit->s.player == PLAYER_NEUTRAL_PASSIVE &&
+        ((unit->class_id >= 0x75303030u && unit->class_id <= 0x75303039u) ||
+         (unit->class_id >= 0x75303041u && unit->class_id <= 0x75303043u))) {
+        char info[200];
+        snprintf(info, sizeof(info),
+                 "player=%u unit=%u type=%u rawcode=0x%08x a900=%u queued=%u",
+                 (unsigned)client->ps.number, (unsigned)unit->s.number,
+                 (unsigned)type, (unsigned)unit->class_id,
+                 (unsigned)G_UnitAbilityLevel(unit, MAKEFOURCC('A','9','0','0')),
+                 (unsigned)(evt != NULL));
+        jass_ordr_log_event(level.vm, "CHOICE_USER_SELECTION", info);
+    }
+}
+
 static void G_PublishSelectionDelta(gameClient_t *client,
                                     edict_t *const *old_selection,
                                     uint32_t old_count) {
@@ -176,7 +242,7 @@ static void G_PublishSelectionDelta(gameClient_t *client,
                     "WC3_QUEST_SELECT publish event=DESELECTED player=%u unit=%u id=%s\n",
                     (unsigned)client->ps.number, (unsigned)ent->s.number, rawcode);
             }
-            G_PublishEvent(ent, EVENT_PLAYER_UNIT_DESELECTED);
+            G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_DESELECTED);
             G_PublishEvent(ent, EVENT_UNIT_DESELECTED);
         }
     }
@@ -190,7 +256,7 @@ static void G_PublishSelectionDelta(gameClient_t *client,
                     "WC3_QUEST_SELECT publish event=SELECTED player=%u unit=%u id=%s\n",
                     (unsigned)client->ps.number, (unsigned)ent->s.number, rawcode);
             }
-            G_PublishEvent(ent, EVENT_PLAYER_UNIT_SELECTED);
+            G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_SELECTED);
             G_PublishEvent(ent, EVENT_UNIT_SELECTED);
         }
     }
@@ -310,13 +376,95 @@ edict_t *G_GetMainControllableUnit(gameClient_t *client) {
     return NULL;
 }
 
+/* ORDR S2 2.323[C] presents its original difficulty/mode/start UI as
+ * nine neutral-passive unit models (u000..u007 and u00C), and three
+ * intentionally unselectable heading models (u009..u00B).
+ *
+ * The map's imported UnitUI rows have these models, but the corresponding
+ * live UnitBalance entries have zero maximum HP on iPad. Warcraft's
+ * conventional death predicate treats any zero HP as a corpse, preventing
+ * EVENT_PLAYER_UNIT_SELECTED. These authored *non-combat* scene controls
+ * have never had living hit points to lose: honor their explicit selectable
+ * flag without inventing health values. No other unit, including ordinary
+ * dead monsters, gains this exception. */
+static bool G_IsORDRMenuChoiceRawcode(uint32_t code) {
+    /* Exactly the nine button rawcodes present in ORDR 2.323[C] CUN.
+     * u009,u00A,u00B are decorative and intentionally not selectable. */
+    return (code >= 0x75303030u && code <= 0x75303037u) ||
+           code == 0x75303043u;
+}
+
+static bool G_IsORDRNonCombatChoice(edict_t const *ent) {
+    uint32_t code;
+    if (!ent || !ent->inuse || !level.vm || !ent->s.model ||
+        ent->s.player != PLAYER_NEUTRAL_PASSIVE ||
+        !(ent->s.flags & EF_UNIT) || (ent->s.flags & EF_NOT_SELECTABLE) ||
+        (ent->svflags & SVF_DEADMONSTER) ||
+        ent->health.max_value != 0.0f || ent->health.value != 0.0f)
+        return false;
+    code = ent->class_id;
+    if (!G_IsORDRMenuChoiceRawcode(code)) return false;
+    return jass_functionbyname(level.vm, "CUO") &&
+           jass_functionbyname(level.vm, "CUW") &&
+           jass_functionbyname(level.vm, "CUN");
+}
+
+/* Some ORDR custom player-controlled scene/utility units have no
+ * UnitBalance hit points. Zero *maximum* HP is not a death transition.
+ * Permit selecting those authored units only in ORDR; keep actual corpses,
+ * locust/unselectable units, and neutral decorations excluded. */
+bool G_IsORDROwnedZeroHealthUnit(edict_t const *ent) {
+    return ent && ent->inuse && level.vm &&
+           jass_functionbyname(level.vm, "CUN") &&
+           (ent->svflags & SVF_MONSTER) &&
+           !(ent->svflags & SVF_DEADMONSTER) &&
+           (ent->s.flags & EF_UNIT) &&
+           !(ent->s.flags & EF_NOT_SELECTABLE) &&
+           ent->s.player < PLAYER_NEUTRAL_AGGRESSIVE &&
+           ent->health.max_value == 0.0f && ent->health.value == 0.0f;
+}
+
+static bool G_IsAliveForSelection(edict_t const *ent) {
+    return ent && (ent->health.value > 0.0f ||
+                   G_IsORDRNonCombatChoice(ent) ||
+                   G_IsORDROwnedZeroHealthUnit(ent));
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_selection, ordr_noncombat_choice_does_not_invent_hitpoints) {
+    /* The authored choice whitelist excludes all three title unit models.
+     * Explicitly not selectable and genuine corpses remain rejected. */
+    edict_t unit = {0};
+    uint32_t const menu_codes[] = {
+        0x75303030u,0x75303031u,0x75303032u,0x75303033u,
+        0x75303034u,0x75303035u,0x75303036u,0x75303037u,0x75303043u
+    };
+    /* Pure invariant: zero max HP does not make a living gameplay unit.
+     * Runtime map identity and owner checks are exercised by the ORDR
+     * startup/choice integration logs on physical devices. */
+    T_ASSERT(!G_IsAliveForSelection(&unit));
+    unit.health.value = 10;
+    T_ASSERT(G_IsAliveForSelection(&unit));
+    unit.health.value = 0;
+    unit.health.max_value = 10;
+    T_ASSERT(!G_IsAliveForSelection(&unit));
+    FOR_LOOP(i, sizeof(menu_codes)/sizeof(*menu_codes))
+        T_ASSERT(G_IsORDRMenuChoiceRawcode(menu_codes[i]));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303039u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303041u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(0x75303042u));
+    T_ASSERT(!G_IsORDRMenuChoiceRawcode(MAKEFOURCC('h','f','o','o')));
+}
+#endif
+
 void G_SelectEntity(gameClient_t *client, edict_t *ent) {
     bool had_selection = false;
 
     /* Corpses remain networked while their death/decay presentation runs, but
      * they are no longer valid gameplay selection targets. */
     if (!client || !ent || !ent->inuse) return;
-    if (M_IsDead(ent) || (ent->s.flags & EF_NOT_SELECTABLE)) return;
+    if (!G_IsAliveForSelection(ent) || (ent->s.flags & EF_NOT_SELECTABLE)) return;
     uint32_t count = 0;
     uint32_t const limit = G_SelectionLimit();
     if (ent->selected & (1u << client->ps.number)) return;
@@ -340,7 +488,7 @@ void G_DeselectEntity(gameClient_t *client, edict_t *ent) {
 
 bool G_IsEntitySelected(gameClient_t *client, edict_t *ent) {
     TEST_SELECTION_CHECK();
-    return client && ent && ent->inuse && !M_IsDead(ent) &&
+    return client && ent && ent->inuse && G_IsAliveForSelection(ent) &&
         !(ent->s.flags & EF_NOT_SELECTABLE) &&
         (!(ent->s.renderfx & RF_HIDDEN) ||
          (S_UnitUsesInvisibilityRenderFlag(ent) &&
@@ -377,7 +525,7 @@ bool G_UnitCanBeSelected(gameClient_t *client, edict_t const *ent) {
     if (!client || !ent || !ent->inuse || !(ent->svflags & SVF_MONSTER)) {
         return false;
     }
-    if ((ent->svflags & SVF_DEADMONSTER) || ent->health.value <= 0.0f ||
+    if ((ent->svflags & SVF_DEADMONSTER) || !G_IsAliveForSelection(ent) ||
         !G_UnitIsWorldActive(ent) ||
         (ent->s.flags & EF_NOT_SELECTABLE)) {
         return false;
@@ -387,6 +535,11 @@ bool G_UnitCanBeSelected(gameClient_t *client, edict_t const *ent) {
          S_UnitIsInvisibleToPlayer(ent, client->ps.number))) {
         return false;
     }
+    /* ORDR owns its local utility/building units even when a custom sight
+     * radius is missing from the imported object row. Own units are visible
+     * to their owner; enemy/neutral fog checks remain authoritative. */
+    if (ent->s.player == client->ps.number && level.vm &&
+        jass_functionbyname(level.vm, "CUN")) return true;
     return G_FowPlayerCanHoverEntity(client->ps.number, ent);
 }
 
@@ -472,7 +625,7 @@ void G_UpdateClientSelections(void) {
                 FOR_LOOP(k, kept) if (keep[k] == ent) { retained = true; break; }
                 if (retained) continue;
                 G_DeselectEntity(client, ent);
-                G_PublishEvent(ent, EVENT_PLAYER_UNIT_DESELECTED);
+                G_PublishPlayerSelectionEvent(client, ent, EVENT_PLAYER_UNIT_DESELECTED);
                 G_PublishEvent(ent, EVENT_UNIT_DESELECTED);
                 changed = true;
             }
@@ -797,6 +950,48 @@ static bool G_SelectionMembershipUnchanged(gameClient_t *client, edict_t *const 
 
 CLIENTCOMMAND(Select) {
     gameClient_t *client = clent->client;
+    /* Identify whether a genuine ORDR finger selection reaches the server. */
+    if (level.vm && argc >= 2 && jass_functionbyname(level.vm, "CUN")) {
+        uint32_t number = 0;
+        static unsigned ordr_trace_count;
+        static unsigned ordr_world_trace_count;
+        if (G_ParseEntityNumber(argv[1], &number) && number < globals.num_edicts) {
+            edict_t const *candidate = &globals.edicts[number];
+            if (ordr_trace_count < 32 && candidate->s.player == PLAYER_NEUTRAL_PASSIVE &&
+                ((candidate->class_id >= 0x75303030u && candidate->class_id <= 0x75303039u) ||
+                 (candidate->class_id >= 0x75303041u && candidate->class_id <= 0x75303043u))) {
+                char detail[260];
+                snprintf(detail, sizeof(detail),
+                         "unit=%u raw=0x%08x player=%u hp=%.0f active=%u selectable=%u fow=%u flags=0x%x ui=%u",
+                         (unsigned)number, (unsigned)candidate->class_id,
+                         (unsigned)client->ps.number, (double)candidate->health.value,
+                         (unsigned)G_UnitIsWorldActive(candidate),
+                         (unsigned)G_UnitCanBeSelected(client, candidate),
+                         (unsigned)G_FowPlayerCanHoverEntity(client->ps.number, candidate),
+                         (unsigned)candidate->s.flags,
+                         (unsigned)client->ps.client_ui_state);
+                jass_ordr_log_event(level.vm, "CHOICE_SELECT_COMMAND", detail);
+                ordr_trace_count++;
+            } else if (ordr_world_trace_count < 20 && level.started &&
+                       candidate->s.player == client->ps.number) {
+                char detail[400];
+                snprintf(detail, sizeof(detail),
+                         "unit=%u owner=%u raw=0x%08x model=%u can_select=%u can_control=%u hp=%.0f/%.0f flags=0x%x sv=0x%x active=%u fow=%u ai=0x%x speed=%.0f ui=%u",
+                         (unsigned)number, (unsigned)candidate->s.player,
+                         (unsigned)candidate->class_id, (unsigned)candidate->s.model,
+                         (unsigned)G_UnitCanBeSelected(client, candidate),
+                         (unsigned)G_UnitCanControl(client, candidate),
+                         (double)candidate->health.value, (double)candidate->health.max_value,
+                         (unsigned)candidate->s.flags, (unsigned)candidate->svflags,
+                         (unsigned)G_UnitIsWorldActive(candidate),
+                         (unsigned)G_FowPlayerCanHoverEntity(client->ps.number, candidate),
+                         (unsigned)candidate->aiflags, (double)candidate->unitinfo.MoveSpeed,
+                         (unsigned)client->ps.client_ui_state);
+                jass_ordr_log_event(level.vm, "ORDR_WORLD_SELECT_COMMAND", detail);
+                ordr_world_trace_count++;
+            }
+        }
+    }
     if (client->menu.on_entity_selected) {
         uint32_t number;
         bool const queued = client->menu.supports_order_queue &&
@@ -873,6 +1068,10 @@ CLIENTCOMMAND(Select) {
         bool cleared = false;
         bool hasunits = false;
         bool const same_type = argc >= 3 && !strcmp(argv[2], "sametype");
+        if (client->ps.number < MAX_PLAYERS &&
+            (level.selection_disabled[client->ps.number] ||
+             (argc > 2 && !same_type && level.drag_selection_disabled[client->ps.number])))
+            return;
         edict_t *same_type_anchor = NULL;
         edict_t *voice = NULL;
         edict_t *old_selection[WC3_SELECTION_MAX] = { 0 };
@@ -1066,6 +1265,37 @@ CLIENTCOMMAND(OrderQueueRelease) {
     }
 }
 
+/* Original ORDR workers e0IX/e0HP both have speed 522 in the map's embedded
+ * UnitBalance.slk. Log a bounded sample of actual move attempts so an iPad
+ * report can distinguish an undelivered touch from selection/ownership,
+ * movement-metadata, and pathing failures without flooding normal JASS logs. */
+static void G_ORDRTraceSmartCommand(gameClient_t *client, cstring_t mode,
+                                   vec2_t const *point, bool issued) {
+    static unsigned trace_count;
+    uint32_t selected_count = 0;
+    edict_t *unit = NULL;
+    char detail[330];
+
+    if (!level.vm || !jass_functionbyname(level.vm, "CUN") ||
+        !client || trace_count >= 24) return;
+    FOR_SELECTED_UNITS(client, selected) {
+        if (!unit) unit = selected;
+        selected_count++;
+    }
+    snprintf(detail, sizeof(detail),
+             "mode=%s point=(%.0f,%.0f) issued=%u selected=%u unit=%u raw=0x%08x owner=%u player=%u controllable=%u speed=%.0f aiflags=0x%x paused=%u",
+             mode, (double)(point ? point->x : 0), (double)(point ? point->y : 0),
+             (unsigned)issued, (unsigned)selected_count,
+             (unsigned)(unit ? unit - globals.edicts : 0),
+             (unsigned)(unit ? unit->class_id : 0),
+             (unsigned)(unit ? unit->s.player : 0), (unsigned)client->ps.number,
+             (unsigned)(unit && G_UnitCanControl(client, unit)),
+             unit && unit->data.UnitBalance ? (double)unit->data.UnitBalance->speed : 0.0,
+             (unsigned)(unit ? unit->aiflags : 0), (unsigned)(unit && unit->paused));
+    jass_ordr_log_event(level.vm, "ORDR_WORLD_SMART_COMMAND", detail);
+    trace_count++;
+}
+
 CLIENTCOMMAND(Smart) {
     gameClient_t *client = clent->client;
     bool issued = false;
@@ -1126,6 +1356,7 @@ CLIENTCOMMAND(Smart) {
         if (rallied) G_PlayUISoundForPlayer(clent, "RallyPointPlace");
         Get_Commands_f(clent);
     }
+    G_ORDRTraceSmartCommand(client, "target", have_click_point ? &click_point : NULL, issued);
 }
 
 CLIENTCOMMAND(SmartPoint) {
@@ -1175,6 +1406,7 @@ CLIENTCOMMAND(SmartPoint) {
         G_SendPointConfirmation(clent, &loc, false);
         G_PlayUISoundForPlayer(clent, "RallyPointPlace");
     }
+    G_ORDRTraceSmartCommand(client, "point", &loc, issued || rally);
 }
 
 CLIENTCOMMAND(Button) {
@@ -1190,6 +1422,32 @@ CLIENTCOMMAND(Button) {
     queued = G_CommandQueueRequested(argc, argv, 2);
     producer = G_GetMainSelectedUnit(client);
     classname = argv[1];
+    /* The map's custom structures may be controlled by JASS events, ability
+     * buttons or Warcraft stock. Record the pressed code and available route
+     * before dispatch, without manufacturing stock or changing map rules. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        producer && G_ORDRFacilityForDiagnostics(producer)) {
+        static unsigned button_samples;
+        if (button_samples < 64) {
+            char detail[304];
+            uint32_t code = 0;
+            if (strlen(classname) == 4) memcpy(&code, classname, 4);
+            snprintf(detail, sizeof(detail),
+                     "building=%u raw=0x%08x owner=%u button=%.40s "
+                     "controlled=%u resources=%u ability_handler=%u "
+                     "custom_handler=%u shop_item=%u shop_unit=%u",
+                     (unsigned)producer->s.number, (unsigned)producer->class_id,
+                     (unsigned)producer->s.player, classname,
+                     (unsigned)G_UnitCanControl(client, producer),
+                     (unsigned)G_UnitCanSpendResources(client, producer),
+                     (unsigned)(FindAbilityForCommand(classname) != NULL),
+                     (unsigned)(client->menu.cmdbutton != NULL),
+                     (unsigned)(code && G_ShopSellsItem(producer, code)),
+                     (unsigned)(code && G_ShopSellsUnit(producer, code)));
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_BUTTON", detail);
+            button_samples++;
+        }
+    }
     /* A neutral shop remains neutral selection state; buying from it must not
      * weaken G_UnitCanControl() for ordinary enemy/neutral units. Merchandise
      * commands are raw object IDs and the authoritative stock path decides
@@ -1240,6 +1498,27 @@ CLIENTCOMMAND(Button) {
 
         if (!G_UnitCanSpendResources(client, producer) || strlen(classname) != 4) return;
         memcpy(&class_id, classname, sizeof(class_id));
+        {
+            char reason[128] = {0};
+            buildCommandState_t const state =
+                G_GetTrainCommandState(client, producer, class_id, reason, sizeof(reason));
+            if (state == BUILD_COMMAND_ABSENT || state == BUILD_COMMAND_HIDDEN) {
+                /* An unsupported custom ability must not fall through into
+                 * training just because its code is four characters long. */
+                if (level.vm && producer && G_ORDRFacilityForDiagnostics(producer)) {
+                    static uint32_t missing_dispatch_samples;
+                    if (missing_dispatch_samples++ < 80) {
+                        char detail[176];
+                        snprintf(detail, sizeof(detail),
+                                 "unit=%u class=0x%08x button=%.4s ability_parent=0x%08x no_native_or_train=1",
+                                 (unsigned)producer->s.number, (unsigned)producer->class_id,
+                                 classname, (unsigned)G_AbilityCode(FS_SLKKey(classname)));
+                        jass_ordr_log_event(level.vm, "ORDR_FACILITY_UNHANDLED_BUTTON", detail);
+                    }
+                }
+                return;
+            }
+        }
         SP_TrainUnit(producer, class_id);
     }
     if (!strcmp(argv[1], STR_CmdStop) || !strcmp(argv[1], STR_CmdHoldPos)) {
@@ -1338,6 +1617,13 @@ CLIENTCOMMAND(Research) {
         return;
     }
     memcpy(&abilcode, classname, sizeof(abilcode));
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        ent && G_ORDRFacilityForDiagnostics(ent)) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "building=%u kind=research button=%.4s",
+                 (unsigned)ent->s.number, classname);
+        jass_ordr_log_event(level.vm, "ORDR_BUILDING_ACTION", detail);
+    }
     if (G_ProducerCanResearch(ent, abilcode)) {
         if (!G_UnitCanSpendResources(client, ent)) return;
         G_QueueResearch(ent, abilcode);
@@ -1356,6 +1642,13 @@ CLIENTCOMMAND(Upgrade) {
 
     if (!G_UnitCanSpendResources(client, ent) || !classname || strlen(classname) != 4) return;
     memcpy(&unit_id, classname, sizeof(unit_id));
+    if (level.vm && jass_functionbyname(level.vm, "CUN") &&
+        ent && G_ORDRFacilityForDiagnostics(ent)) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "building=%u kind=upgrade button=%.4s",
+                 (unsigned)ent->s.number, classname);
+        jass_ordr_log_event(level.vm, "ORDR_BUILDING_ACTION", detail);
+    }
     G_StartBuildingUpgrade(ent, unit_id);
     Get_Commands_f(clent);
 }
@@ -3018,7 +3311,150 @@ static void CMD_JassDialogChoice(edict_t *ent, uint32_t argc, cstring_t argv[]) 
     G_JassDialogClick(ent, (uint32_t)dialog, (uint32_t)button);
 }
 
+/* The client sends only the opaque Dz frame handle; the game validates it
+ * against visible, enabled JASS-owned FDF frames before invoking the callback. */
+static void CMD_DzFrameClick(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end;
+    unsigned long handle;
+    if (!ent || !ent->client || argc != 2 || !argv[1][0] || argv[1][0] == '-') return;
+    handle = strtoul(argv[1], &end, 10);
+    if (*end || handle > UINT32_MAX) return;
+    ORDR_DzClickFrame(ent, (uint32_t)handle);
+}
+
+static void CMD_DzFrameEdit(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end;
+    unsigned long handle;
+    if(!ent || !ent->client || argc!=3 || !argv[1][0] || argv[1][0]=='-')return;
+    handle=strtoul(argv[1],&end,10);
+    if(*end || handle>UINT32_MAX)return;
+    ORDR_DzEditFrame(ent,(uint32_t)handle,argv[2]);
+}
+
+/* UI input is reported by the generic layout renderer. Handle and event ID
+ * are validated by the active game; clients cannot address JASS callbacks. */
+static void CMD_UIFrameEvent(edict_t *ent,uint32_t argc,cstring_t argv[]) {
+    char *end_handle,*end_event;
+    unsigned long handle,event;
+    if(!ent || !ent->client || (argc!=3 && argc!=4) || !argv[1][0] || !argv[2][0] ||
+       argv[1][0]=='-' || argv[2][0]=='-')return;
+    handle=strtoul(argv[1],&end_handle,10);
+    event=strtoul(argv[2],&end_event,10);
+    if(*end_handle || *end_event || handle>UINT32_MAX || event>UINT8_MAX)return;
+    if(event==9){
+        if(argc==4)ORDR_DzEditFrame(ent,(uint32_t)handle,argv[3]);
+        return;
+    }
+    if(event==10){
+        char *end_index;
+        unsigned long index;
+        if(argc!=4 || !argv[3][0] || argv[3][0]=='-')return;
+        index=strtoul(argv[3],&end_index,10);
+        if(*end_index || index>INT16_MAX)return;
+        ORDR_DzSelectFrameItem(ent,(uint32_t)handle,(int)index);
+        return;
+    }
+    if(argc!=3)return;
+    if(event==1){ORDR_DzClickFrame(ent,(uint32_t)handle);return;}
+    ORDR_DzFrameEvent(ent,(uint32_t)handle,(int)event);
+}
+
+/* Receive virtual-key edges from a client binding or platform adapter.
+ * Parse exact bounded integers before entering the current player's JASS VM. */
+static void CMD_DzKeyInput(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    char *end_key,*end_down;
+    unsigned long key,down;
+    if(!ent || !ent->client || argc!=3 || !argv[1][0] || !argv[2][0] ||
+       argv[1][0]=='-' || argv[2][0]=='-')return;
+    key=strtoul(argv[1],&end_key,10);
+    down=strtoul(argv[2],&end_down,10);
+    if(*end_key || *end_down || key>255 || down>1)return;
+    ORDR_DzKeyInput(ent,(int)key,(int)down);
+}
+
+/* Touch-friendly WC3 chat: the stock upper Chat button opens a modal edit
+ * window. CL_WindowOpen auto-focuses its FT_EDITBOX, which activates SDL text
+ * input / the iPad software keyboard. The editor's {wc3_chat} value is
+ * quoted by CL_WindowFormatCommand, never interpreted as a console command. */
+static void CMD_ChatOpen(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    uiFrame_t edit_frame = {0}, text_frame = {0};
+    uiEditBox_t edit = {0};
+    uiLabel_t label = {0};
+    uint32_t editor_number;
+    (void)argc;
+    (void)argv;
+    if (!ent || !ent->client || !ent->client->connected) return;
+    fprintf(stderr, "ORDR_CHAT_OPEN request player=%u\n",
+            (unsigned)ent->client->ps.number);
+    UI_SetCurrentClient(ent->client);
+    UI_WriteWindowStart(&MAKE(uiWindowDef_t,
+        .id = BZ_WC3_WINDOW_CHAT, .class_id = BZ_WC3_WINDOW_CHAT,
+        .flags = UI_WINDOW_MODAL | UI_WINDOW_NO_PAUSE | UI_WINDOW_UNIQUE));
+
+    UI_WriteBackdropFrame(0.135f, 0.080f, 0.53f, 0.155f,
+        "UI\\Widgets\\EscMenu\\Human\\human-options-menu-background.blp",
+        "UI\\Widgets\\EscMenu\\Human\\human-options-menu-border.blp");
+    UI_WriteTextFrameSized(0.155f, 0.090f, 0.40f, 0.025f, "CHAT / COMMAND",
+        COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_FONT_SIZE);
+
+    edit_frame.flags.type = FT_EDITBOX;
+    edit_frame.color = COLOR32_WHITE;
+    UI_SetFrameRect(&edit_frame, 0.155f, 0.126f, 0.395f, 0.060f);
+    strlcpy(edit.id, "wc3_chat", sizeof(edit.id));
+    edit.maxChars = 220;
+    edit.borderSize = 0.004f;
+    edit.font = gi.FontIndex("Fonts\\FRIZQT__.TTF", HUD_FONT_SIZE);
+    edit.textColor = COLOR32_WHITE;
+    edit.cursorColor = COLOR32_WHITE;
+    edit.background.Background = gi.ImageIndex("UI\\Widgets\\EscMenu\\Human\\human-options-menu-background.blp");
+    edit.background.TileBackground = true;
+    UI_WriteProxyFrame(&edit_frame, &edit, sizeof(edit));
+    editor_number = edit_frame.number;
+
+    /* The text child is required by the existing client edit-widget state
+     * machine; do not use a standalone text field, which cannot receive IME. */
+    text_frame.flags.type = FT_STRING;
+    text_frame.color = COLOR32_WHITE;
+    text_frame.parent = editor_number;
+    text_frame.text = "";
+    UI_SetFrameRect(&text_frame, 0.006f, 0.011f, 0.375f, 0.034f);
+    label.font = edit.font;
+    label.textalignx = FONT_JUSTIFYLEFT;
+    label.textaligny = FONT_JUSTIFYCENTER;
+    UI_WriteProxyFrame(&text_frame, &label, sizeof(label));
+
+    UI_WriteCommandTextFrame(0.556f, 0.132f, 0.089f, 0.050f,
+        "SEND", UI_WINDOW_CLOSE_COMMAND_PREFIX "chat \"{wc3_chat}\"",
+        COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_FONT_SIZE);
+    UI_WriteCommandTextFrame(0.155f, 0.192f, 0.085f, 0.030f,
+        "LOG", UI_WINDOW_CLOSE_COMMAND_PREFIX "log",
+        COLOR32_WHITE, FONT_JUSTIFYLEFT, HUD_SMALL_FONT_SIZE);
+    UI_WriteCommandTextFrame(0.562f, 0.090f, 0.083f, 0.030f,
+        "CANCEL", UI_WINDOW_CLOSE_ACTION,
+        COLOR32_WHITE, FONT_JUSTIFYCENTER, HUD_SMALL_FONT_SIZE);
+    UI_WriteWindowEnd(ent);
+    fprintf(stderr, "ORDR_CHAT_OPEN window_sent player=%u\n",
+            (unsigned)ent->client->ps.number);
+    UI_SetCurrentClient(NULL);
+}
+
+static void CMD_Chat(edict_t *ent, uint32_t argc, cstring_t argv[]) {
+    edict_t *player;
+    gameEvent_t *evt;
+    if (!ent || !ent->client || argc != 2 || !argv[1] || !argv[1][0]) return;
+    player = G_GetPlayerEntityByNumber(ent->client->ps.number);
+    if (!player) return;
+    evt = G_PublishEvent(player, EVENT_PLAYER_CHAT);
+    if (evt) {
+        strlcpy(evt->chat_text, argv[1], sizeof(evt->chat_text));
+        fprintf(stderr, "WC3_CHAT player=%u bytes=%u dispatched=1\\n",
+            (unsigned)ent->client->ps.number, (unsigned)strlen(evt->chat_text));
+    }
+}
+
 clientCommand_t clientCommands[] = {
+    { "chat_open", CMD_ChatOpen },
+    { "chat", CMD_Chat },
     { "give", CMD_Give },
     { "god", CMD_God },
     { "kill", CMD_Kill },
@@ -3069,6 +3505,10 @@ clientCommand_t clientCommands[] = {
     { "gameresult_load", CMD_GameResultLoad },
     { "gameresult_quit", CMD_GameResultQuit },
     { "jassdialog", CMD_JassDialogChoice },
+    { "dzframe", CMD_DzFrameClick },
+    { "dzedit", CMD_DzFrameEdit },
+    { "uievent", CMD_UIFrameEvent },
+    { "dzkey", CMD_DzKeyInput },
     { "debugspawn", CMD_DebugSpawn },
     { "enemiesclear", CMD_EnemiesClear },
     { "eclear", CMD_EnemiesClear },

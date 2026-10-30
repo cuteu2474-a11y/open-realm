@@ -3,13 +3,14 @@
 
 #define BZ_WC3_MB_WIDTH 0.287f // FDF units; widened for the resource columns while keeping the panel right-aligned
 #define BZ_WC3_MB_MIN_NAME_WIDTH 0.105f // FDF units; minimum name column preserving the prior resource alignment
-#define BZ_WC3_MB_NAME_CHAR_WIDTH 0.0058f // FDF units per byte; estimate name-column width before placing resource columns
+#define BZ_WC3_MB_NAME_CHAR_WIDTH 0.0058f // FDF units per visible UTF-8 character (not per encoded byte)
 #define BZ_WC3_MB_NAME_MAX_WIDTH 0.300f // FDF units; cap name expansion so long names retain the resource panel
 #define WC3_MB_ROW_HEIGHT 0.016f // FDF units; one resource/cell row at HUD_FONT_SIZE
 #define WC3_MB_HEADER_HEIGHT 0.020f // FDF units; title strip text height
 #define WC3_MB_HEADER_PAD 0.006f // FDF units; title strip padding above/below the text
 #define WC3_MB_PANEL_GAP 0.001f // FDF units; gap between the title strip and the body panel
 #define WC3_MB_TOP 0.040f // FDF units; stack origin below the top edge, before timer/leaderboard offsets
+#define WC3_ORDR_COUNTDOWN_STRIP 0.035f // FDF units; ORDR's top-right DzFrame round clock is not a stock TimerDialog
 
 static uint32_t MultiboardFont(void) {
     frameDef_t *title = hud.leaderboard.LeaderboardTitle;
@@ -164,6 +165,90 @@ static uint32_t MultiboardTeamRows(uint32_t viewer) {
     return count;
 }
 
+/* Names can contain Warcraft inline color codes. Their ten ASCII bytes are
+ * not visible text; treating them as part of a column's width pushes score
+ * columns out of alignment on ORDR's colored Korean player names. */
+static bool MultiboardIsColorCode(unsigned char const *p) {
+    if (p[0] != '|' || (p[1] != 'c' && p[1] != 'C')) return false;
+    for (unsigned i = 2; i < 10; ++i) {
+        unsigned char c = p[i];
+        if (!c || !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+
+/* One Unicode codepoint per glyph instead of one character per UTF-8 byte.
+ * Ignore inline colors, count a literal || as one visible pipe, and measure
+ * the longest line when a scripted name contains Warcraft's |n separator. */
+static size_t MultiboardUTF8Chars(cstring_t value) {
+    size_t chars = 0, widest = 0;
+    if (!value) return 0;
+    for (unsigned char const *p = (unsigned char const *)value; *p; ++p) {
+        if (MultiboardIsColorCode(p)) { p += 9; continue; }
+        if (p[0] == '|' && (p[1] == 'r' || p[1] == 'R')) { ++p; continue; }
+        if (p[0] == '|' && (p[1] == 'n' || p[1] == 'N')) {
+            widest = MAX(widest, chars); chars = 0; ++p; continue;
+        }
+        if (p[0] == '|' && p[1] == '|') { ++chars; ++p; continue; }
+        if ((*p & 0xc0u) != 0x80u) ++chars;
+    }
+    return MAX(widest, chars);
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_multiboard, colored_korean_names_do_not_expand_scoreboard_columns) {
+    T_EQ(MultiboardUTF8Chars("루피"), 2u);
+    T_EQ(MultiboardUTF8Chars("|cffff0000루피|r"), 2u);
+    T_EQ(MultiboardUTF8Chars("|cff00ff00A||B|r"), 3u);
+    T_EQ(MultiboardUTF8Chars("ABC|n가나"), 3u);
+}
+#endif
+
+/* Status/comment cell widths must account for visible glyphs, not only
+ * the authored column width. This helper is independent of map assets. */
+#ifdef BZ_TESTS
+TEST(wc3_multiboard, ordr_description_width_exceeds_short_number_column) {
+    T_ASSERT(MultiboardUTF8Chars("유닛 카운트 제한: 70") > MultiboardUTF8Chars("0점"));
+    T_ASSERT(MultiboardUTF8Chars("|cff22dd33한글|r") == 2);
+}
+#endif
+
+/* MultiboardSetItemWidth / MultiboardSetItemsWidth write per-cell widths.
+ * The old renderer threw them away and drew every column at equal width:
+ * ORDR score columns consequently overlap their neighboring values. Use the
+ * widest authored cell in each column, with an equal fallback only if no
+ * script assigned any width to that column. */
+static float MultiboardAuthoredColumnWidth(multiboard_t const *board,
+                                           uint32_t col, uint32_t cols) {
+    float authored = 0.0f;
+    FOR_LOOP(row, MIN(board->rows, (uint32_t)MAX_MULTIBOARD_ROWS)) {
+        struct gmultiboardcell_s const *cell =
+            &board->cells[row * MAX_MULTIBOARD_COLS + col];
+        if (cell->width > authored) authored = cell->width;
+    }
+    /* An authored width of 0.05 FDF units is legal but it is NOT enough for
+     * many Korean descriptions/status rows used by ORDR. Previously the
+     * renderer let long values paint into the following columns, making the
+     * score panel illegible despite a successful layout build. Bound the
+     * source width by the widest visible string for that column. Preserve
+     * non-ORDR authored widths without altering their layout contract. */
+    if (level.map_path && strstr(level.map_path, "ORDR_S2_")) {
+        size_t max_glyphs = 0;
+        FOR_LOOP(row, MIN(board->rows, (uint32_t)MAX_MULTIBOARD_ROWS)) {
+            struct gmultiboardcell_s const *cell =
+                &board->cells[row * MAX_MULTIBOARD_COLS + col];
+            if (cell->show_value && cell->value[0])
+                max_glyphs = MAX(max_glyphs, MultiboardUTF8Chars(cell->value));
+        }
+        if (max_glyphs)
+            authored = MAX(authored, MIN(0.24f, max_glyphs * 0.0062f + 0.016f));
+    }
+    return authored > 0.0f ? MAX(0.014f, authored)
+                            : (BZ_WC3_MB_WIDTH - 0.014f) / (float)cols;
+}
+
 static float MultiboardTeamNameWidth(uint32_t viewer) {
     size_t max_chars = 0;
     FOR_LOOP(i, PLAYER_NEUTRAL_AGGRESSIVE) {
@@ -172,7 +257,7 @@ static float MultiboardTeamNameWidth(uint32_t viewer) {
             cstring_t name;
             if (game.clients[slot].ps.number != i) continue;
             name = game.clients[slot].ps.name ? game.clients[slot].ps.name : "";
-            max_chars = MAX(max_chars, strlen(name));
+            max_chars = MAX(max_chars, MultiboardUTF8Chars(name));
             break;
         }
     }
@@ -186,6 +271,7 @@ void UI_WriteMultiboard(edict_t *ent) {
     uint32_t client_index, viewer, root, rows = 0, cols = 0;
     bool team = false, minimized = false;
     float width = BZ_WC3_MB_WIDTH, name_width = BZ_WC3_MB_MIN_NAME_WIDTH;
+    float column_widths[MAX_MULTIBOARD_COLS] = {0};
     float height, body_height, body_y, x, y;
 
     if (!ent || !(client = ent->client)) return;
@@ -207,6 +293,23 @@ void UI_WriteMultiboard(edict_t *ent) {
         width += name_width - BZ_WC3_MB_MIN_NAME_WIDTH;
     }
     if (!team && !board) { UI_ClearLayer(ent, WC3_LAYER_MULTIBOARD); return; }
+    if (board && cols) {
+        float total = 0.0f;
+        FOR_LOOP(c, cols) {
+            column_widths[c] = MultiboardAuthoredColumnWidth(board, c, cols);
+            total += column_widths[c];
+        }
+        /* Keep scripted proportions but keep the panel on the iPad viewport.
+         * Scaling down all columns is safer than letting the last column fall
+         * offscreen or writing beyond the client UI canvas. */
+        float const available = UI_BASE_WIDTH - 2.0f * HUD_HERO_SHORTCUT_EDGE_X - 0.014f;
+        if (total > available && total > 0.0f) {
+            float const scale = available / total;
+            FOR_LOOP(c, cols) column_widths[c] *= scale;
+            total = available;
+        }
+        width = MAX(BZ_WC3_MB_WIDTH, total + 0.014f);
+    }
 
     body_height = team
         ? (minimized ? 0.0f : rows * WC3_MB_ROW_HEIGHT + 0.012f)
@@ -215,9 +318,14 @@ void UI_WriteMultiboard(edict_t *ent) {
                     (minimized ? 0.0f : WC3_MB_PANEL_GAP + body_height)
                   : WC3_MB_HEADER_HEIGHT + body_height;
     x = UI_BASE_WIDTH - width - HUD_HERO_SHORTCUT_EDGE_X;
-    /* Timer, leaderboard, title and resources form one top-right stack. */
+    /* Timer, leaderboard, title and resources form one top-right stack.
+     * ORDR's separate DzFrame round countdown is absent from the stock
+     * TimerDialog registry, so it needs one reserved strip above its
+     * scripted score panel. Leave all other maps' HUD positions unchanged. */
     y = WC3_MB_TOP + UI_TimerDialogLeaderboardOffset(viewer)
-        + UI_LeaderboardMultiboardOffset(viewer);
+        + UI_LeaderboardMultiboardOffset(viewer)
+        + (board && strstr(level.map_path, "ORDR_S2_")
+            ? WC3_ORDR_COUNTDOWN_STRIP : 0.0f);
     UI_SetCurrentClient(client);
     UI_WriteStart(WC3_LAYER_MULTIBOARD);
     root = MultiboardRoot();
@@ -291,8 +399,9 @@ void UI_WriteMultiboard(edict_t *ent) {
             FOR_LOOP(r, rows) FOR_LOOP(c, cols) {
                 struct gmultiboardcell_s const *cell =
                     &board->cells[r * MAX_MULTIBOARD_COLS + c];
-                float cw = (width - 0.014f) / cols;
-                float xx = x + 0.007f + c * cw;
+                float cw = column_widths[c];
+                float xx = x + 0.007f;
+                FOR_LOOP(prev, c) xx += column_widths[prev];
                 float yy = y + height - WC3_MB_HEADER_HEIGHT - (r + 1) * WC3_MB_ROW_HEIGHT;
                 if (cell->show_icon && cell->icon[0]) {
                     uiFrame_t icon = { 0 };

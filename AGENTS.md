@@ -1,5 +1,19 @@
 # OpenWarcraft Agent Guide
 
+## Shared Development Throughput Policy — applicable to all agent changes
+
+This section expresses the user's preferred **batch implementation / shared infrastructure / integrated verification** workflow. It supplements, but never overrides, the engine's correctness, licensing, architectural boundaries, security rules, test requirements, or the current game's confirmed policy.
+
+1. **Inspect before coding.** Read the current branch's project guide, architecture, ORDR handoff when applicable, and the actual implementation. Recount incomplete behavior from code; old session reports are not proof of present implementation.
+2. **Implement meaningful feature batches.** Group related bugs and connected functionality by shared root cause. Avoid the loop "tiny fix → full simulator → write another long report" for every micro-change. Grouping 5–10 functions is a guideline, not a mandate to land unreviewable changes.
+3. **Build reusable engine support first.** Fix missing game-module/JASS/FDF/renderer/input contracts in the appropriate owner; do not alter original WC3 map data to disguise an engine bug. Follow the universal client vs. per-game game.dll boundary; reuse existing abstractions rather than introducing another incompatible pipeline.
+4. **Test at batch boundaries.** Run focused correctness checks where necessary, then the relevant full regression/integration suite **once for the assembled change**. For ORDR gameplay, resolve identified bugs before the final simulator pass when feasible. Do not repeatedly start/cancel the same GitHub Actions workflow; do not claim device play from a CI/simulator result.
+5. **Act within agreed constraints.** Implement low-level decisions autonomously without repeated approval, but do not invent original game rules, probabilities, timings, interface designs, or network modes. Keep original artifacts unmodified; maintain the agreed offline/single-player iPad scope for the ORDR compatibility work.
+6. **Commit and document efficiently.** Use the existing working branch and CI, avoid new branches/workflows, create coherent verified commits, and keep handoffs concise: current state, reproducible failures, evidence, next work. Historical diagnostics belong in existing detailed docs, not ever-growing front-page summaries.
+7. **Measure playable outcomes.** "Compiles", "passes tests", "simulator opens", "IPA produced", and "played successfully on a real iPad" are distinct states. Prioritize correct menus, input, units, buildings, enemy waves and battle rules over cosmetic polish.
+
+For ORDR iPad, review [the native handoff](docs/games/warcraft-3/ordr-native-handoff.md) first. User's latest explicit instructions and authoritative per-game engine specifications take precedence where relevant.
+
 ## Project Context
 
 This codebase is inspired by **Quake 2** (id Software). The developer is deeply familiar with Quake 2's architecture and source code. **Quake 2 is the primary reference** for all lifecycle, state communication, UI control, movement, and entity patterns. Use **Quake 3** as a secondary reference for features Q2 lacks, such as client-side UI libraries or renderer module separation.
@@ -50,6 +64,8 @@ This codebase is inspired by **Quake 2** (id Software). The developer is deeply 
 | WC3 naval movement, FLOAT/AMPH water pathing, collision domains, bridge semantics | [docs/games/warcraft-3/naval-movement.md](docs/games/warcraft-3/naval-movement.md) |
 | WC3 alarm/captain AI natives and full-screen model cinematic compatibility | [docs/games/warcraft-3/campaign-ai-model-cinematic.md](docs/games/warcraft-3/campaign-ai-model-cinematic.md) |
 | WC3 JASS native coverage, callback contracts, state ownership | [games/warcraft-3/jass-native-coverage.md](games/warcraft-3/jass-native-coverage.md) |
+| **ORDR iPad single source of truth — current status, actual CI/IPA evidence, P0 bugs and handoff** | [docs/games/warcraft-3/ordr-native-handoff.md](docs/games/warcraft-3/ordr-native-handoff.md) |
+| ORDR Dz/FDF contracts (technical reference; not proof of gameplay completion) | [docs/games/warcraft-3/ordr-dzapi-compat.md](docs/games/warcraft-3/ordr-dzapi-compat.md) |
 | WC3 AI next-upgrade cost queries and `ShiftTownSpot` construction placement state | [docs/games/warcraft-3/ai-upgrade-costs-and-town-spot.md](docs/games/warcraft-3/ai-upgrade-costs-and-town-spot.md) |
 | WC3 event-trigger queueing, synchronous `TriggerExecute`, coroutine context | [docs/games/warcraft-3/trigger-events.md](docs/games/warcraft-3/trigger-events.md) |
 | WC3 JASS choice dialogs, modal input, event context, remaining retail gaps | [docs/games/warcraft-3/jass-dialogs.md](docs/games/warcraft-3/jass-dialogs.md) |

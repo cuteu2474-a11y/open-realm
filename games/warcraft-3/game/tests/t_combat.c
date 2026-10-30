@@ -2277,6 +2277,74 @@ TEST(wc3_combat, cooldown_range_buffer_holds_then_chases_at_ready_time) {
     T_STREQ(attacker->currentmove->animation, "walk");
 }
 
+TEST(wc3_combat, zero_damage_point_melee_hit_is_not_lost_to_wait_guard) {
+    edict_t *attacker;
+    edict_t *target;
+    float after;
+    setup_test_world();
+    reset_entities();
+    attacker = make_combat_unit(MAKEFOURCC('h','f','o','o'), 420.0f, 0.0f, 0.0f);
+    target = make_combat_unit(MAKEFOURCC('h','f','o','o'), 420.0f, 80.0f, 0.0f);
+    attacker->s.player = 0;
+    target->s.player = 5;
+    attacker->attack1.type = ATK_NORMAL;
+    attacker->attack1.weapon = WPN_NORMAL;
+    attacker->attack1.targetsAllowed = WC3_TARGET_FLAG_GROUND;
+    attacker->attack1.damageBase = 30.0f;
+    attacker->attack1.range = 100.0f;
+    attacker->attack1.cooldown = 1.0f;
+    attacker->attack1.damagePoint = 0.0f;
+    target->targtype = TARG_GROUND;
+
+    order_attack(attacker, target);
+    attacker->currentmove->think(attacker);
+    T_STREQ(attacker->currentmove->animation, "attack");
+    T_FEQ(target->health.value, target->health.max_value, 0.001f);
+    attacker->currentmove->think(attacker);
+    T_ASSERT(target->health.value < target->health.max_value);
+    after = target->health.value;
+    attacker->currentmove->think(attacker);
+    T_FEQ(target->health.value, after, 0.001f);
+}
+
+TEST(wc3_combat, zero_damage_point_ranged_launches_one_projectile) {
+    edict_t *attacker;
+    edict_t *target;
+    unsigned missiles = 0;
+    setup_test_world();
+    reset_entities();
+    attacker = make_combat_unit(MAKEFOURCC('h','r','i','f'), 535.0f, 0.0f, 0.0f);
+    target = make_combat_unit(MAKEFOURCC('h','f','o','o'), 420.0f, 120.0f, 0.0f);
+    attacker->s.player = 0;
+    target->s.player = 5;
+    attacker->attack1.type = ATK_PIERCE;
+    attacker->attack1.weapon = WPN_MISSILE;
+    attacker->attack1.targetsAllowed = WC3_TARGET_FLAG_GROUND;
+    attacker->attack1.damageBase = 20.0f;
+    attacker->attack1.range = 500.0f;
+    attacker->attack1.cooldown = 1.0f;
+    attacker->attack1.damagePoint = 0.0f;
+    attacker->attack1.projectile.speed = 900.0f;
+    target->targtype = TARG_GROUND;
+
+    order_attack(attacker, target);
+    attacker->currentmove->think(attacker);
+    T_STREQ(attacker->currentmove->animation, "attack range");
+    attacker->currentmove->think(attacker);
+    FILTER_EDICTS(ent, ent->inuse && ent->owner == attacker &&
+                          ent->movetype == MOVETYPE_FLYMISSILE) {
+        missiles++;
+    }
+    T_EQ(missiles, 1u);
+    attacker->currentmove->think(attacker);
+    missiles = 0;
+    FILTER_EDICTS(ent, ent->inuse && ent->owner == attacker &&
+                          ent->movetype == MOVETYPE_FLYMISSILE) {
+        missiles++;
+    }
+    T_EQ(missiles, 1u);
+}
+
 TEST(wc3_combat, attack_animation_end_does_not_restart_swing_cooldown) {
     edict_t *attacker = make_combat_unit(MAKEFOURCC('h','f','o','o'), 420.0f, 0.0f, 0.0f);
     edict_t *target = make_combat_unit(MAKEFOURCC('h','f','o','o'), 420.0f, 80.0f, 0.0f);

@@ -229,18 +229,47 @@ void G_NormalizeModelFilename(cstring_t authored, string_t out, size_t out_size)
 
     if (!out || !out_size) return;
     out[0] = '\0';
-    if (!authored || !*authored) return;
+    if (!authored || !*authored || !strcmp(authored, "_")) return;
 
     slash_back = strrchr(authored, '\\');
     slash_forward = strrchr(authored, '/');
     slash = slash_back;
     if (!slash || (slash_forward && slash_forward > slash)) slash = slash_forward;
     dot = strrchr(authored, '.');
-    if (dot && (!slash || dot > slash))
-        strlcpy(out, authored, out_size);
-    else
+    if (dot && (!slash || dot > slash)) {
+        /* Only map-imported .mdl aliases require an explicit .mdx rewrite.
+         * Stock game model identifiers remain in their source spelling:
+         * the resource loader resolves that namespace itself. Converting
+         * every stock .mdl breaks campaign object model references. */
+        bool const imported = !strncasecmp(authored, "war3mapImported\\", sizeof("war3mapImported\\") - 1) ||
+                              !strncasecmp(authored, "war3mapImported/", sizeof("war3mapImported/") - 1);
+        if (imported && !strcasecmp(dot, ".mdl")) {
+            size_t stem_len = (size_t)(dot - authored);
+            if (stem_len + sizeof(".mdx") <= out_size) {
+                memcpy(out, authored, stem_len);
+                memcpy(out + stem_len, ".mdx", sizeof(".mdx"));
+            }
+        } else
+            strlcpy(out, authored, out_size);
+    } else
         snprintf(out, out_size, "%s.mdx", authored);
 }
+
+#ifdef BZ_TESTS
+TEST(wc3_model, normalize_nonimported_mdl_to_runtime_mdx) {
+    char normalized[MAX_PATHLEN];
+    G_NormalizeModelFilename("Units\\Custom\\Shop.mdl", normalized, sizeof(normalized));
+    T_STREQ(normalized, "Units\\Custom\\Shop.mdl");
+    G_NormalizeModelFilename("war3mapImported\\Gamble.MDL", normalized, sizeof(normalized));
+    T_STREQ(normalized, "war3mapImported\\Gamble.mdx");
+    G_NormalizeModelFilename("war3mapImported\\Named Building", normalized, sizeof(normalized));
+    T_STREQ(normalized, "war3mapImported\\Named Building.mdx");
+    G_NormalizeModelFilename("Buildings\\Custom\\Shop.mdx", normalized, sizeof(normalized));
+    T_STREQ(normalized, "Buildings\\Custom\\Shop.mdx");
+    G_NormalizeModelFilename("_", normalized, sizeof(normalized));
+    T_STREQ(normalized, "");
+}
+#endif
 
 int G_RegisterModel(cstring_t filename) {
     /* Units with a missile weapon but no authored Missileart have no model. */
@@ -313,6 +342,12 @@ static g_cmodel_t *GetModel(uint32_t modelindex) {
         }
     }
     return entry->animations ? entry : NULL;
+}
+
+animation_t const *G_GetAnimationByIndex(uint32_t modelindex, int32_t index) {
+    g_cmodel_t *model = GetModel(modelindex);
+    return model && index >= 0 && (uint32_t)index < model->num_animations
+        ? &model->animations[index] : NULL;
 }
 
 animation_t const *G_GetAnimation(uint32_t modelindex, cstring_t animname) {
@@ -600,6 +635,7 @@ void G_SetUnitAnimation(edict_t *unit, cstring_t animname) {
     animationTagSet_t request_tags = {0};
 
     if (!unit || !animname) return;
+    unit->animation_index = 0;
     strlcpy(request, animname, sizeof(request));
     strlcpy(unit->animation_request, request, sizeof(unit->animation_request));
     AnimationParseRequest(request, primary, &request_tags);

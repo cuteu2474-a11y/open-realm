@@ -23,10 +23,11 @@ type trigger          extends handle
 type event            extends handle
 type race             extends handle
 type triggeraction    extends handle
-type playerevent      extends handle
-type gameevent        extends handle
-type playerunitevent  extends handle
-type unitevent        extends handle
+type eventid          extends handle
+type playerevent      extends eventid
+type gameevent        extends eventid
+type playerunitevent  extends eventid
+type unitevent        extends eventid
 type alliancetype     extends handle
 type racepreference  extends handle
 type mapcontrol      extends handle
@@ -412,12 +413,14 @@ globals
     constant playerunitevent EVENT_PLAYER_UNIT_RESEARCH_FINISH = ConvertPlayerUnitEvent(37)
     constant playerunitevent EVENT_PLAYER_UNIT_ISSUED_ORDER = ConvertPlayerUnitEvent(38)
     constant playerunitevent EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER = ConvertPlayerUnitEvent(39)
+    constant playerunitevent EVENT_PLAYER_UNIT_SELL = ConvertPlayerUnitEvent(272)
     constant playerunitevent EVENT_PLAYER_UNIT_SELL_ITEM = ConvertPlayerUnitEvent(274)
     constant playerunitevent EVENT_PLAYER_UNIT_SPELL_EFFECT = ConvertPlayerUnitEvent(277)
     constant playerunitevent EVENT_PLAYER_HERO_LEVEL = ConvertPlayerUnitEvent(41)
     constant playerunitevent EVENT_PLAYER_UNIT_SUMMON = ConvertPlayerUnitEvent(47)
     constant playerunitevent EVENT_PLAYER_UNIT_PICKUP_ITEM = ConvertPlayerUnitEvent(49)
     constant playerunitevent EVENT_PLAYER_UNIT_USE_ITEM = ConvertPlayerUnitEvent(50)
+    constant unitevent EVENT_UNIT_SELL = ConvertUnitEvent(289)
     constant unitevent EVENT_UNIT_SELL_ITEM = ConvertUnitEvent(291)
     constant integer PLAYER_NEUTRAL_PASSIVE = GetPlayerNeutralPassive()
     constant gameevent EVENT_GAME_STATE_LIMIT = ConvertGameEvent(3)
@@ -448,6 +451,7 @@ globals
     constant racepreference RACE_PREF_ORC = ConvertRacePref(2)
     constant racepreference RACE_PREF_RANDOM = ConvertRacePref(32)
     constant mapcontrol MAP_CONTROL_COMPUTER = ConvertMapControl(1)
+    constant mapcontrol MAP_CONTROL_USER = ConvertMapControl(0)
     constant gametype GAME_TYPE_MELEE = ConvertGameType(1)
     constant gametype GAME_TYPE_FFA = ConvertGameType(2)
     constant mapflag MAP_FOG_HIDE_TERRAIN = ConvertMapFlag(1)
@@ -466,6 +470,8 @@ globals
     constant playerstate PLAYER_STATE_RESOURCE_GOLD = ConvertPlayerState(1)
     constant playerstate PLAYER_STATE_RESOURCE_LUMBER = ConvertPlayerState(2)
     constant playerslotstate PLAYER_SLOT_STATE_LEFT = ConvertPlayerSlotState(2)
+    constant playerslotstate PLAYER_SLOT_STATE_EMPTY = ConvertPlayerSlotState(0)
+    constant playerslotstate PLAYER_SLOT_STATE_PLAYING = ConvertPlayerSlotState(1)
     constant playercolor PLAYER_COLOR_RED = ConvertPlayerColor(0)
     constant playercolor PLAYER_COLOR_BLUE = ConvertPlayerColor(1)
     constant playercolor PLAYER_COLOR_CYAN = ConvertPlayerColor(2)
@@ -510,3 +516,17 @@ globals
     constant unittype UNIT_TYPE_GROUND = ConvertUnitType(4)
     constant effecttype EFFECT_TYPE_TARGET = ConvertEffectType(1)
 endglobals
+
+native GetTriggerEventId takes nothing returns eventid
+
+native GetLearnedSkill takes nothing returns integer
+
+native GetLearnedSkillLevel takes nothing returns integer
+
+native GetLearningUnit takes nothing returns unit
+
+native SetTimeOfDayScale takes real r returns nothing
+
+native GetTimeOfDayScale takes nothing returns real
+
+native SetUnitAnimationByIndex takes unit u, integer index returns nothing

@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""Summarize the last known engine stage; never infer playable gameplay from CI."""
+import json
+import pathlib
+import re
+import sys
+
+
+def inspect(report):
+    def read(name):
+        path = report / name
+        return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+    jass, server = read("ordr-jass.log"), read("ordr-server.log")
+    client, renderer = read("ordr-client.log"), read("ordr-renderer.log")
+    frames = [int(n) for n in re.findall(r"frame=(\d+) stage=SERVER_FRAME_COMPLETE", server)]
+    draw_start = None
+    draw_max = None
+    for line in client.splitlines():
+        stamp = re.search(r"wall_ms=(\d+)", line)
+        if stamp and "stage=CL_FRAME_BEFORE_DRAW" in line:
+            draw_start = int(stamp.group(1))
+        elif stamp and "stage=CL_FRAME_AFTER_DRAW" in line and draw_start is not None:
+            elapsed = int(stamp.group(1)) - draw_start
+            if elapsed >= 0:
+                draw_max = max(draw_max or 0, elapsed)
+            draw_start = None
+    map_times = {}
+    for stage in ("R_REGISTER_MAP_ENTER", "R_REGISTER_MAP_COMPLETE"):
+        match = re.search(r"wall_since_start_ms=(\d+) stage=" + stage + r"(?:\s|$)", renderer, re.M)
+        if match:
+            map_times[stage] = int(match.group(1))
+    map_elapsed = None
+    if len(map_times) == 2:
+        map_elapsed = map_times["R_REGISTER_MAP_COMPLETE"] - map_times["R_REGISTER_MAP_ENTER"]
+    entered = re.search(r"\[EVENT_BEFORE_RESUME\].*ordinal=\d+.*function=BB4", jass)
+    finished = re.search(r"\[EVENT_AFTER_RESUME\].*ordinal=\d+.*function=BB4", jass)
+    condition_entered = re.findall(r"\[CONDITION_ENTER\s*\]\s+index=\d+\s+function=(\S+)", jass)
+    condition_completed = re.findall(r"\[CONDITION_RESULT\s*\]\s+index=\d+\s+function=(\S+)", jass)
+    runtime_errors = re.findall(r"\[RUNTIME_ERROR\s*\]\s+([^\r\n]+)", jass)
+    division_sources = re.findall(r"\[DIVIDE_SOURCE\s*\]\s+([^\r\n]+)", jass)
+    divisor_globals = re.findall(r"\[DIVISOR_GLOBAL\s*\]\s+([^\r\n]+)", jass)
+    divisor_values = re.findall(r"\[DIVISOR_VALUE\s*\]\s+([^\r\n]+)", jass)
+    divisor_operands = re.findall(r"\[DIVISOR_OPERANDS\s*\]\s+([^\r\n]+)", jass)
+    background_stage_changes = re.findall(
+        r"\[CHOICE_BACKGROUND_VISIBILITY\s*\]\s+([^\r\n]+)", jass)
+    probe_requests = re.findall(
+        r"stage=SIM_CHOICE_SELECT_QUEUED unit=(\d+) raw=(u00[0-9A-C]) step=(\d+)",
+        client)
+    command_ids = set(re.findall(
+        r"\[CHOICE_SELECT_COMMAND\s*\][^\r\n]*\bunit=(\d+)", jass))
+    accepted_ids = set(re.findall(
+        r"\[CHOICE_USER_SELECTION\s*\][^\r\n]*\bunit=(\d+)[^\r\n]*\bqueued=1\b",
+        jass))
+    verified_requests = [item for item in probe_requests
+                         if item[0] in command_ids and item[0] in accepted_ids]
+    choice_actions = re.findall(
+        r"\[FLOW_ENTER\s*\]\s+function=(CUK|CUL|CUM)\b", jass)
+    blocked_taps = re.findall(
+        r"stage=SIM_CHOICE_TAP_BLOCKED raw=(u00[0-9A-C]) step=(\d+)",
+        client)
+    probe_states = re.findall(
+        r"stage=SIM_CHOICE_PROBE_STATE ([^\r\n]+)", client)
+    wisp_selects = re.findall(
+        r"stage=SIM_WISP_SELECT_QUEUED unit=(\d+) raw=(?:e0IX|e0HP) input=finger", client)
+    wisp_moves = re.findall(
+        r"stage=SIM_WISP_MOVE_QUEUED unit=(\d+) target=\([-\d.]+,[-\d.]+\) input=two_finger", client)
+    wisp_server_selects = set(re.findall(
+        r"\[ORDR_WORLD_SELECT_COMMAND\s*\][^\r\n]*\bunit=(\d+)[^\r\n]*\bcan_select=1\b", jass))
+    wisp_server_moves = set(re.findall(
+        r"\[ORDR_WORLD_SMART_COMMAND\s*\][^\r\n]*\bmode=(?:point|target)\b[^\r\n]*\bissued=1\b[^\r\n]*\bunit=(\d+)\b", jass))
+    # Compare the selected wisp's position immediately before and after the
+    # queued order, not two points from before the requested movement.
+    latest_pre_move_position = {}
+    movement_start_position = {}
+    observed_movement = set()
+    attempted_moves = set()
+    for line in client.splitlines():
+        position = re.search(r"stage=SIM_WISP_POSITION unit=(\d+) pos=\(([-\d.]+),([-\d.]+)\)", line)
+        movement = re.search(r"stage=SIM_WISP_MOVE_QUEUED unit=(\d+)\b", line)
+        if movement:
+            unit = movement.group(1)
+            attempted_moves.add(unit)
+            if unit in latest_pre_move_position:
+                movement_start_position[unit] = latest_pre_move_position[unit]
+        elif position:
+            unit, x, y = position.groups()
+            point = (float(x), float(y))
+            if unit not in attempted_moves:
+                latest_pre_move_position[unit] = point
+            elif unit in movement_start_position:
+                start = movement_start_position[unit]
+                if (point[0] - start[0]) ** 2 + (point[1] - start[1]) ** 2 > 16.0:
+                    observed_movement.add(unit)
+    # Do not credit unrelated units' movement or reject/undelivered orders.
+    moved_wisps = set()
+    for unit in set(wisp_moves) & set(wisp_selects) & wisp_server_selects & wisp_server_moves:
+        if unit in observed_movement:
+            moved_wisps.add(unit)
+    # Attack animation is only a start signal. Track whether a hit reaches
+    # T_Damage and actually mutates enemy HP, and why earlier gates reject it.
+    attack_windups = re.findall(r"\[ORDR_ATTACK_WINDUP_(?:MELEE|RANGED)\s*\]", jass)
+    attack_hit_attempts = re.findall(r"\[ORDR_ATTACK_HIT_ATTEMPT\s*\]", jass)
+    attack_hp_applied = re.findall(
+        r"\[ORDR_ATTACK_HEALTH_(?:APPLIED|LETHAL)\s*\][^\r\n]*\btarget_owner=6\b", jass)
+    attack_block_reasons = re.findall(r"\[(ORDR_ATTACK_BLOCKED_[A-Z_]+)\s*\]", jass)
+    projectiles_stalled = re.findall(r"\[ORDR_PROJECTILE_STALLED\s*\]", jass)
+    # An accepted order is not movement. Compare position samples for the
+    # same enemy entity across distinct game-time checkpoints.
+    enemy_order_accepts = re.findall(
+        r"\[ORDR_SCRIPT_POINT_ORDER\s*\][^\r\n]*\bowner=6\b[^\r\n]*\baccepted=1\b",
+        jass)
+    wave_spawn_enter = re.findall(r"\[ORDR_WAVE_SPAWN_ENTER\s*\]", jass)
+    wave_death_queued = re.findall(
+        r"\[ORDR_WAVE_DEATH_QUEUED\s*\]([^\r\n]*)", jass)
+    wave_death_dispatch = re.findall(
+        r"\[ORDR_WAVE_DEATH_DISPATCH\s*\]([^\r\n]*)", jass)
+    enemy_positions = {}
+    for timestamp, unit, x, y in re.findall(
+        r"^(\d+) ms\s+\[ORDR_ENEMY_MOVEMENT\s*\]\s+unit=(\d+)\b[^\r\n]*?"
+        r"\bpos=\(([-\d.]+),([-\d.]+)\)", jass, re.M):
+        enemy_positions.setdefault(unit, []).append(
+            (int(timestamp), float(x), float(y)))
+    moving_enemies, repeated_enemies = [], []
+    for unit, samples in enemy_positions.items():
+        if len({sample[0] for sample in samples}) < 2:
+            continue
+        repeated_enemies.append(unit)
+        start = samples[0]
+        if any((x - start[1]) ** 2 + (y - start[2]) ** 2 > 16.0
+               for _, x, y in samples[1:]):
+            moving_enemies.append(unit)
+
+    # UI-generated finger taps and actual server command consumption must
+    # match in entity id and command; a green simulator job is not enough.
+    building_selected = set(re.findall(
+        r"stage=SIM_BUILDING_SELECT_QUEUED unit=(\d+)\b[^\r\n]*\binput=finger", client))
+    building_server_selected = set(re.findall(
+        r"\[ORDR_BUILDING_SELECTION\s*\]\s+unit=(\d+)\b", jass))
+    button_requests = re.findall(
+        r"stage=SIM_BUILDING_BUTTON_QUEUED unit=(\d+) command=(button|upgrade|research) (\S+) input=finger", client)
+    server_buttons = set(re.findall(
+        r"\[ORDR_BUILDING_BUTTON\s*\]\s+building=(\d+)\b[^\r\n]*\bbutton=(\S+)", jass))
+    server_actions = set(re.findall(
+        r"\[ORDR_BUILDING_ACTION\s*\]\s+building=(\d+) kind=(upgrade|research) button=(\S+)", jass))
+    verified_buttons = []
+    for unit, kind, code in button_requests:
+        if unit not in building_selected or unit not in building_server_selected:
+            continue
+        if (kind == "button" and (unit, code) in server_buttons) or (
+                kind != "button" and (unit, kind, code) in server_actions):
+            verified_buttons.append((unit, kind, code))
+    background_audits = re.findall(
+        r"\[CHOICE_BACKGROUND_AUDIT\s*\]\s+B100_instances=(\d+) visible=(\d+) model_indices=(\d+)",
+        jass)
+    # The first few server-frame checkpoints are a diagnostic sample, not proof
+    # that the server stopped running after that frame.
+    jass_times = [int(n) for n in re.findall(r"^(\d+) ms\s+\[", jass, re.M)]
+    choice_creates = re.findall(r"\[CHOICE_CREATE\s*\][^\r\n]*\bcreated=1\b", jass)
+    choice_selectables = re.findall(r"\[CHOICE_MODEL_AUDIT\s*\][^\r\n]*\bselectable=1\b", jass)
+    choice_render = re.findall(r"\[CHOICE_RENDER_AUDIT\s*\][^\r\n]*", jass)
+    choice_camera = "CHOICE_CAMERA_APPLIED" in jass
+    if entered and not finished and "CUX_CONDITION_AFTER" in jass:
+        status = "bb4_resume_unfinished"
+    elif entered and finished:
+        # A VM error marks the coroutine done, but its JASS condition/action never completed.
+        between = jass[entered.end():finished.start()]
+        status = "bb4_resume_aborted_runtime_error" if "[RUNTIME_ERROR" in between else "bb4_resume_completed"
+    else:
+        status = "insufficient_evidence"
+    return {
+        "jass_status": status,
+        "last_condition_entered": condition_entered[-1] if condition_entered else None,
+        "last_condition_completed": condition_completed[-1] if condition_completed else None,
+        "last_jass_runtime_error": runtime_errors[-1][:128] if runtime_errors else None,
+        "last_division_source": division_sources[-1][:360] if division_sources else None,
+        "recent_divisor_global_states": [entry[:160] for entry in divisor_globals[-4:]],
+        "recent_divisor_values": [entry[:160] for entry in divisor_values[-4:]],
+        "recent_divisor_operands": [entry[:160] for entry in divisor_operands[-4:]],
+        "choice_background_visibility_changes":
+            [entry[:180] for entry in background_stage_changes[-6:]],
+        "choice_background_hidden_in_gameplay":
+            any("hidden=1 choice_stage=0" in entry for entry in background_stage_changes),
+        "last_completed_game_frame": max(frames) if frames else None,
+        "last_observed_jass_ms": max(jass_times) if jass_times else None,
+        "choice_units_created": len(choice_creates),
+        "choice_selectable_models": len(choice_selectables),
+        "choice_camera_applied": choice_camera,
+        "choice_render_audit_present": bool(choice_render),
+        "choice_scene_setup_logged": bool(choice_creates and choice_camera and choice_render),
+        "offline_map_flag_confirmed": "ORDR_OFFLINE_CONFIRMED" in jass,
+        "simulator_choice_probe_queued": "SIM_CHOICE_SELECT_QUEUED" in client,
+        "choice_select_command_seen": "CHOICE_SELECT_COMMAND" in jass,
+        "choice_user_selection_event_seen": "CHOICE_USER_SELECTION" in jass,
+        "simulator_choice_requested": [item[1] for item in probe_requests],
+        "simulator_choice_input_type": "synthetic_sdl_finger",
+        "simulator_choice_tap_blocked": [item[0] for item in blocked_taps[-12:]],
+        "simulator_probe_latest_state": probe_states[-1][:240] if probe_states else None,
+        "simulator_probe_enabled_observed":
+            any("enabled=1" in item for item in probe_states),
+        "choice_background_original_asset_recovered":
+            "CHOICE_BACKGROUND_RECOVERED" in jass,
+        "choice_background_original_asset_missing":
+            "CHOICE_BACKGROUND_NOT_FOUND" in jass,
+        "simulator_choice_script_functions": sorted(set(choice_actions)),
+        "choice_background_instance_count":
+            int(background_audits[-1][0]) if background_audits else None,
+        "choice_background_visible_count":
+            int(background_audits[-1][1]) if background_audits else None,
+        "choice_background_model_count":
+            int(background_audits[-1][2]) if background_audits else None,
+        "simulator_choice_verified": [item[1] for item in verified_requests],
+        "simulator_choice_network_roundtrip_verified":
+            bool(probe_requests) and len(verified_requests) == len(probe_requests),
+        "simulator_choice_full_three_tap_roundtrip_verified":
+            len(probe_requests) == 3 and len(verified_requests) == 3 and
+            [request[1] for request in probe_requests] == ["u005", "u00C", "u006"],
+        "attack_windup_count": len(attack_windups),
+        "attack_hit_attempt_count": len(attack_hit_attempts),
+        "attack_enemy_hp_changed_count": len(attack_hp_applied),
+        "attack_block_reasons": sorted(set(attack_block_reasons)),
+        "attack_projectiles_stalled_count": len(projectiles_stalled),
+        "attack_damage_verified": bool(attack_hp_applied),
+        "wave_spawn_region_enter_events": len(wave_spawn_enter),
+        "wave_death_events_queued": len(wave_death_queued),
+        "wave_death_events_dispatched": len(wave_death_dispatch),
+        "wave_death_missing_count_markers": sum(
+            "marker_A901=0" in line for line in wave_death_queued),
+        "wave_death_unmatched_handlers": sum(
+            "owner_matched=0" in line for line in wave_death_dispatch),
+        "enemy_wave_sampled_units": len(enemy_positions),
+        "enemy_wave_repeatedly_sampled_units": len(repeated_enemies),
+        "enemy_wave_moving_units": sorted(moving_enemies),
+        "enemy_script_order_accepted": bool(enemy_order_accepts),
+        "enemy_movement_verified": bool(moving_enemies),
+        "enemy_movement_status": (
+            "moving_confirmed" if moving_enemies else
+            "stationary_in_samples" if repeated_enemies else
+            "no_repeat_samples" if enemy_positions else
+            "no_wave_sample"),
+        "simulator_building_selection_requested": len(building_selected),
+        "simulator_building_selection_server_seen":
+            len(building_selected & building_server_selected),
+        "simulator_building_buttons_requested": len(button_requests),
+        "simulator_building_buttons_server_seen": len(verified_buttons),
+        "simulator_building_button_roundtrip_verified": bool(verified_buttons),
+        "simulator_building_probe_blocked": re.findall(
+            r"stage=SIM_BUILDING_PROBE_BLOCKED ([^\r\n]+)", client)[-12:],
+        "simulator_wisp_selection_requested": bool(wisp_selects),
+        "simulator_wisp_selection_server_seen": bool(set(wisp_selects) & wisp_server_selects),
+        "simulator_wisp_move_requested": bool(wisp_moves),
+        "simulator_wisp_move_server_accepted":
+            bool(set(wisp_moves) & set(wisp_selects) & wisp_server_moves),
+        "simulator_wisp_position_changed": bool(moved_wisps),
+        "simulator_wisp_beacon_reward_verified": False,
+        "simulator_wisp_probe_blocked": re.findall(
+            r"stage=SIM_WISP_PROBE_BLOCKED reason=([^\s]+)", client)[-12:],
+        "game_start_jass_called": "CUM" in choice_actions,
+        "physical_touch_verified": False,
+        "client_activated": "CLIENT_ACTIVATED_LOADING_CLEARED" in client,
+        "renderer_registered": "R_REGISTER_MAP_COMPLETE" in renderer,
+        "map_registration_ms": map_elapsed,
+        "max_observed_client_draw_ms": draw_max,
+        "gameplay_verified": False,
+    }
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: check_simulator_runtime.py <simulator-report-directory>")
+    print(json.dumps(inspect(pathlib.Path(sys.argv[1])), indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

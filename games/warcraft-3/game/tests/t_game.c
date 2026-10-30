@@ -127,6 +127,7 @@ static bool portrait_capture_root_widescreen;
 static bool portrait_capture_child_relative;
 static bool portrait_capture_text_relative;
 static char portrait_capture_animation[32];
+static uint32_t portrait_capture_static_icons;
 
 static void portrait_test_write(pfWriteType_t type, void const *data) {
     uiFrame_t const *frame;
@@ -147,6 +148,8 @@ static void portrait_test_write(pfWriteType_t type, void const *data) {
             frame->parent == 0 &&
             frame->points.x[FPP_MIN].relativeTo == 0 &&
             frame->points.y[FPP_MIN].relativeTo == 0;
+    } else if (frame->flags.type == FT_TEXTURE && frame->tex.index) {
+        portrait_capture_static_icons++;
     } else if (frame->flags.type == FT_STRING &&
                (frame->stat == UI_STAT_SELECTION_HEALTH_TEXT ||
                 frame->stat == UI_STAT_SELECTION_MANA_TEXT)) {
@@ -1991,6 +1994,44 @@ TEST(wc3_game, selected_unit_portrait_follows_confirmed_playback) {
     gi.unicast = old_unicast;
     gi.FontIndex = old_font;
     T_STREQ(portrait_capture_animation, "Portrait");
+}
+
+TEST(wc3_game, model_less_custom_unit_portrait_uses_authored_icon) {
+    void (*old_write)(pfWriteType_t, void const *) = gi.Write;
+    void (*old_unicast)(edict_t *) = gi.unicast;
+    gameClient_t *client = &game.clients[0];
+    edict_t *player = &g_edicts[0];
+    edict_t *unit;
+    UnitProfile_t *profile;
+    cstring_t previous_art;
+
+    reset_entities();
+    setup_test_world();
+    player->client = client;
+    client->connected = true;
+    client->ps.number = 0;
+    unit = alloc_test_unit(MAKEFOURCC('h','f','o','o'), 0, 0);
+    unit->svflags |= SVF_MONSTER;
+    unit->s.player = 0;
+    unit->s.model = 0; /* A valid choice/helper unit with no portrait model. */
+    profile = (UnitProfile_t *)G_UnitProfile(unit->class_id);
+    /* The compact fixture intentionally omits the optional UnitProfile row.
+     * Install its authored icon temporarily, as a custom map override would. */
+    previous_art = profile->art;
+    profile->art = "ReplaceableTextures\\CommandButtons\\BTNMove.blp";
+    G_SelectEntity(client, unit);
+
+    portrait_capture_static_icons = 0;
+    portrait_capture_count = 0;
+    gi.Write = portrait_test_write;
+    gi.unicast = selection_test_unicast;
+    UI_WriteSelectedPortraitLayer(player);
+    gi.Write = old_write;
+    gi.unicast = old_unicast;
+    profile->art = previous_art;
+
+    T_EQ(portrait_capture_count, 0);
+    T_EQ(portrait_capture_static_icons, 1);
 }
 
 TEST(wc3_game, response_cleanup_runs_from_server_frame_scheduler) {

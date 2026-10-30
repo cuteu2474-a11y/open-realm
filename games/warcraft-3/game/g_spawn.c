@@ -21,7 +21,7 @@ static bool G_LoadMapUnitData(void) {
 static bool G_MapObjectCreatedByMapScript(uint32_t id) {
     if (id == MAKEFOURCC('s', 'l', 'o', 'c') || G_Doodad(id)->id || G_DestructableData(id)->file)
         return false;
-    return G_UnitUI(id)->modelFile || G_ItemData(id)->file;
+    return G_UnitBalance(id)->id || G_UnitUI(id)->modelFile || G_ItemData(id)->file;
 }
 
 static char *G_Orc07SkipScriptSpace(char *cursor, char *end) {
@@ -97,9 +97,88 @@ unsupported:
     return false;
 }
 
+/* ORDR 2.323[C] single-player practice shortcut.
+ *
+ * The original CUM() is the authoritative difficulty commit. It normally
+ * requires a clicked selection unit and trigger-player context, which the
+ * iPad's non-rendering selection scene cannot provide. Instead of faking
+ * click events or reimplementing difficulty balance in C, copy precisely
+ * CUM's post-validation JASS body into one map-local timer callback and
+ * preselect NL (Nightmare) and th[tn] (Isekai). This retains CT9, research,
+ * resources, modifiers, timers, cinematic transitions and LB dispatch.
+ *
+ * Input is never changed; jass_dobuffer mutates its own allocated output.
+ * The production gate below checks the exact map script size and signatures.
+ */
+static char *G_ORDRAutoNightmareScript(cstring_t script, bool exact_map) {
+    static cstring_t const cum_header = "function CUM takes nothing returns nothing\n";
+    static cstring_t const cun_header = "function CUN takes nothing returns nothing\n";
+    static cstring_t const commit_start = "\ncall CT9()\n";
+    static cstring_t const commit_end = "\nendfunction";
+    static cstring_t const insert_after =
+        "set tP=CUF($75303036,880,-375,250)\n"
+        "call SetUnitAnimation(tP,\"Stand\")\n";
+    static cstring_t const schedule =
+        "call TimerStart(BHs(0),.25,false,function ORDR_AutoNightmareIsekai)\n";
+    static cstring_t const helper_start =
+        "\nfunction ORDR_AutoNightmareIsekai takes nothing returns nothing\n"
+        "local integer EK=0\n"
+        "call BHu(GetExpiredTimer())\n"
+        "if tU then\n"
+        "return\n"
+        "endif\n"
+        "set NE=NL\n"
+        "set th[tl]=false\n"
+        "set th[tn]=true\n"
+        "set th[tp]=false\n";
+    static cstring_t const helper_end = "\nendfunction\n";
+    cstring_t cum, cun, core, cum_end, spot, cun_end;
+    char *out, *w;
+    size_t source_bytes, first_bytes, last_bytes, core_bytes, capacity;
+
+    if (!script || !strstr(script, "function CUO takes") ||
+        !strstr(script, "function CUW takes") ||
+        strstr(script, "function ORDR_AutoNightmareIsekai takes"))
+        return NULL;
+    source_bytes = strlen(script);
+    if (exact_map && source_bytes != 2503677u) return NULL;
+    cum = strstr(script, cum_header);
+    cun = strstr(script, cun_header);
+    if (!cum || !cun || !(cum < cun)) return NULL;
+    cum_end = strstr(cum, commit_end);
+    core = strstr(cum, commit_start);
+    cun_end = strstr(cun, commit_end);
+    spot = strstr(cun, insert_after);
+    if (!cum_end || !core || core >= cum_end ||
+        !cun_end || !spot || spot >= cun_end) return NULL;
+    core++; /* exclude the newline before "call CT9()" */
+    spot += strlen(insert_after);
+    first_bytes = (size_t)(spot - script);
+    last_bytes = source_bytes - first_bytes;
+    core_bytes = (size_t)(cum_end - core);
+    capacity = source_bytes + strlen(schedule) + strlen(helper_start) +
+               core_bytes + strlen(helper_end) + 1;
+    out = gi.MemAlloc(capacity);
+    if (!out) return NULL;
+    w = out;
+#define ORDR_COPY(SRC, LEN) do { memcpy(w, (SRC), (LEN)); w += (LEN); } while (0)
+    ORDR_COPY(script, first_bytes);
+    ORDR_COPY(schedule, strlen(schedule));
+    ORDR_COPY(spot, last_bytes);
+    ORDR_COPY(helper_start, strlen(helper_start));
+    ORDR_COPY(core, core_bytes);
+    ORDR_COPY(helper_end, strlen(helper_end));
+#undef ORDR_COPY
+    *w = '\0';
+    return out;
+}
+
 #ifdef BZ_TESTS
 bool G_TestMapObjectCreatedByMapScript(uint32_t id) { return G_MapObjectCreatedByMapScript(id); }
 bool G_TestFixOrc07BridgeRestoreScript(char *script) { return G_FixOrc07BridgeRestoreScript(script); }
+char *G_TestORDRAutoNightmareScript(cstring_t script) {
+    return G_ORDRAutoNightmareScript(script, false);
+}
 #endif
 
 static void G_JassCoroutineTrace(jass_t *vm, handle_t coroutine, handle_t trigger_handle,
@@ -598,6 +677,115 @@ void G_FillMapPlacedUnitMana(edict_t *ent) {
     ent->mana.value = ent->mana.max_value;
 }
 
+/* ORDR's original neutral choice backdrop is a custom B100 map object.
+ * On older maps its custom object row sometimes reaches SP_CallSpawn with no
+ * resolved modelFile/DestructableData.file, leaving an in-use, visible edict
+ * with s.model=0. Only recover the original imported MDX file when it
+ * actually exists; never substitute a fabricated texture or edit map data.
+ * This exception is scoped to the exact ORDR map and scenery class. */
+static bool SP_IsORDRChoiceBackgroundType(uint32_t class_id) {
+    /* Preserve both Warcraft rawcode representations used by imported
+     * object data and decoded map entities. */
+    return class_id == MAKEFOURCC('B','1','0','0') || class_id == 0x42313030u;
+}
+
+static bool SP_IsORDRChoiceBackground(uint32_t class_id, cstring_t map) {
+    return SP_IsORDRChoiceBackgroundType(class_id) &&
+           map && strstr(map, "ORDR_S2_2.323") != NULL;
+}
+
+/* Restore only the map-authored B100 original imported background MDX.
+ * Some map object setups have a live visible B100 edict but no registered
+ * model, after an incomplete W3B row or early empty "map" cvar.
+ * Never synthesize artwork or alter the game script. */
+static bool SP_RestoreORDRChoiceBackgroundModel(edict_t *edict, bool confirmed_ordr) {
+    static cstring_t const imports[] = {
+        "war3mapImported\\Background.mdx",
+        "Background.mdx",
+    };
+    cstring_t map;
+    PATHSTR authored = {0};
+    cstring_t paths[3];
+    size_t count = 0;
+
+    if (!edict || edict->s.model || !SP_IsORDRChoiceBackgroundType(edict->class_id))
+        return false;
+    map = gi.CvarString("map", "");
+    if (!confirmed_ordr && !SP_IsORDRChoiceBackground(edict->class_id, map))
+        return false;
+
+    /* A model path from the original map's object row has priority. */
+    if (edict->data.DestructableData && edict->data.DestructableData->file &&
+        *edict->data.DestructableData->file) {
+        SP_DestructableModelFilename(edict->data.DestructableData,
+                                    edict->variation, authored, sizeof(authored));
+        if (*authored) paths[count++] = authored;
+    }
+    FOR_LOOP(i, sizeof(imports) / sizeof(imports[0]))
+        paths[count++] = imports[i];
+
+    FOR_LOOP(i, count) {
+        uint32_t size = 0;
+        uint8_t *data = gi.ReadFile(paths[i], &size);
+        bool valid = data && size >= 4 && !memcmp(data, "MDLX", 4);
+        if (data) gi.MemFree(data);
+        if (!valid) continue;
+        int model = G_RegisterModel(paths[i]);
+        if (model <= 0) continue;
+        edict->s.model = model;
+        edict->svflags &= ~SVF_NOCLIENT;
+        edict->svflags |= SVF_STATIC_SCENERY;
+        edict->s.flags |= EF_NOT_SELECTABLE;
+        /* Initial spawn links after SP_CallSpawn returns; only an in-game
+         * recovery must notify the server broad phase immediately. */
+        if (confirmed_ordr) gi.LinkEntity(edict);
+        if (level.vm) {
+            char detail[192];
+            snprintf(detail, sizeof(detail),
+                     "entity=%u B100 model=%u original_import=%s",
+                     (unsigned)edict->s.number,
+                     (unsigned)model, paths[i]);
+            jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_RECOVERED", detail);
+        }
+        return true;
+    }
+    if (level.vm) {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "entity=%u B100 model=0 paths_tried=%u authored_row=%u",
+                 (unsigned)edict->s.number, (unsigned)count,
+                 (unsigned)(authored[0] != 0));
+        jass_ordr_log_event(level.vm, "CHOICE_BACKGROUND_NOT_FOUND", detail);
+    }
+    return false;
+}
+
+/* After the original JASS callbacks have registered we can identify ORDR
+ * even if the map name cvar was empty at object creation. */
+void G_RestoreORDRChoiceBackdropAfterScript(void) {
+    if (!level.vm) return;
+    FOR_LOOP(i, globals.num_edicts) {
+        edict_t *ent = &g_edicts[i];
+        if (!ent->inuse || !SP_IsORDRChoiceBackgroundType(ent->class_id) ||
+            ent->s.model) continue;
+        (void)SP_RestoreORDRChoiceBackgroundModel(ent, true);
+    }
+}
+
+#ifdef BZ_TESTS
+TEST(wc3_spawn, ordr_choice_backdrop_fallback_is_map_scoped) {
+    T_ASSERT(SP_IsORDRChoiceBackgroundType(0x42313030u));
+    T_ASSERT(!SP_IsORDRChoiceBackgroundType(MAKEFOURCC('B','1','0','1')));
+    T_ASSERT(SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'),
+                                       "Maps\\ORDR_S2_2.323[C].w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'),
+                                        "Maps\\Other.w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','1'),
+                                        "Maps\\ORDR_S2_2.323[C].w3x"));
+    T_ASSERT(!SP_IsORDRChoiceBackground(MAKEFOURCC('B','1','0','0'), NULL));
+}
+#endif
+
 void SP_CallSpawn(edict_t *edict) {
     if (!edict->class_id)
         return;
@@ -608,7 +796,11 @@ void SP_CallSpawn(edict_t *edict) {
     } else if (edict->data.DestructableData->file) {
         SP_SpawnDestructable(edict);
         SP_monster_tree(edict);
-    } else if (edict->data.UnitUI->modelFile) {
+    } else if (edict->data.UnitBalance->id || edict->data.UnitUI->modelFile) {
+        /* A sparse custom UnitUI row can intentionally omit the model path.
+         * The authoritative UnitBalance id still denotes a unit: skipping
+         * SP_SpawnUnit left it without EF_UNIT/SVF_MONSTER, so neither point
+         * orders nor enter-region triggers (such as wisp beacons) worked. */
         SP_SpawnUnit(edict);
         SP_monster_unit(edict);
     } else if (edict->data.ItemData->file) {
@@ -624,6 +816,7 @@ void SP_CallSpawn(edict_t *edict) {
             fprintf(stderr, "Warning: Invalid map object ID %.4s\n", (char const *)&edict->class_id);
         }
     }
+    (void)SP_RestoreORDRChoiceBackgroundModel(edict, false);
 //    for (struct spawn *s = spawns; s->func; s++) {
 //        if (*((int const *)s->name) == edict->class_id) {
 //            s->func(edict);
@@ -851,6 +1044,7 @@ void G_SpawnEntities(void) {
     G_FowShutdown();
     G_BlightShutdown();
     memset(&level, 0, sizeof(level));
+    level.timeofday.scale = 1.0f;
     G_ResetSelectionSoundState();
     G_CommandErrorReset();
     G_ResetHeroPassiveCaches();
@@ -953,8 +1147,40 @@ void G_SpawnEntities(void) {
 //    jass_dofilenative(level.vm, "/Users/igor/Desktop/war3map.j");
     G_DumpPrologue02BurrowHandoffSource(level.mapinfo->mapscript);
     if (level.mapinfo->mapscript) {
+        bool parsed;
+        char detail[256];
+        size_t const bytes = strlen(level.mapinfo->mapscript);
+        bool const ordr = strstr(level.mapinfo->mapscript, "function CUO") &&
+                          strstr(level.mapinfo->mapscript, "function CUW");
         G_FixOrc07BridgeRestoreScript(level.mapinfo->mapscript);
-        jass_dobuffer(level.vm, level.mapinfo->mapscript);
+        /* Normal gameplay uses the map's original clickable difficulty,
+         * mode and start buttons. Retain the old Nightmare+Isekai shortcut
+         * strictly as an explicit diagnostic opt-in (wc3_ordr_autostart=1);
+         * otherwise it silently commits a difficulty before the user taps. */
+        char *auto_script = NULL;
+        cstring_t auto_opt = gi.CvarString
+            ? gi.CvarString("wc3_ordr_autostart", "0") : "0";
+        if (ordr && G_IsSinglePlayer() && auto_opt && atoi(auto_opt) != 0)
+            auto_script = G_ORDRAutoNightmareScript(level.mapinfo->mapscript, true);
+        parsed = jass_dobuffer(level.vm,
+                               auto_script ? auto_script : level.mapinfo->mapscript);
+        snprintf(detail, sizeof(detail),
+                 "script_bytes=%u parse_ok=%u config=%u main=%u CUO=%u CUW=%u error=%.80s",
+                 (unsigned)bytes, (unsigned)parsed,
+                 (unsigned)jass_hasfunction(level.vm, "config"),
+                 (unsigned)jass_hasfunction(level.vm, "main"),
+                 (unsigned)jass_hasfunction(level.vm, "CUO"),
+                 (unsigned)jass_hasfunction(level.vm, "CUW"),
+                 jass_rterror_pending(level.vm) ? jass_rterror_message(level.vm) : "none");
+        if (ordr) {
+            fprintf(stderr, "ORDR-PARSE: %s\n", detail);
+            jass_ordr_log_event(level.vm, "MAP_PARSE", detail);
+            jass_ordr_log_event(level.vm, "AUTO_NIGHTMARE_ISEKAI",
+                auto_script ? (parsed ? "patch=applied mode=nightmare+isekai timer=250ms" :
+                               "patch=applied but script failed to parse") :
+                              "patch=disabled or map source does not match");
+        }
+        if (auto_script) gi.MemFree(auto_script);
     } else
         fprintf(stderr, "G_SpawnEntities: missing mapscript; skipping jass_dobuffer\n");
     gi.LoadingFrame();

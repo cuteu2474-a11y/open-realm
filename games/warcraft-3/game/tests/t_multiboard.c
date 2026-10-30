@@ -77,6 +77,8 @@ static int32_t mb_text_layers[MB_MAX_TEXTS];
 static uint32_t mb_text_count;
 static uint32_t mb_unicast_count;
 static edict_t *mb_unicast_target;
+static float mb_first_panel_y;
+static bool mb_first_panel_seen;
 
 static void mb_reset_capture(void) {
     memset(mb_layout_layers, 0, sizeof(mb_layout_layers));
@@ -86,6 +88,8 @@ static void mb_reset_capture(void) {
     mb_layout_count = mb_text_count = mb_unicast_count = 0;
     mb_layer_pending = false;
     mb_unicast_target = NULL;
+    mb_first_panel_seen = false;
+    mb_first_panel_y = 0.0f;
 }
 
 static void mb_capture_write(pfWriteType_t type, void const *data) {
@@ -103,6 +107,11 @@ static void mb_capture_write(pfWriteType_t type, void const *data) {
     if (type == PF_UIFRAME && data && mb_layout_count && mb_layout_count <= MB_MAX_LAYOUTS) {
         uiFrame_t const *frame = data;
         mb_layout_frames[mb_layout_count - 1]++;
+        if (!mb_first_panel_seen && mb_layout_layers[mb_layout_count - 1] == WC3_LAYER_MULTIBOARD &&
+            frame->flags.type == FT_BACKDROP) {
+            mb_first_panel_y = -(float)frame->points.y[FPP_MIN].offset / UI_FRAMEPOINT_SCALE;
+            mb_first_panel_seen = true;
+        }
         if (frame->flags.type == FT_STRING && frame->text && mb_text_count < MB_MAX_TEXTS) {
             mb_text_layers[mb_text_count] = mb_layout_layers[mb_layout_count - 1];
             snprintf(mb_texts[mb_text_count++], sizeof(mb_texts[0]), "%s", frame->text);
@@ -171,6 +180,35 @@ TEST(wc3_multiboard, team_resources_layer_is_distinct_from_command_error_layer) 
     T_NE(WC3_LAYER_MULTIBOARD, WC3_LAYER_LEADERBOARD);
     T_NE(WC3_LAYER_MULTIBOARD, WC3_LAYER_TIMERDIALOG);
     T_ASSERT(WC3_LAYER_MULTIBOARD < MAX_LAYOUT_LAYERS);
+}
+
+/* ORDR's custom top-right countdown is authored with Dz frames rather than
+ * a TimerDialog handle. It must not share the scripted scoreboard's top row. */
+TEST(wc3_multiboard, ordr_scoreboard_reserves_custom_countdown_strip) {
+    edict_t *viewer = &g_edicts[0];
+    multiboard_t *board;
+    mbCaptureSaved_t saved;
+
+    setup_test_world();
+    G_SetClientConnected(viewer, true);
+    board = G_AllocMultiboard();
+    T_NOT_NULL(board);
+    board->rows = board->cols = 1;
+    G_SetMultiboardDisplayed(board, &viewer->client->ps, true);
+    saved = mb_install_capture();
+
+    UI_WriteMultiboard(viewer);
+    T_ASSERT(mb_first_panel_seen);
+    T_FEQ(mb_first_panel_y, 0.040f, 1.5f / UI_FRAMEPOINT_SCALE);
+
+    strlcpy(level.map_path, "Maps/ORDR_S2_2.323[C].w3x", sizeof(level.map_path));
+    mb_reset_capture();
+    UI_WriteMultiboard(viewer);
+    T_ASSERT(mb_first_panel_seen);
+    T_FEQ(mb_first_panel_y, 0.075f, 1.5f / UI_FRAMEPOINT_SCALE);
+
+    mb_restore_capture(saved);
+    G_FreeMultiboard(board);
 }
 
 static bool mb_gold_text_seen(gameClient_t const *owner) {

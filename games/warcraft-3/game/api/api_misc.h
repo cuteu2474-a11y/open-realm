@@ -343,7 +343,11 @@ uint32_t TimerStart(jass_t *j) {
     bool periodic = jass_checkboolean(j, 3);
     /* Warcraft accepts null to start/reset a timer without an expiration callback. */
     jassFunc_t const *handlerFunc = jass_toboolean(j, 4) ? jass_checkcode(j, 4) : NULL;
+    bool ordr_initial_timer = handlerFunc && jass_functionname(handlerFunc) &&
+        !strcmp(jass_functionname(handlerFunc), "CUW") && level.vm;
+    if (ordr_initial_timer) jass_ordr_log_event(level.vm, "CUW_TIMER_NATIVE_BEFORE", "TimerStart invoked");
     if (whichTimer) G_TimerStart(whichTimer, (uint32_t)(MAX(0.0f, timeout) * 1000.0f), periodic, handlerFunc);
+    if (ordr_initial_timer) jass_ordr_log_event(level.vm, "CUW_TIMER_NATIVE_AFTER", "TimerStart returned");
     return 0;
 }
 uint32_t TimerGetElapsed(jass_t *j) {
@@ -558,7 +562,9 @@ uint32_t DestroyBoolExpr(jass_t *j) {
     return 0;
 }
 uint32_t GetEventGameState(jass_t *j) {
-    return jass_pushnullhandle(j, "gamestate");
+    /* TriggerRegisterGameStateEvent publishes the registration's enum
+     * value through the coroutine-local eventValue, not an ephemeral global. */
+    return JassPushEnumHandle(j, "gamestate", jass_getcontext(j)->eventValue);
 }
 uint32_t GetWinningPlayer(jass_t *j) {
     return jass_pushnullhandle(j, "player");
@@ -585,10 +591,10 @@ uint32_t GetLearningUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
 }
 uint32_t GetLearnedSkill(jass_t *j) {
-    return jass_pushinteger(j, 0);
+    return jass_pushinteger(j, jass_getcontext(j)->learned_level ? jass_getcontext(j)->eventValue : 0);
 }
 uint32_t GetLearnedSkillLevel(jass_t *j) {
-    return jass_pushinteger(j, 0);
+    return jass_pushinteger(j, jass_getcontext(j)->learned_level);
 }
 uint32_t GetRevivableUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
@@ -737,16 +743,21 @@ uint32_t GetSpellTargetLoc(jass_t *j) {
     return 1;
 }
 uint32_t GetEventPlayerState(jass_t *j) {
-    return jass_pushnullhandle(j, "playerstate");
+    /* WC3 player-state limit events carry the triggering state in the
+     * coroutine's existing eventValue context. No transient native-global
+     * variable is needed: suspended JASS triggers retain the correct state. */
+    return JassPushPlayerStateHandle(j, jass_getcontext(j)->eventValue);
 }
 uint32_t GetEventPlayerChatString(jass_t *j) {
-    return jass_pushstring(j, 0);
+    return jass_pushstring(j, jass_getcontext(j)->chat_text);
 }
 uint32_t GetEventPlayerChatStringMatched(jass_t *j) {
-    return jass_pushstring(j, 0);
+    return jass_pushstring(j, jass_getcontext(j)->chat_matched);
 }
 uint32_t GetEventUnitState(jass_t *j) {
-    return jass_pushnullhandle(j, "unitstate");
+    /* TriggerRegisterUnitStateEvent shares the game-state transition
+     * event machinery and receives the original UNIT_STATE_* enum. */
+    return JassPushUnitStateHandle(j, jass_getcontext(j)->eventValue);
 }
 uint32_t GetEventDamage(jass_t *j) {
     return jass_pushnumber(j, (float)jass_getcontext(j)->eventValue);
@@ -764,11 +775,40 @@ uint32_t GetSellingUnit(jass_t *j) {
 uint32_t GetBuyingUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->source, "unit");
 }
+/* A sell event can be queued alongside other purchases. Read its own sold
+ * entity number rather than a mutable global "last sold unit". A legacy
+ * direct TriggerExecute call outside a sale event still uses that global. */
+static edict_t *G_EventSoldEntity(jass_t *j, bool item) {
+    jassContext_t const *ctx = jass_getcontext(j);
+    uint32_t id;
+    if (!ctx) return item ? eventsolditem : eventsoldunit;
+    bool const sale_event = item
+        ? (ctx->event_id == EVENT_UNIT_SELL_ITEM + 1 ||
+           ctx->event_id == EVENT_PLAYER_UNIT_SELL_ITEM + 1)
+        : (ctx->event_id == EVENT_UNIT_SELL + 1 ||
+           ctx->event_id == EVENT_PLAYER_UNIT_SELL + 1);
+    if (!sale_event) {
+        if (!item && (ctx->event_id == EVENT_PLAYER_UNIT_SELL + 1 || ctx->event_id == EVENT_UNIT_SELL + 1))
+            fprintf(stderr, "WC3_SELL_CTX_UNEXPECTED id=%u value=%d\n", ctx->event_id, ctx->eventValue);
+        return item ? eventsolditem : eventsoldunit;
+    }
+    if (!item) {
+        static uint32_t inspected;
+        if (inspected++ < 48)
+            fprintf(stderr, "WC3_SELL_GET_SOLD_UNIT event=%u value=%d count=%u\n",
+                    ctx->event_id, ctx->eventValue, (unsigned)globals.num_edicts);
+    }
+    if (ctx->eventValue <= 0) return NULL;
+    id = (uint32_t)ctx->eventValue;
+    if (id >= globals.num_edicts) return NULL;
+    edict_t *ent = &globals.edicts[id];
+    return ent->inuse && !G_IsDeferredFree(ent) ? ent : NULL;
+}
 uint32_t GetSoldUnit(jass_t *j) {
-    return jass_pushlighthandle(j, eventsoldunit, "unit");
+    return jass_pushlighthandle(j, G_EventSoldEntity(j, false), "unit");
 }
 uint32_t GetSoldItem(jass_t *j) {
-    return jass_pushlighthandle(j, eventsolditem, "item");
+    return jass_pushlighthandle(j, G_EventSoldEntity(j, true), "item");
 }
 uint32_t StringLength(jass_t *j) {
     cstring_t s = jass_checkstring(j, 1);
@@ -790,7 +830,10 @@ uint32_t StringCase(jass_t *j) {
     return jass_pushstring(j, buf);
 }
 uint32_t GetEventDetectingPlayer(jass_t *j) {
-    return jass_pushnullhandle(j, "player");
+    jassContext_t const *context = jass_getcontext(j);
+    return context && context->playerState ?
+        jass_pushlighthandle(j, context->playerState, "player") :
+        jass_pushnullhandle(j, "player");
 }
 uint32_t GetEventTargetUnit(jass_t *j) {
     return jass_pushlighthandle(j, jass_getcontext(j)->unit, "unit");
@@ -897,9 +940,31 @@ uint32_t SetAllyColorFilterState(jass_t *j) {
 uint32_t GetCreepCampFilterState(jass_t *j) { (void)j; return jass_pushboolean(j, creep_camp_filter_state); }
 uint32_t SetCreepCampFilterState(jass_t *j) { creep_camp_filter_state = jass_checkboolean(j, 1); return 0; }
 uint32_t EnableMinimapFilterButtons(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnableDragSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnablePreSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
-uint32_t EnableSelect(jass_t *j) { (void)jass_checkboolean(j, 1); (void)jass_checkboolean(j, 2); return 0; }
+/* WC3 selection natives control real input policy, not just a visual hint.
+ * The second UI-feedback parameter is not a substitute for input gating. */
+static void WC3_SetSelectionGate(uint8_t gates[MAX_PLAYERS], bool enable) {
+    if (currentplayer && PLAYER_NUM(currentplayer) < MAX_PLAYERS)
+        gates[PLAYER_NUM(currentplayer)] = !enable;
+    else FOR_LOOP(i, MAX_PLAYERS) gates[i] = !enable;
+}
+uint32_t EnableDragSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.drag_selection_disabled, enable);
+    return 0;
+}
+uint32_t EnablePreSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.preselection_disabled, enable);
+    return 0;
+}
+uint32_t EnableSelect(jass_t *j) {
+    bool enable = jass_checkboolean(j, 1);
+    (void)jass_checkboolean(j, 2);
+    WC3_SetSelectionGate(level.selection_disabled, enable);
+    return 0;
+}
 uint32_t SetReservedLocalHeroButtons(jass_t *j) { (void)jass_checkinteger(j, 1); return 0; }
 uint32_t CopySaveGame(jass_t *j) {
     cstring_t source = jass_checkstring(j, 1);
@@ -928,9 +993,58 @@ uint32_t IsPointBlighted(jass_t *j) {
     vec2_t point = { jass_checknumber(j, 1), jass_checknumber(j, 2) };
     return jass_pushboolean(j, G_IsPointBlighted(&point));
 }
+/* JASS pathingtype is an enum, NOT the raw byte mask stored by the WPM.
+ * Warcraft WPM bits: 0x02 unwalkable, 0x04 unflyable, 0x08 unbuildable,
+ * 0x10 unharvestable, 0x20 blighted, 0x40 unswimmable.
+ * Avoid returning 'true' on impassable cells; it wrongly enables move
+ * decisions and spawn/build placement in authored map triggers. */
+static bool WC3_TerrainPathTypeAllows(uint32_t type, uint8_t flags) {
+    switch (type) {
+        case 0: return !(flags & (0x02u | 0x04u | 0x08u | 0x40u)); /* ANY */
+        case 1: return !(flags & CM_PATHING_UNWALKABLE);             /* WALKABILITY */
+        case 2: return !(flags & CM_PATHING_UNFLYABLE);               /* FLYABILITY */
+        case 3: return !(flags & 0x08u);                              /* BUILDABILITY */
+        case 4: return !(flags & 0x10u);                              /* PEONHARVESTPATHING */
+        case 5: return (flags & 0x20u) != 0;                          /* BLIGHTPATHING */
+        case 6: return !(flags & CM_PATHING_UNSWIMMABLE);             /* FLOATABILITY */
+        case 7: return !(flags & (CM_PATHING_UNWALKABLE |
+                                 CM_PATHING_UNSWIMMABLE));           /* AMPHIBIOUSPATHING */
+        default: return false;
+    }
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_terrain, original_wpm_pathability_uses_enum_not_mask_index) {
+    T_ASSERT(WC3_TerrainPathTypeAllows(1, 0));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(1, CM_PATHING_UNWALKABLE));
+    T_ASSERT(WC3_TerrainPathTypeAllows(2, CM_PATHING_UNWALKABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(2, CM_PATHING_UNFLYABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(3, 0x08u));
+    T_ASSERT(WC3_TerrainPathTypeAllows(5, WC3_PATH_BLIGHTED));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(6, CM_PATHING_UNSWIMMABLE));
+    T_ASSERT(!WC3_TerrainPathTypeAllows(0, CM_PATHING_UNWALKABLE));
+}
+#endif
+
 uint32_t IsTerrainPathable(jass_t *j) {
-    (void)jass_checknumber(j, 1); (void)jass_checknumber(j, 2); (void)jass_checkhandle(j, 3, "pathingtype");
-    return jass_pushboolean(j, true);
+    vec2_t point = { jass_checknumber(j, 1), jass_checknumber(j, 2) };
+    uint32_t const *pathingtype = jass_checkhandle(j, 3, "pathingtype");
+    uint8_t flags = 0;
+    bool allowed;
+    if (!pathingtype) return jass_pushboolean(j, false);
+    if (CM_GetPathingFlagsAt(&point, &flags))
+        allowed = WC3_TerrainPathTypeAllows(*pathingtype, flags);
+    else {
+        /* Fall back to geometric terrain sampling only when no original WPM
+         * byte grid is mounted. Do not fabricate build/harvest/blight flags. */
+        switch (*pathingtype) {
+            case 1: allowed = CM_TerrainPointIsWalkable(&point); break;
+            case 6: allowed = CM_TerrainPointIsSwimmable(&point); break;
+            default: allowed = false; break;
+        }
+    }
+    return jass_pushboolean(j, allowed);
 }
 uint32_t SetTerrainPathable(jass_t *j) {
     (void)jass_checknumber(j, 1); (void)jass_checknumber(j, 2); (void)jass_checkhandle(j, 3, "pathingtype");
@@ -1257,55 +1371,126 @@ uint32_t GetRandomReal(jass_t *j) {
     float t = (float)rand() / (float)RAND_MAX;
     return jass_pushnumber(j, lowBound + t * (highBound - lowBound));
 }
-uint32_t CreateUnitPool(jass_t *j) {
-    return jass_pushnullhandle(j, "unitpool");
+/* Weighted pools are native JASS handles. Keep their entries in the game's
+ * VM allocator, and select by the authored weights rather than uniformly. */
+typedef struct {
+    uint32_t id;
+    float weight;
+} ordr_pool_entry_t;
+typedef struct {
+    bool destroyed;
+    int count;
+    ordr_pool_entry_t entries[512];
+} ordr_weighted_pool_t;
+static ordr_weighted_pool_t *ordr_pool_new(jass_t *j,const char *type){
+    ordr_weighted_pool_t *pool=jass_newhandle(j,sizeof(*pool),type);
+    if(pool)memset(pool,0,sizeof(*pool));
+    return pool;
 }
-uint32_t DestroyUnitPool(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
+static void ordr_pool_add(ordr_weighted_pool_t *pool,uint32_t id,float weight){
+    if(!pool||pool->destroyed||!id||!(weight>0.0f)||weight>100000000.0f)return;
+    for(int i=0;i<pool->count;i++)if(pool->entries[i].id==id){
+        pool->entries[i].weight=weight;return;
+    }
+    if(pool->count>=512)return;
+    pool->entries[pool->count++]=(ordr_pool_entry_t){id,weight};
+}
+static void ordr_pool_remove(ordr_weighted_pool_t *pool,uint32_t id){
+    if(!pool||pool->destroyed)return;
+    for(int i=0;i<pool->count;i++)if(pool->entries[i].id==id){
+        memmove(&pool->entries[i],&pool->entries[i+1],
+                (size_t)(pool->count-i-1)*sizeof(pool->entries[0]));
+        pool->count--;return;
+    }
+}
+static uint32_t ordr_pool_choose(ordr_weighted_pool_t *pool){
+    if(!pool||pool->destroyed)return 0;
+    double total=0;
+    for(int i=0;i<pool->count;i++)total+=pool->entries[i].weight;
+    if(total<=0)return 0;
+    double t=(double)rand()/((double)RAND_MAX+1.0)*total;
+    for(int i=0;i<pool->count;i++){
+        t-=pool->entries[i].weight;
+        if(t<0)return pool->entries[i].id;
+    }
+    return pool->count?pool->entries[pool->count-1].id:0;
+}
+uint32_t CreateUnitPool(jass_t *j){
+    /* ordr_pool_new() calls jass_newhandle(), which already pushes the handle.
+     * A second push left two values on the JASS stack and corrupted arguments. */
+    ordr_pool_new(j,"unitpool");
+    return 1;
+}
+uint32_t DestroyUnitPool(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    if(pool){pool->destroyed=true;pool->count=0;}
     return 0;
 }
-uint32_t UnitPoolAddUnitType(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //int32_t unitId = jass_checkinteger(j, 2);
-    //float weight = jass_checknumber(j, 3);
+uint32_t UnitPoolAddUnitType(jass_t *j){
+    static unsigned trace_count;
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    float weight=jass_checknumber(j,3);
+    if (trace_count < 16) {
+        char detail[160];
+        snprintf(detail,sizeof(detail),"entry call=%u pool=%p id=%u weight=%g count=%d",
+                 trace_count,(void *)pool,(unsigned)id,(double)weight,pool ? pool->count : -1);
+        jass_ordr_log_event(j,"UNITPOOL_ENTER",detail);
+    }
+    ordr_pool_add(pool,id,weight);
+    if (trace_count < 16) {
+        char detail[120];
+        snprintf(detail,sizeof(detail),"return call=%u count=%d",
+                 trace_count,pool ? pool->count : -1);
+        jass_ordr_log_event(j,"UNITPOOL_RETURN",detail);
+    }
+    trace_count++;
     return 0;
 }
-uint32_t UnitPoolRemoveUnitType(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //int32_t unitId = jass_checkinteger(j, 2);
+uint32_t UnitPoolRemoveUnitType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    ordr_pool_remove(pool,id);return 0;
+}
+uint32_t PlaceRandomUnit(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"unitpool");
+    player_t *owner=jass_checkhandle(j,2,"player");
+    vec2_t location=MAKE(vec2_t,jass_checknumber(j,3),jass_checknumber(j,4));
+    float facing=jass_checknumber(j,5);
+    uint32_t id=ordr_pool_choose(pool);
+    if(!owner||!id)return jass_pushnullhandle(j,"unit");
+    edict_t *unit=unit_create(PLAYER_NUM(owner),id,&location,facing);
+    return jass_pushlighthandle(j,unit,"unit");
+}
+uint32_t CreateItemPool(jass_t *j){
+    /* ordr_pool_new() calls jass_newhandle(), which already pushes the handle.
+     * A second push left two values on the JASS stack and corrupted arguments. */
+    ordr_pool_new(j,"itempool");
+    return 1;
+}
+uint32_t DestroyItemPool(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    if(pool){pool->destroyed=true;pool->count=0;}
     return 0;
 }
-uint32_t PlaceRandomUnit(jass_t *j) {
-    //handle_t whichPool = jass_checkhandle(j, 1, "unitpool");
-    //mapPlayer_t *forWhichPlayer = jass_checkhandle(j, 2, "player");
-    //float x = jass_checknumber(j, 3);
-    //float y = jass_checknumber(j, 4);
-    //float facing = jass_checknumber(j, 5);
-    return jass_pushnullhandle(j, "unit");
+uint32_t ItemPoolAddItemType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    float weight=jass_checknumber(j,3);
+    ordr_pool_add(pool,id,weight);return 0;
 }
-uint32_t CreateItemPool(jass_t *j) {
-    return jass_pushnullhandle(j, "itempool");
+uint32_t ItemPoolRemoveItemType(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    uint32_t id=(uint32_t)jass_checkinteger(j,2);
+    ordr_pool_remove(pool,id);return 0;
 }
-uint32_t DestroyItemPool(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    return 0;
-}
-uint32_t ItemPoolAddItemType(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //int32_t itemId = jass_checkinteger(j, 2);
-    //float weight = jass_checknumber(j, 3);
-    return 0;
-}
-uint32_t ItemPoolRemoveItemType(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //int32_t itemId = jass_checkinteger(j, 2);
-    return 0;
-}
-uint32_t PlaceRandomItem(jass_t *j) {
-    //handle_t whichItemPool = jass_checkhandle(j, 1, "itempool");
-    //float x = jass_checknumber(j, 2);
-    //float y = jass_checknumber(j, 3);
-    return jass_pushnullhandle(j, "item");
+uint32_t PlaceRandomItem(jass_t *j){
+    ordr_weighted_pool_t *pool=jass_checkhandle(j,1,"itempool");
+    float x=jass_checknumber(j,2),y=jass_checknumber(j,3);
+    uint32_t id=ordr_pool_choose(pool);
+    if(!id||!G_ItemData(id))return jass_pushnullhandle(j,"item");
+    edict_t *item=SP_SpawnAtLocation((int32_t)id,0,&MAKE(vec2_t,x,y));
+    return jass_pushlighthandle(j,item,"item");
 }
 uint32_t ChooseRandomCreep(jass_t *j) {
     //int32_t level = jass_checkinteger(j, 1);
@@ -1472,10 +1657,13 @@ uint32_t SetTerrainFogEx(jass_t *j) {
     return 0;
 }
 uint32_t SetWaterBaseColor(jass_t *j) {
-    //int32_t red = jass_checkinteger(j, 1);
-    //int32_t green = jass_checkinteger(j, 2);
-    //int32_t blue = jass_checkinteger(j, 3);
-    //int32_t alpha = jass_checkinteger(j, 4);
+    int red = MAX(0, MIN(255, jass_checkinteger(j, 1)));
+    int green = MAX(0, MIN(255, jass_checkinteger(j, 2)));
+    int blue = MAX(0, MIN(255, jass_checkinteger(j, 3)));
+    int alpha = MAX(0, MIN(255, jass_checkinteger(j, 4)));
+    char value[48];
+    snprintf(value, sizeof(value), "%d %d %d %d", red, green, blue, alpha);
+    if (gi.configstring) gi.configstring(CS_WC3_WATER_RGBA, value);
     return 0;
 }
 uint32_t SetWaterDeforms(jass_t *j) {
@@ -1541,11 +1729,12 @@ uint32_t SetFalseTimeOfDay(jass_t *j) {
     return 0;
 }
 uint32_t SetTimeOfDayScale(jass_t *j) {
-    //float r = jass_checknumber(j, 1);
+    float scale = jass_checknumber(j, 1);
+    if (isfinite(scale) && scale >= 0.0f) level.timeofday.scale = scale;
     return 0;
 }
 uint32_t GetTimeOfDayScale(jass_t *j) {
-    return jass_pushnumber(j, 0);
+    return jass_pushnumber(j, level.timeofday.scale);
 }
 uint32_t ShowInterface(jass_t *j) {
     bool flag = jass_checkboolean(j, 1);
@@ -1621,7 +1810,8 @@ uint32_t SetAltMinimapIcon(jass_t *j) {
     return 0;
 }
 uint32_t EnableOcclusion(jass_t *j) {
-    //bool flag = jass_checkboolean(j, 1);
+    bool enabled = jass_checkboolean(j, 1);
+    if (gi.configstring) gi.configstring(CS_WC3_OCCLUSION, enabled ? "1" : "0");
     return 0;
 }
 uint32_t SetIntroShotText(jass_t *j) {
@@ -1833,7 +2023,10 @@ uint32_t ForceCinematicSubtitles(jass_t *j) {
     return 0;
 }
 uint32_t NewSoundEnvironment(jass_t *j) {
-    //cstring_t environmentName = jass_checkstring(j, 1);
+    /* The renderer owns DSP; the game publishes the exact map-authored
+     * environment name and the client selects the corresponding preset. */
+    cstring_t environment = jass_checkstring(j, 1);
+    if (gi.configstring) gi.configstring(CS_WC3_SOUND_ENV, environment ? environment : "");
     return 0;
 }
 uint32_t SetDoodadAnimation(jass_t *j) {
@@ -1862,7 +2055,46 @@ uint32_t SetDoodadAnimationRect(jass_t *j) {
     return 0;
 }
 uint32_t Cheat(jass_t *j) {
-    //cstring_t cheatStr = jass_checkstring(j, 1);
+    cstring_t cheatStr = jass_checkstring(j, 1);
+    static cstring_t const resourceCheat = "greedisgood";
+    cstring_t amountText;
+    int32_t amount = 500;
+    gameClient_t *client;
+
+    /* Warcraft III's single-player GreedIsGood cheat is used by ORDR's
+     * original BJK -> BJJ initialization as an *offline detection probe*.
+     * BJJ checks whether gold/lumber changed, clears those resources and
+     * sets the map's Lw online flag accordingly. With Cheat() stubbed, the
+     * probe always said "online" even in a local game. Keep the engine's
+     * multiplayer untouched and let the map make its own determination. */
+    if (!cheatStr || strncasecmp(cheatStr, resourceCheat, strlen(resourceCheat)))
+        return 0;
+    amountText = cheatStr + strlen(resourceCheat);
+    if (*amountText && !isspace((unsigned char)*amountText)) return 0;
+    while (isspace((unsigned char)*amountText)) amountText++;
+    if (*amountText) {
+        char *end;
+        long parsed = strtol(amountText, &end, 10);
+        while (isspace((unsigned char)*end)) end++;
+        if (end == amountText || *end || parsed <= 0) return 0;
+        amount = (int32_t)MIN(parsed, USHRT_MAX);
+    }
+    if (!G_IsSinglePlayer()) return 0;
+    client = G_SinglePlayerLocalClient();
+    if (!client || !client->connected || !client->mapplayer ||
+        client->mapplayer->playerType != kPlayerTypeHuman) return 0;
+
+    for (int resource = PLAYERSTATE_RESOURCE_GOLD;
+         resource <= PLAYERSTATE_RESOURCE_LUMBER; resource++) {
+        uint16_t const before = client->ps.stats[resource];
+        uint16_t const after = (uint16_t)MIN((int32_t)before + amount, USHRT_MAX);
+        client->ps.stats[resource] = after;
+        G_JassPlayerStateChanged(client->ps.number, resource, before, after);
+    }
+    if (level.vm && (strstr(level.map_path, "ORDR_S2_") ||
+                     strstr(level.map_path, "ordr_s2_")))
+        jass_ordr_log_event(level.vm, "ORDR_SINGLEPLAYER_PROBE",
+                            "GreedIsGood resource detection applied to local player");
     return 0;
 }
 uint32_t IsNoVictoryCheat(jass_t *j) {

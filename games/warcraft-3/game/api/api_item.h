@@ -26,8 +26,10 @@ uint32_t RemoveItem(jass_t *j) {
     return 0;
 }
 uint32_t GetItemPlayer(jass_t *j) {
-    //handle_t whichItem = jass_checkhandle(j, 1, "item");
-    return jass_pushnullhandle(j, "player");
+    edict_t *item=jass_checkhandle(j,1,"item");
+    player_t *owner=item&&G_IsItem(item)&&item->s.player<MAX_PLAYERS?
+        G_GetPlayerByNumber(item->s.player):NULL;
+    return jass_pushlighthandle(j,owner,"player");
 }
 uint32_t GetItemTypeId(jass_t *j) {
     edict_t *item = jass_checkhandle(j, 1, "item");
@@ -125,7 +127,9 @@ uint32_t GetManipulatedItem(jass_t *j) {
     return item && G_IsItem(item) ? jass_pushlighthandle(j, item, "item") : jass_pushnullhandle(j, "item");
 }
 uint32_t GetOrderTargetItem(jass_t *j) {
-    return jass_pushnullhandle(j, "item");
+    edict_t *target=jass_getcontext(j)->source;
+    return target&&G_IsItem(target)?
+        jass_pushlighthandle(j,target,"item"):jass_pushnullhandle(j,"item");
 }
 uint32_t GetEnumItem(jass_t *j) {
     extern edict_t *currentenumitem;
@@ -185,11 +189,42 @@ uint32_t IsItemOwned(jass_t *j) {
     edict_t *whichItem = jass_checkhandle(j, 1, "item");
     return jass_pushboolean(j, whichItem && whichItem->item->carrier && !whichItem->item->in_world);
 }
+/* The item instance can own map-overridden catalog data; consult that row
+ * first and fall back to the type catalog for older/spawned instances. */
+static ItemData_t const *item_data_for_script_item(edict_t *item) {
+    if (!item || !G_IsItem(item)) return NULL;
+    return item->data.ItemData ? item->data.ItemData : G_ItemData(item->class_id);
+}
 uint32_t IsItemPowerup(jass_t *j) {
-    edict_t *whichItem = jass_checkhandle(j, 1, "item");
-    ItemData_t const *data = whichItem ? whichItem->data.ItemData : NULL;
-    if (!data && whichItem) data = G_ItemData(whichItem->class_id);
+    ItemData_t const *data = item_data_for_script_item(jass_checkhandle(j, 1, "item"));
     return jass_pushboolean(j, data && data->powerup);
+}
+/* Type queries read the effective ItemData catalog, never an instance's
+ * SetItemPawnable override. Absent rawcodes are false, not truthy defaults. */
+uint32_t IsItemIdPowerup(jass_t *j) {
+    ItemData_t const *data = G_ItemData((uint32_t)jass_checkinteger(j, 1));
+    return jass_pushboolean(j, data && data->powerup);
+}
+uint32_t IsItemIdSellable(jass_t *j) {
+    ItemData_t const *data = G_ItemData((uint32_t)jass_checkinteger(j, 1));
+    return jass_pushboolean(j, data && data->sellable);
+}
+uint32_t IsItemIdPawnable(jass_t *j) {
+    ItemData_t const *data = G_ItemData((uint32_t)jass_checkinteger(j, 1));
+    return jass_pushboolean(j, data && data->pawnable);
+}
+/* Instance queries use the resolved map overlay and respect explicit pawn
+ * overrides, the same policy as G_ShopPawnItem's authoritative sale path. */
+uint32_t IsItemSellable(jass_t *j) {
+    ItemData_t const *data = item_data_for_script_item(jass_checkhandle(j, 1, "item"));
+    return jass_pushboolean(j, data && data->sellable);
+}
+uint32_t IsItemPawnable(jass_t *j) {
+    edict_t *item = jass_checkhandle(j, 1, "item");
+    ItemData_t const *data = item_data_for_script_item(item);
+    bool pawnable = data && data->pawnable;
+    if (data && item->item->pawnable_set) pawnable = item->item->pawnable;
+    return jass_pushboolean(j, pawnable);
 }
 uint32_t SetItemPawnable(jass_t *j) {
     edict_t *whichItem = jass_checkhandle(j, 1, "item");

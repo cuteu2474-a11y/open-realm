@@ -1,3 +1,5 @@
+> **ORDR iPad development:** For the active single-player port, see [current handoff and P0/P1 tasks](ordr-native-handoff.md). Historical feature documents are references, not current ORDR playability claims.
+
 # Warcraft III
 
 This is the main game target for OpenWarcraft3. It is the most complete path in the tree, and the place where the engine is being shaped into a playable RTS rather than only a viewer.

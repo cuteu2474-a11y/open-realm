@@ -16,6 +16,23 @@ static struct {
 static bool world_loaded = false;
 static bool begin_sent = false;
 
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+extern void CL_ORDRTrace(cstring_t stage);
+#else
+/* The SC2/Warcraft unity test includes both parsers in one translation unit.
+ * Use a no-op macro so no duplicate static or missing linked trace symbol. */
+#ifndef CL_ORDRTrace
+#define CL_ORDRTrace(stage) ((void)(stage))
+#endif
+#endif
+static unsigned ordr_prep_seen;
+static void CL_ORDRPrepTrace(unsigned bit, cstring_t stage) {
+    if (!(ordr_prep_seen & (1u << bit))) {
+        ordr_prep_seen |= 1u << bit;
+        CL_ORDRTrace(stage);
+    }
+}
+
 /* Optional CS_MODELS indices become handles here. Games that do not publish
  * CS_TERRAIN_LIGHT_MODEL / CS_ENTITY_LIGHT_MODEL leave the slots empty. */
 static model_t const *V_ConfigLightModel(uint32_t configstring) {
@@ -174,6 +191,25 @@ static void Matrix4_getPreviewLightMatrix(vec3_t const *sunangles, vec3_t const 
     Matrix4_multiply(&proj, &view, output);
 }
 
+/* A top-down Warcraft camera can point directly along the world-up vector.
+ * Matrix4_lookAt cannot build a valid basis from parallel direction/up axes;
+ * retaining the Euler camera's own screen-up vector at the pole keeps the
+ * authored yaw and the difficulty selection scene upright. At ordinary
+ * orbit pitches the familiar world-Z up convention remains unchanged. */
+static vec3_t CL_CameraSafeWorldUp(vec3_t const *direction, mat4_t const *euler_view) {
+    vec3_t const world_up = { 0, 0, 1 };
+    float const length_sq = Vector3_lengthsq(direction);
+    float const horizontal_sq = direction->x * direction->x + direction->y * direction->y;
+    if (length_sq > 0.0f && horizontal_sq <= 0.03f * length_sq) {
+        mat4_t inverse;
+        Matrix4_inverse(euler_view, &inverse);
+        vec3_t up = { inverse.v[4], inverse.v[5], inverse.v[6] };
+        if (Vector3_lengthsq(&up) > 0.01f)
+            return up;
+    }
+    return world_up;
+}
+
 void Matrix4_getCameraMatrix(mat4_t *output) {
     if (!world_loaded) {
         Matrix4_identity(output);
@@ -224,7 +260,8 @@ void Matrix4_getCameraMatrix(mat4_t *output) {
     } else if (distance > 0.0f && CL_GameCameraUsesWorldUp()) {
         /* Some game cameras orbit a target and require a world-up basis to keep low shots upright. */
         vec3_t direction = Vector3_sub(&origin, &cl.viewDef.camerastate[0].eye);
-        Matrix4_lookAt(&view, &cl.viewDef.camerastate[0].eye, &direction, &(vec3_t){0, 0, 1});
+        vec3_t const up = CL_CameraSafeWorldUp(&direction, &view);
+        Matrix4_lookAt(&view, &cl.viewDef.camerastate[0].eye, &direction, &up);
     }
     Matrix4_multiply(&proj, &view, output);
 }
@@ -252,6 +289,9 @@ static void V_AddClientEntity(centity_t const *ent) {
     /* model is a uint16_t and MAX_MODELS bounds the configstring lookup. */
     re.origin = Vector3_lerp(&ent->prev.origin, &ent->current.origin, cl.viewDef.lerpfrac);
     re.angle = LerpRotation(ent->prev.angle, ent->current.angle, cl.viewDef.lerpfrac);
+#ifndef WOW
+    re.look_at_packed = ent->current.look_at_packed;
+#endif
 #ifdef WOW
     re.rotation = Vector3_lerp(&ent->prev.rotation, &ent->current.rotation, cl.viewDef.lerpfrac);
 #endif
@@ -553,7 +593,12 @@ static void CL_AddEntities(void) {
 }
 
 void CL_PrepRefresh(void) {
-    if (!cl.precache_ready || !cl.layout[LAYER_LOADING]) return;
+    CL_ORDRPrepTrace(0, "PREP_REFRESH_ENTER");
+    if (!cl.precache_ready || !cl.layout[LAYER_LOADING]) {
+        CL_ORDRPrepTrace(1, "PREP_GATE_WAITING_FOR_ASSETS_OR_LAYOUT");
+        return;
+    }
+    CL_ORDRPrepTrace(2, "PREP_READY_GATE_PASSED");
     if (!*cl.configstrings[CS_WORLD]) {
         world_loaded = false;
         begin_sent = false;
@@ -566,7 +611,10 @@ void CL_PrepRefresh(void) {
         if (!CM_IsMapLoaded(cl.configstrings[CS_WORLD])) {
             CM_LoadMap(cl.configstrings[CS_WORLD], CL_LoadingFrame);
         }
+        CL_ORDRPrepTrace(3, "PREP_BEFORE_REGISTER_MAP");
         re.RegisterMap(cl.configstrings[CS_WORLD]);
+        CL_ORDRPrepTrace(4, "PREP_AFTER_REGISTER_MAP");
+        CL_ApplyWorldPresentationConfig();
         world_loaded = true;
     }
     CL_LoadingStage(0.40f);
@@ -601,6 +649,7 @@ void CL_PrepRefresh(void) {
         CL_RegisterConfigString(CS_MODELS + i);
     }
     CL_RegisterConfigString(CS_ORDER_MARKER);
+    CL_ORDRPrepTrace(5, "PREP_AFTER_MODEL_REGISTRATION");
     CL_LoadingStage(0.60f);
 
     for (uint32_t i = 1; i < MAX_IMAGES; i++) {
@@ -608,6 +657,7 @@ void CL_PrepRefresh(void) {
             continue;
         CL_RegisterConfigString(CS_IMAGES + i);
     }
+    CL_ORDRPrepTrace(6, "PREP_AFTER_IMAGE_REGISTRATION");
     CL_LoadingStage(0.75f);
 
     if (register_sounds)
@@ -620,10 +670,13 @@ void CL_PrepRefresh(void) {
             continue;
         CL_RegisterConfigString(CS_FONTS + i);
     }
+    CL_ORDRPrepTrace(7, "PREP_AFTER_FONT_REGISTRATION");
     CL_LoadingStage(0.94f);
 
     if (world_loaded && !begin_sent) {
+        CL_ORDRPrepTrace(8, "PREP_BEFORE_SEND_BEGIN");
         CL_SendBegin();
+        CL_ORDRPrepTrace(9, "PREP_AFTER_SEND_BEGIN");
         begin_sent = true;
     }
     CL_LoadingStage(0.98f);
@@ -632,7 +685,10 @@ void CL_PrepRefresh(void) {
         S_EndRegistration();
         cl.refresh_prepped = true;
     }
-    if (cl.refresh_prepped) CL_LoadingStage(1.0f);
+    if (cl.refresh_prepped) {
+        CL_LoadingStage(1.0f);
+        CL_ORDRPrepTrace(10, "PREP_COMPLETE");
+    }
 }
 
 void V_RenderView(void) {
@@ -829,6 +885,21 @@ TEST(client_camera, server_view_offsets_interpolate_onto_target_and_eye) {
     T_FEQ(cl.viewDef.camerastate[0].eye.y, steady_eye.y - 2.0f, 0.01f);
     T_FEQ(cl.viewDef.camerastate[0].eye.z, steady_eye.z, 0.01f);
     cl.viewDef = saved; re = api; world_loaded = loaded;
+}
+
+/* At a Warcraft top-down camera angle, the world-up vector is parallel
+ * to the view direction; the fallback must remain perpendicular and finite. */
+TEST(client_camera, top_down_world_up_avoids_degenerate_basis) {
+    mat4_t euler_view;
+    Matrix4_identity(&euler_view);
+    vec3_t direction = { 0, 0, -1 };
+    vec3_t up = CL_CameraSafeWorldUp(&direction, &euler_view);
+    T_FEQ(up.x, 0.0f, 0.001f);
+    T_FEQ(up.y, 1.0f, 0.001f);
+    T_FEQ(up.z, 0.0f, 0.001f);
+    direction = (vec3_t){ 0, -1, -1 };
+    up = CL_CameraSafeWorldUp(&direction, &euler_view);
+    T_FEQ(up.z, 1.0f, 0.001f);
 }
 
 /* Sky and particles consume the same interpolated eye used to build the final view. */

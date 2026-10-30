@@ -26,6 +26,9 @@
 #include "sound/s_local.h"
 #include "common/server_api.h"
 #include "common/online.h"
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
 #ifdef BZ_TESTS
 #include "shared/test.h"
 #endif
@@ -49,6 +52,41 @@ static uint32_t cl_realtime = 0;
 static uint32_t cl_connect_started, cl_connect_retry;
 
 uint32_t CL_RealTime(void) { return cl_realtime; }
+
+/* Private ORDR-only iPad progress probes. Do not log player names, map bytes,
+ * arbitrary file paths, network contents or credentials. The app Documents
+ * directory is copied by the private simulator workflow, never to the repo. */
+void CL_ORDRTrace(cstring_t stage) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    static FILE *file;
+    static bool open_attempted;
+    static unsigned lines;
+    cstring_t map = Cvar_String("map", "");
+    if (!map || !strstr(map, "ORDR_S2_2.323")) return;
+    if (!open_attempted) {
+        char filename[1024];
+        cstring_t home = getenv("HOME");
+        open_attempted = true;
+        if (home && *home &&
+            snprintf(filename, sizeof(filename), "%s/Documents/ordr-client.log", home) < (int)sizeof(filename))
+            file = fopen(filename, "w");
+        if (file) setvbuf(file, NULL, _IOLBF, 0);
+    }
+    if (!file || lines++ >= 2400) return;
+    fprintf(file,
+            "wall_ms=%u client_ms=%u stage=%s state=%d ui=%u ready=%d precache=%d loading_layout=%d world_cs=%d plaque=%d progress=%.2f\n",
+            (unsigned)SDL_GetTicks(), (unsigned)cl_realtime, stage ? stage : "(none)", (int)cls.state,
+            (unsigned)cl.playerstate.client_ui_state, (int)cl.refresh_prepped,
+            (int)cl.precache_ready, cl.layout[LAYER_LOADING] != NULL,
+            cl.configstrings[CS_WORLD][0] != '\0', cls.disable_screen != 0,
+            (double)cl.loading_progress);
+    fflush(file);
+#else
+    (void)stage;
+#endif
+}
+
+
 
 typedef enum {
     CL_MENU_ACTION_NONE,
@@ -567,6 +605,7 @@ void CL_BeginLoadingMap(cstring_t mapName) {
     cl.playerstate.client_ui_state = CLIENT_UI_LOADING;
     cls.state = ca_connected;
     CL_SetGameplayInput();
+    CL_ORDRTrace("LOADING_MAP_BEGIN");
     SCR_BeginLoadingPlaque();
     /* New map baselines repopulate the compact active-entity list; drop any
      * stale entries from the previous map before they arrive. */
@@ -1534,9 +1573,274 @@ static void CL_SendSoundEvents(void) {
     }
 }
 
+
+/* Simulator-only UI probe. It invokes the same SDL finger handling that
+ * a normal iPad tap invokes (in cl_input.c), rather than bypassing UI input
+ * by inserting a network select command directly. The map still decides
+ * which selection, mode and game-start actions are valid. */
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+bool CL_ORDRSimulatorTapChoice(uint32_t number);
+bool CL_ORDRSimulatorTapWisp(uint32_t number);
+bool CL_ORDRSimulatorTapBeacon(void);
+bool CL_ORDRSimulatorTapBuilding(uint32_t number);
+bool CL_ORDRSimulatorTapBuildingButton(char *command, size_t capacity);
+
+static bool CL_ORDRSimulatorRawMatch(uint32_t actual, uint32_t wanted) {
+    if (actual == wanted) return true;
+    return (((actual & 0xffu) << 24) | ((actual & 0xff00u) << 8) |
+            ((actual & 0xff0000u) >> 8) | (actual >> 24)) == wanted;
+}
+
+/* After the original difficulty/mode/start taps, attempt a genuine world
+ * selection and two-finger movement order. Position samples are observations,
+ * not a claim that the beacon reward or game progression works. */
+static void CL_ORDRSimulatorProbeWisp(uint32_t now) {
+    static uint32_t selected_wisp, selected_at, next_position, next_miss;
+    static bool move_queued;
+    static cstring_t wisp_kind = "e0IX";
+    viewDef_t const *view = &cl.viewDef;
+    renderEntity_t const *wisp = NULL;
+    if (now < 970000u || !view->entities ||
+        cls.netchan.message.cursize + 128 >= cls.netchan.message.maxsize)
+        return;
+
+    if (selected_wisp) {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (ent->number == selected_wisp) { wisp = ent; break; }
+        }
+    } else {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+                ent->owner != view->player || !(ent->flags & RF_UNIT) ||
+                (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)))
+                continue;
+            uint32_t const raw = cl.ents[ent->number].current.class_id;
+            if (CL_ORDRSimulatorRawMatch(raw, MAKEFOURCC('e','0','I','X')))
+                wisp_kind = "e0IX";
+            else if (CL_ORDRSimulatorRawMatch(raw, MAKEFOURCC('e','0','H','P')))
+                wisp_kind = "e0HP";
+            else continue;
+            wisp = ent;
+            break;
+        }
+        if (wisp && CL_ORDRSimulatorTapWisp(wisp->number)) {
+            char trace[160];
+            selected_wisp = wisp->number;
+            selected_at = now;
+            next_position = now;
+            snprintf(trace, sizeof(trace),
+                     "SIM_WISP_SELECT_QUEUED unit=%u raw=%s input=finger",
+                     (unsigned)selected_wisp, wisp_kind);
+            CL_ORDRTrace(trace);
+        }
+    }
+
+    if (selected_wisp && wisp && now >= next_position) {
+        char trace[160];
+        snprintf(trace, sizeof(trace), "SIM_WISP_POSITION unit=%u pos=(%.1f,%.1f)",
+                 (unsigned)selected_wisp, (double)wisp->origin.x,
+                 (double)wisp->origin.y);
+        CL_ORDRTrace(trace);
+        next_position = now + 20000u;
+    }
+    if (selected_wisp && !move_queued && now >= selected_at + 30000u &&
+        cl.selection.num_selected && cl.selection.entity_nums[0] == selected_wisp &&
+        CL_ORDRSimulatorTapBeacon()) {
+        char trace[180];
+        snprintf(trace, sizeof(trace),
+                 "SIM_WISP_MOVE_QUEUED unit=%u target=(-3456,-9360) input=two_finger",
+                 (unsigned)selected_wisp);
+        CL_ORDRTrace(trace);
+        move_queued = true;
+        return;
+    }
+    if (now >= next_miss && (!selected_wisp || (!move_queued && now >= selected_at + 30000u))) {
+        cstring_t reason = !wisp ? (selected_wisp ? "selected_wisp_not_rendered" : "wisp_not_visible") :
+            !selected_wisp ? "wisp_finger_hit_blocked" :
+            cl.selection.num_selected && cl.selection.entity_nums[0] == selected_wisp ?
+            "beacon_two_finger_order_blocked" : "wisp_selection_lost";
+        char trace[160];
+        snprintf(trace, sizeof(trace), "SIM_WISP_PROBE_BLOCKED reason=%s", reason);
+        CL_ORDRTrace(trace);
+        next_miss = now + 15000u;
+    }
+}
+
+/* Up to three distinct structures are selected with a real simulated finger,
+ * followed by an enabled command-card button. Missing visibility, selection,
+ * and server receipt are all recorded separately. */
+static void CL_ORDRSimulatorProbeBuildings(uint32_t now) {
+    static uint32_t visited[3], count, selected, selected_at, next_try, next_block;
+    static bool pending;
+    viewDef_t const *view = &cl.viewDef;
+    if (now < 1050000u || !view->entities ||
+        cls.netchan.message.cursize + 160 >= cls.netchan.message.maxsize) return;
+    if (pending) {
+        bool has_selection = false;
+        FOR_LOOP(i, cl.selection.num_selected)
+            if (cl.selection.entity_nums[i] == selected) has_selection = true;
+        if (has_selection && now >= selected_at + 12000u) {
+            char command[96] = { 0 }, line[220];
+            if (CL_ORDRSimulatorTapBuildingButton(command, sizeof(command))) {
+                snprintf(line, sizeof(line),
+                         "SIM_BUILDING_BUTTON_QUEUED unit=%u command=%s input=finger",
+                         (unsigned)selected, command);
+                CL_ORDRTrace(line);
+                pending = false;
+                next_try = now + 12000u;
+                return;
+            }
+        }
+        if (now >= selected_at + 32000u) {
+            char line[180];
+            snprintf(line, sizeof(line),
+                     "SIM_BUILDING_PROBE_BLOCKED unit=%u reason=%s",
+                     (unsigned)selected, has_selection
+                         ? "no_clickable_command_button" : "selection_not_retained");
+            CL_ORDRTrace(line);
+            pending = false;
+            next_try = now + 12000u;
+        }
+        return;
+    }
+    if (count >= 3 || now < next_try) return;
+    /* Prefer the two unit-based ORDR facilities from the physical-device
+     * report before the map's many ordinary buildings occupy all three slots. */
+    FOR_LOOP(pass, 2) {
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        bool seen = false;
+        if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+            !(ent->flags & RF_UNIT) ||
+            (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+            (ent->owner != view->player && ent->owner != 15u)) continue;
+        /* H0C4 (vault) and H05M are map-owned, stationary facility units.
+         * Their authored object rows do not set the WC3 building bit; the
+         * original simulator's EF_BUILDING-only filter skipped precisely
+         * these structures despite the real iPad selecting them. */
+        uint32_t const id = cl.ents[ent->number].current.class_id;
+        bool const facility =
+            CL_ORDRSimulatorRawMatch(id, MAKEFOURCC('H','0','C','4')) ||
+            CL_ORDRSimulatorRawMatch(id, MAKEFOURCC('H','0','5','M'));
+        if (!facility && !(cl.ents[ent->number].current.flags & EF_BUILDING))
+            continue;
+        if ((pass == 0 && !facility) || (pass == 1 && facility)) continue;
+        FOR_LOOP(k, count) if (visited[k] == ent->number) seen = true;
+        if (seen || !CL_ORDRSimulatorTapBuilding(ent->number)) continue;
+        selected = ent->number;
+        selected_at = now;
+        visited[count++] = selected;
+        pending = true;
+        char line[176];
+        snprintf(line, sizeof(line),
+                 "SIM_BUILDING_SELECT_QUEUED unit=%u owner=%u raw=0x%08x input=finger",
+                 (unsigned)selected, (unsigned)ent->owner,
+                 (unsigned)cl.ents[selected].current.class_id);
+        CL_ORDRTrace(line);
+        return;
+    }
+    }
+    if (now >= next_block) {
+        CL_ORDRTrace("SIM_BUILDING_PROBE_BLOCKED reason=no_visible_selectable_building");
+        next_block = now + 25000u;
+    }
+    next_try = now + 5000u;
+}
+
+static void CL_ORDRSimulatorProbeChoice(void) {
+    /* Initial screenshots at 600 s capture the untouched menu. Allow each
+     * authored selection enough client+server frames before the next tap. */
+    static uint32_t next_step;
+    static uint32_t next_miss_log;
+    static uint32_t next_state_log;
+    static uint32_t const codes[3] = {
+        MAKEFOURCC('u','0','0','5'), /* nightmare difficulty */
+        MAKEFOURCC('u','0','0','C'), /* Isekai mode */
+        MAKEFOURCC('u','0','0','6'), /* authored Start Game card */
+    };
+    static uint32_t const earliest_ms[3] = { 615000u, 710000u, 805000u };
+    static cstring_t const stage_name[3] = { "u005", "u00C", "u006" };
+    viewDef_t const *view = &cl.viewDef;
+    cstring_t map = Cvar_String("map", "");
+    uint32_t now = SDL_GetTicks();
+    cstring_t probe_env = getenv("ORDR_SIM_TEST_CHOICES");
+    bool enabled = (probe_env && !strcmp(probe_env, "1")) ||
+                   Cvar_Integer("ordr_simulator_choice_probe", 0) == 1;
+    /* A missing cvar or an unexpectedly different active UI used to silently
+     * skip all finger taps. Record the actual decision without logging paths,
+     * input text or unrelated user data. */
+    if (map && strstr(map, "ORDR_S2_2.323") && now >= 600000u &&
+        now >= next_state_log) {
+        char trace[240];
+        snprintf(trace, sizeof(trace),
+                 "SIM_CHOICE_PROBE_STATE enabled=%u step=%u state=%d key=%d ui=%u ready=%u entities=%u target=(%.0f,%.0f)",
+                 (unsigned)enabled, (unsigned)next_step, (int)cls.state,
+                 (int)cls.key_dest, (unsigned)cl.playerstate.client_ui_state,
+                 (unsigned)CL_GameplayInputReady(),
+                 (unsigned)view->num_entities,
+                 (double)view->target.x, (double)view->target.y);
+        CL_ORDRTrace(trace);
+        next_state_log = now + 20000u;
+    }
+    if (cls.state != ca_active || !enabled ||
+        !map || !strstr(map, "ORDR_S2_2.323")) return;
+    if (next_step >= 3) {
+        CL_ORDRSimulatorProbeWisp(now);
+        CL_ORDRSimulatorProbeBuildings(now);
+        return;
+    }
+    if (
+        now < earliest_ms[next_step] ||
+        !view->entities ||
+        cls.netchan.message.cursize + 64 >= cls.netchan.message.maxsize)
+        return;
+
+    if (fabsf(view->target.x + 6000.0f) < 1800.0f &&
+        fabsf(view->target.y + 8864.0f) < 1800.0f) {
+        FOR_LOOP(i, view->num_entities) {
+            renderEntity_t const *ent = &view->entities[i];
+            if (!ent->number || ent->number >= MAX_CLIENT_ENTITIES ||
+                !ent->model || ent->owner != 15u ||
+                (ent->flags & (RF_HIDDEN | RF_NOT_SELECTABLE)) ||
+                !CL_ORDRSimulatorRawMatch(cl.ents[ent->number].current.class_id,
+                                          codes[next_step]))
+                continue;
+            if (!CL_ORDRSimulatorTapChoice(ent->number)) break;
+            char trace[128];
+            snprintf(trace, sizeof(trace),
+                     "SIM_CHOICE_SELECT_QUEUED unit=%u raw=%s step=%u input=finger",
+                     (unsigned)ent->number, stage_name[next_step],
+                     (unsigned)(next_step + 1));
+            CL_ORDRTrace(trace);
+            next_step++;
+            return;
+        }
+    }
+    if (now >= next_miss_log) {
+        char trace[112];
+        snprintf(trace, sizeof(trace),
+                 "SIM_CHOICE_TAP_BLOCKED raw=%s step=%u",
+                 stage_name[next_step], (unsigned)(next_step + 1));
+        CL_ORDRTrace(trace);
+        next_miss_log = now + 15000u;
+    }
+}
+#else
+static void CL_ORDRSimulatorProbeChoice(void) {}
+#endif
+
 void CL_Frame(uint32_t msec) {
+    static uint32_t ordr_next_trace;
+    bool trace_tick;
     cl_realtime += msec;
     cl.time += msec;
+    trace_tick = cl_realtime >= ordr_next_trace;
+    if (trace_tick) {
+        ordr_next_trace = cl_realtime + 5000;
+        CL_ORDRTrace("CL_FRAME_ENTER");
+    }
 
     netadr_t online_host;
     if (Online_TakeConnection(&online_host)) {
@@ -1551,6 +1855,7 @@ void CL_Frame(uint32_t msec) {
     CL_CanvasFrame(cl_realtime);
     CL_MovieUpdate();
     CL_ReadPackets();
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_AFTER_PACKETS");
     if (cls.state == ca_connecting && cls.netchan.remote_address.type == NA_EOS) {
         if (cl_realtime - cl_connect_started > CL_TIMEOUT_MSEC) {
             CL_Disconnect("Internet host connection timed out.", true);
@@ -1564,13 +1869,16 @@ void CL_Frame(uint32_t msec) {
         ? Cvar_Value("s_volume", 1.0f) : 0.0f);
     CL_SendSoundEvents();
     CL_CheckTimeout();
+    CL_ORDRSimulatorProbeChoice();
     CL_SendCommand();
     if (cls.state == ca_connected && !cl.refresh_prepped) {
         CL_PrepRefresh();
     } else if (cls.state == ca_active) {
         CL_PrepRefresh();
     }
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_BEFORE_DRAW");
     SCR_UpdateScreen(msec);
+    if (trace_tick) CL_ORDRTrace("CL_FRAME_AFTER_DRAW");
 }
 
 #if defined(BZ_TESTS) && defined(BZ_CLIENT_WORLD)

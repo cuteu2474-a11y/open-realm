@@ -115,7 +115,7 @@ void G_RestartCorpseBoneDecayAfterCargo(edict_t *corpse) {
 static void unit_decay_flesh_think(edict_t *self) {
     /* An active corpse consumer owns the remains.  Freeze ordinary decay until
      * that reservation is released or, for Cannibalize, the corpse is consumed. */
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     unit_runwait(self, unit_begin_bone_decay);
 }
 
@@ -153,7 +153,7 @@ void unit_begin_decay(edict_t *self) {
 /* Ordinary corpses are removed. Heroes instead finish their dissipation timer,
  * become hidden/awaiting-revive, and keep the same authoritative edict. */
 void unit_decay_think(edict_t *self) {
-    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO)) return;
+    if (self->aiflags & (AI_CORPSE_RESERVED | AI_CORPSE_IN_CARGO | AI_CORPSE_DECAY_SUSPENDED)) return;
     if (G_UnitIsHero(self) && !(self->aiflags & AI_ILLUSION)) {
         if (!(self->revival && self->revival->awaiting)) unit_runwait(self, hero_become_revivable);
         return;
@@ -522,6 +522,20 @@ void unit_die(edict_t *self, edict_t *attacker) {
      * (TriggerRegisterDeathEvent/UnitEvent); EVENT_PLAYER_UNIT_DEATH fires the
      * owner's player-unit-death triggers (TriggerRegisterPlayerUnitEvent), e.g.
      * the mission win check that counts the player's dying naga. */
+    if (self->s.player == 6 && level.vm &&
+        jass_functionbyname(level.vm, "CUN")) {
+        static unsigned death_samples;
+        if (death_samples++ < 80) {
+            char detail[196];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=6 killer=%u marker_A901=%u marker_A902=%u",
+                     (unsigned)self->s.number, (unsigned)self->class_id,
+                     attacker ? (unsigned)attacker->s.number : 0,
+                     (unsigned)G_UnitAbilityLevel(self, MAKEFOURCC('A','9','0','1')),
+                     (unsigned)G_UnitAbilityLevel(self, MAKEFOURCC('A','9','0','2')));
+            jass_ordr_log_event(level.vm, "ORDR_WAVE_DEATH_QUEUED", detail);
+        }
+    }
     G_PublishEventWithSource(self, EVENT_UNIT_DEATH, attacker);
     G_PublishEventWithSource(self, EVENT_PLAYER_UNIT_DEATH, attacker);
     self->svflags |= SVF_DEADMONSTER;
@@ -1213,9 +1227,37 @@ bool unit_issuetargetorder(edict_t *self, cstring_t order, edict_t *target) {
 }
 
 bool unit_issueorder(edict_t *self, cstring_t order, vec2_t const *point) {
-    if (G_BuildingUpgradeActive(self)) return false;
-    return G_IssueUnitPointOrder(self, order, point, false,
-                                 self ? self->s.player : 0, 0.0f);
+    bool accepted = !G_BuildingUpgradeActive(self) &&
+        G_IssueUnitPointOrder(self, order, point, false,
+                              self ? self->s.player : 0, 0.0f);
+    /* ORDR's wave scripts use several JASS order natives (including groups
+     * and location variants). Trace at the common unit router so rejected
+     * creep orders cannot disappear behind an uninstrumented native. */
+    if (level.vm && jass_functionbyname(level.vm, "CUN") && self) {
+        static unsigned traced;
+        if (traced < 96) {
+            char detail[352];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u raw=0x%08x owner=%u order=%.32s accepted=%u "
+                     "from=(%.0f,%.0f) to=(%.0f,%.0f) hp=%.0f/%.0f "
+                     "speed=%.0f ai=0x%x paused=%u structure=%u upgrading=%u move=%s",
+                     (unsigned)self->s.number, (unsigned)self->class_id,
+                     (unsigned)self->s.player, order ? order : "(null)",
+                     (unsigned)accepted,
+                     (double)self->s.origin2.x, (double)self->s.origin2.y,
+                     (double)(point ? point->x : 0.0f),
+                     (double)(point ? point->y : 0.0f),
+                     (double)self->health.value, (double)self->health.max_value,
+                     (double)self->unitinfo.MoveSpeed, (unsigned)self->aiflags,
+                     (unsigned)self->paused, (unsigned)G_UnitIsStructure(self),
+                     (unsigned)G_BuildingUpgradeActive(self),
+                     self->currentmove && self->currentmove->animation
+                         ? self->currentmove->animation : "(none)");
+            jass_ordr_log_event(level.vm, "ORDR_SCRIPT_POINT_ORDER", detail);
+            traced++;
+        }
+    }
+    return accepted;
 }
 
 /* Rebind an existing edict to another WC3 unit type while retaining its
@@ -1409,9 +1451,21 @@ edict_t *unit_create(uint32_t player, uint32_t unitid, vec2_t const *location, f
         unit->mana.value = unit->mana.max_value;
     }
     /* Warsmash CreateUnit delegates to createUnitSimple, which checks the
-     * spawned unit against static pathing and nudges it to a legal point. */
+     * spawned unit against static pathing and nudges it to a legal point.
+     * ORDR's neutral-passive difficulty selection markers are a fixed
+     * in-world UI laid out against scenery at authored coordinates. Nudging
+     * them shifts multiple buttons by 256-384 units and breaks the layout.
+     * Restrict this exception to the exact menu codes, owner, time and area;
+     * ordinary Warcraft units retain normal unstuck placement. */
+    bool ordr_choice_marker = player == 15 &&
+        level.time >= 3900 && level.time <= 7000 &&
+        ((unitid >= 0x75303030u && unitid <= 0x75303039u) ||
+         (unitid >= 0x75303041u && unitid <= 0x75303043u)) &&
+        location->x >= -7200.0f && location->x <= -4800.0f &&
+        location->y >= -9600.0f && location->y <= -8200.0f;
     vec2_t position;
-    if (G_FindUnitUnstuckPosition(unit, location, &position)) {
+    if (ordr_choice_marker || G_FindUnitUnstuckPosition(unit, location, &position)) {
+        if (ordr_choice_marker) position = *location;
         unit->s.origin2 = position;
         unit->s.origin.x = position.x;
         unit->s.origin.y = position.y;
@@ -1430,6 +1484,7 @@ edict_t *unit_create(uint32_t player, uint32_t unitid, vec2_t const *location, f
     unit->s.angle = facing * M_PI / 180;
     G_ActivateUnitFood(unit);
     G_BotUnitReady(unit);
+    G_UnitSpawnedRegionEvents(unit);
     return unit;
 }
 
@@ -2240,6 +2295,10 @@ bool G_HeroLearnSkill(edict_t *ent, uint32_t abilcode) {
     if (!G_HeroModifySkillPoints(ent, -1)) {
         return false;
     }
+    gameEvent_t *event = G_PublishEventWithValue(ent, EVENT_PLAYER_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
+    event = G_PublishEventWithValue(ent, EVENT_UNIT_HERO_SKILL, NULL, (int32_t)abilcode);
+    if (event) event->learned_level = old_level + 1;
     return true;
 }
 

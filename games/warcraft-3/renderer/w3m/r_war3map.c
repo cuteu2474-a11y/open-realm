@@ -2,6 +2,11 @@
 #include "../mdx/r_mdx.h"
 #include "renderer/r_shader.h"
 #include <float.h>
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+extern void R_ORDRMapTrace(cstring_t stage);
+#else
+#define R_ORDRMapTrace(stage) ((void)(stage))
+#endif
 #include <math.h>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -25,6 +30,23 @@ static float *w3_terrain_offsets;
 static uint8_t *w3_terrain_dirty_segments;
 static uint32_t w3_terrain_offset_count, w3_deform_last_update, w3_terrain_segment_count;
 static bool w3_terrain_rebuild_pending;
+static bool w3_water_color_rebuild_pending;
+static bool w3_occlusion_enabled = true;
+
+/* Warcraft's SetWaterBaseColor(..., 0) hides the water surface, including its
+ * depth writes. ORDR uses it for the original difficulty-choice scene. */
+static bool R_W3WaterHidden(wc3WaterStyle_t const *style) {
+    return style && style->base_override_enabled && style->base_override.a == 0;
+}
+
+/* Water tint changes only water vertices; no ground/cliff rebake is needed. */
+void R_W3InvalidateWaterColor(void) {
+    if (tr.world && g_mapSegments) w3_water_color_rebuild_pending = true;
+}
+
+void R_W3SetOcclusionEnabled(bool enabled) {
+    w3_occlusion_enabled = enabled;
+}
 static int w3_deform_x0, w3_deform_y0, w3_deform_x1, w3_deform_y1;
 static bool w3_deform_bounds_valid;
 static bool w3_warn_deform_unavailable, w3_warn_deform_type, w3_warn_deform_pool;
@@ -302,6 +324,30 @@ static void R_FreeMapLayers(maplayer_t * *layers) {
     }
 }
 
+/* Keep global ground buffers, cliffs, their welds and segment bounds intact
+ * when the map changes SetWaterBaseColor. Only water has per-vertex tint. */
+static void R_W3RefreshWaterColors(void) {
+    if (!w3_water_color_rebuild_pending || !tr.world) return;
+    /* Retain the old GPU geometry while invisible; the first visible frame
+     * rebuilds it with the latest authored tint before drawing it. */
+    if (R_W3WaterHidden(R_WaterStyle())) return;
+    FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments) {
+        maplayer_t **link = &segment->layers;
+        while (*link && (*link)->type != MAPLAYERTYPE_WATER) link = &(*link)->next;
+        if (*link && R_UpdateMapSegmentWaterColors(tr.world, segment->sx, segment->sy, *link))
+            continue;
+        maplayer_t *fresh = R_BuildMapSegmentWater(tr.world, segment->sx, segment->sy);
+        if (*link) {
+            maplayer_t *old = *link;
+            *link = old->next;
+            old->next = NULL;
+            R_FreeMapLayers(&old);
+        }
+        R_AddMapSegmentLayer(segment, fresh);
+    }
+    w3_water_color_rebuild_pending = false;
+}
+
 static void R_FreeMapSegments(void) {
     while (g_mapSegments) {
         mapsegment_t *segment = g_mapSegments;
@@ -326,6 +372,7 @@ static void R_W3ClearTerrainDeformations(void) {
     w3_terrain_segment_count = 0;
     w3_deform_last_update = 0;
     w3_terrain_rebuild_pending = false;
+    w3_water_color_rebuild_pending = false;
     w3_deform_bounds_valid = false;
     memset(w3_deformations, 0, sizeof(w3_deformations));
 }
@@ -657,9 +704,64 @@ static vec3_t R_GetMapVertexPoint(war3map_t const *map, uint32_t x, uint32_t y) 
     };
 }
 
+/* Small bounded progress markers for diagnosing expensive original W3E geometry.
+ * No map contents or unit data are written into this device-only log. */
+static void R_ORDRSegmentProgress(cstring_t phase, uint32_t x, uint32_t y,
+                                  uint32_t done, uint32_t total) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    char stage[116];
+    snprintf(stage, sizeof(stage), "SEGMENT_%s x=%u y=%u done=%u total=%u",
+             phase, (unsigned)x, (unsigned)y, (unsigned)done, (unsigned)total);
+    R_ORDRMapTrace(stage);
+#else
+    (void)phase; (void)x; (void)y; (void)done; (void)total;
+#endif
+}
+
+/* W3E wet flags and stored water levels are independent. Record their
+ * relationship once per loaded map so a genuine flooded region can be
+ * distinguished from a dry-ground shading defect without changing map data. */
+typedef struct {
+    uint32_t total, authored_wet, wet_submerged, dry_above;
+} wc3WaterCoverage_t;
+
+static wc3WaterCoverage_t R_W3CountWaterCorners(war3map_t const *map) {
+    wc3WaterCoverage_t counts = {0};
+    if (!map || !map->vertices) return counts;
+    for (uint32_t y = 0; y < map->height; y++) {
+        for (uint32_t x = 0; x < map->width; x++) {
+            war3mapVertex_t const *v = GetWar3MapVertex(map, x, y);
+            float const water = GetWar3MapVertexWaterLevel(v);
+            float const ground = R_GetVertexPosition(map, x, y, true).z;
+            bool const submerged = water > ground + 0.25f;
+            counts.total++;
+            if (v->water) {
+                counts.authored_wet++;
+                if (submerged) counts.wet_submerged++;
+            } else if (submerged) {
+                counts.dry_above++;
+            }
+        }
+    }
+    return counts;
+}
+
+static void R_W3LogWaterCoverage(war3map_t const *map) {
+    wc3WaterCoverage_t const counts = R_W3CountWaterCorners(map);
+    fprintf(stderr, "WC3 W3E water: corners=%u wet=%u submerged_wet=%u dry_above_water=%u\n",
+            (unsigned)counts.total, (unsigned)counts.authored_wet,
+            (unsigned)counts.wet_submerged, (unsigned)counts.dry_above);
+}
+
 static void R_LoadMapSegments(war3map_t const *map) {
-    FOR_LOOP(fx, (map->width - 1) / SEGMENT_SIZE) {
-        FOR_LOOP(fy, (map->height - 1) / SEGMENT_SIZE) {
+    uint32_t const columns = (map->width - 1) / SEGMENT_SIZE;
+    uint32_t const rows = (map->height - 1) / SEGMENT_SIZE;
+    uint32_t completed = 0;
+    R_ORDRSegmentProgress("START", 0, 0, 0, columns * rows);
+    FOR_LOOP(fx, columns) {
+        FOR_LOOP(fy, rows) {
+            if ((completed % 16) == 0)
+                R_ORDRSegmentProgress("BEFORE", fx, fy, completed, columns * rows);
             mapsegment_t *segment = R_BuildMapSegment(map, fx, fy);
             ADD_TO_LIST(segment, g_mapSegments);
             FOR_LOOP(sx, SEGMENT_SIZE+1) FOR_LOOP(sy, SEGMENT_SIZE+1) {
@@ -672,6 +774,9 @@ static void R_LoadMapSegments(war3map_t const *map) {
                 segment->bbox.max.y = MAX(segment->bbox.max.y, v.y);
                 segment->bbox.max.z = MAX(segment->bbox.max.z, v.z);
             }
+            completed++;
+            if ((completed % 16) == 0 || completed == columns * rows)
+                R_ORDRSegmentProgress("AFTER", fx, fy, completed, columns * rows);
         }
     }
 }
@@ -706,32 +811,18 @@ static void R_LoadMapMinimap(handle_t hMpq, cstring_t mapFilename) {
     }
 }
 
-static bool R_ReadWar3MapVertex(handle_t file, war3mapVertex_t *vert) {
+/* W3E has one 7-byte packed terrain record per vertex. Reading its five
+ * fields with separate SFileReadFile calls caused hundreds of thousands of
+ * tiny compressed MPQ reads during ORDR's loading screen on the iPad.
+ * Decode the same authored bytes from one checked bulk read instead. */
+static void R_DecodeWar3MapVertex(uint8_t const *bytes, war3mapVertex_t *vert) {
     uint16_t water_and_edge;
-    uint8_t flags;
-    uint8_t variation;
-    uint8_t cliff_and_layer;
-
-    if (!file || !vert) {
-        return false;
-    }
     memset(vert, 0, sizeof(*vert));
-    if (!SFileReadFile(file, &vert->accurate_height, sizeof(vert->accurate_height), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &water_and_edge, sizeof(water_and_edge), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &flags, sizeof(flags), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &variation, sizeof(variation), NULL, NULL)) {
-        return false;
-    }
-    if (!SFileReadFile(file, &cliff_and_layer, sizeof(cliff_and_layer), NULL, NULL)) {
-        return false;
-    }
-
+    memcpy(&vert->accurate_height, bytes, sizeof(vert->accurate_height));
+    memcpy(&water_and_edge, bytes + 2, sizeof(water_and_edge));
+    uint8_t const flags = bytes[4];
+    uint8_t const variation = bytes[5];
+    uint8_t const cliff_and_layer = bytes[6];
     vert->waterlevel = water_and_edge & 0x3FFF;
     vert->mapedge = (water_and_edge & 0x4000) != 0;
     vert->ground = flags & 0x0F;
@@ -743,7 +834,6 @@ static bool R_ReadWar3MapVertex(handle_t file, war3mapVertex_t *vert) {
     vert->groundVariation = variation & 0x1F;
     vert->cliff = (cliff_and_layer >> 4) & 0x0F;
     vert->level = cliff_and_layer & 0x0F;
-    return true;
 }
 
 war3map_t *FileReadWar3Map(handle_t archive) {
@@ -759,15 +849,36 @@ war3map_t *FileReadWar3Map(handle_t archive) {
     SFileReadFile(file, &map->width, 4, NULL, NULL);
     SFileReadFile(file, &map->height, 4, NULL, NULL);
     SFileReadFile(file, &map->center, 8, NULL, NULL);
-    uint32_t const num_vertices = map->width * map->height;
-    int const vertexblocksize = sizeof(war3mapVertex_t) * num_vertices;
-    map->vertices = ri.MemAlloc(vertexblocksize);
-    R_AllocateFogOfWar(map);
-    FOR_LOOP(i, num_vertices) {
-        if (!R_ReadWar3MapVertex(file, (war3mapVertex_t *)map->vertices + i)) {
-            break;
-        }
+    uint64_t const vertex_count64 = (uint64_t)map->width * map->height;
+    if (vertex_count64 == 0 || vertex_count64 > UINT32_MAX / MAP_VERTEX_FILE_SIZE ||
+        vertex_count64 > SIZE_MAX / sizeof(war3mapVertex_t)) {
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: invalid W3E vertex dimensions\n");
+        return NULL;
     }
+    uint32_t const num_vertices = (uint32_t)vertex_count64;
+    uint32_t const packed_size = num_vertices * MAP_VERTEX_FILE_SIZE;
+    uint8_t *packed = ri.MemAlloc(packed_size);
+    uint32_t read_size = 0;
+    if (!packed || !SFileReadFile(file, packed, packed_size, &read_size, NULL) ||
+        read_size != packed_size) {
+        if (packed) ri.MemFree(packed);
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: truncated W3E terrain vertex data\n");
+        return NULL;
+    }
+    map->vertices = ri.MemAlloc(sizeof(war3mapVertex_t) * (size_t)num_vertices);
+    if (!map->vertices) {
+        ri.MemFree(packed);
+        SFileCloseFile(file);
+        ri.error("R_RegisterMap: failed to allocate W3E terrain vertices\n");
+        return NULL;
+    }
+    FOR_LOOP(i, num_vertices)
+        R_DecodeWar3MapVertex(packed + (size_t)i * MAP_VERTEX_FILE_SIZE,
+                             (war3mapVertex_t *)map->vertices + i);
+    ri.MemFree(packed);
+    R_AllocateFogOfWar(map);
     SFileCloseFile(file);
     FOR_LOOP(y, map->height) {
 //        printf("%04x  ", y);
@@ -801,10 +912,14 @@ void _W3M_RegisterMap(char const *mapFilename) {
     /* A map registration replaces the whole WC3 world.  Free GPU buffers,
      * map-owned models, fog targets and source terrain before creating the
      * next level so repeated campaign transitions do not accumulate state. */
+    R_ORDRMapTrace("W3M_BEFORE_CLEAR");
     _W3M_ClearMap();
+    R_ORDRMapTrace("W3M_AFTER_CLEAR");
 
     /* Load .w3m file (which is itself an MPQ archive) */
+    R_ORDRMapTrace("W3M_BEFORE_READ_MPQ");
     mapSize = ri.FS_ReadFile(mapFilename, (void **)&mapData);
+    R_ORDRMapTrace("W3M_AFTER_READ_MPQ");
     if (mapSize < 0 || !mapData) {
         ri.error("R_RegisterMap: failed to open map %s\n", mapFilename);
         return;
@@ -816,24 +931,41 @@ void _W3M_RegisterMap(char const *mapFilename) {
         ri.error("R_RegisterMap: failed to open map archive %s\n", mapFilename);
         return;
     }
+    R_ORDRMapTrace("W3M_MPQ_OPENED");
     map = FileReadWar3Map(hMpq);
+    R_ORDRMapTrace("W3M_AFTER_TERRAIN_READ");
     R_FileReadShadowMap(hMpq, map);
+    R_ORDRMapTrace("W3M_AFTER_SHADOW");
     R_LoadMapMinimap(hMpq, mapFilename);
+    R_ORDRMapTrace("W3M_AFTER_MINIMAP");
     tr.world = map;
+    R_ORDRMapTrace("W3M_BEFORE_TILESET_ARCHIVE");
     R_W3OpenTilesetArchive(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_TILESET_ARCHIVE");
     /* Read special-doodad footprint masks while the nested map MPQ is open,
      * before baking either ground or ordinary cliff meshes. */
+    R_ORDRMapTrace("W3M_BEFORE_SPECIAL_CUTOUTS");
     R_W3LoadSpecialCutouts(hMpq, map);
+    R_ORDRMapTrace("W3M_AFTER_SPECIAL_CUTOUTS");
     SFileCloseArchive(hMpq);
     ri.FS_FreeFile(mapData);
+    R_ORDRMapTrace("W3M_BEFORE_BLIGHT");
     R_LoadBlightTexture(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_BLIGHT");
     R_LoadWaterStyle(map->tileset);
+    R_ORDRMapTrace("W3M_AFTER_WATER");
+    R_W3LogWaterCoverage(map);
     R_W3SetMapTerrainOffsets(map);
+    R_ORDRMapTrace("W3M_AFTER_TERRAIN_OFFSETS");
     R_W3RebuildCameraHeightMap();
+    R_ORDRMapTrace("W3M_AFTER_CAMERA_HEIGHT");
 
     R_LoadMapSegments(map);
+    R_ORDRMapTrace("W3M_AFTER_SEGMENTS");
     R_FinishCliffs();
+    R_ORDRMapTrace("W3M_AFTER_CLIFFS");
     R_BuildGroundLayers(map);
+    R_ORDRMapTrace("W3M_AFTER_GROUND_LAYERS");
     w3_terrain_rebuild_pending = false;
 }
 
@@ -895,6 +1027,8 @@ void _W3M_DrawWorld(void) {
     if (tr.viewDef.rdflags & RDF_NOWORLDMODEL)
         return;
 
+    R_W3RefreshWaterColors();
+
     R_Call(glEnable, GL_DEPTH_TEST);
     R_Call(glDepthMask, GL_TRUE);
     R_Call(glDepthFunc, GL_LEQUAL);
@@ -932,6 +1066,8 @@ void _W3M_DrawWorld(void) {
 void _W3M_DrawAlphaSurfaces(void) {
     if (tr.viewDef.rdflags & RDF_NOWORLDMODEL)
         return;
+    /* Transparent water must not occlude models in the depth-only prepass. */
+    if (R_W3WaterHidden(R_WaterStyle())) return;
 
     /* Establish the translucent water plane in depth before drawing alpha
      * unit geosets. That lets fragments above water pass and fragments below
@@ -939,12 +1075,14 @@ void _W3M_DrawAlphaSurfaces(void) {
     R_Call(glDepthMask, GL_TRUE);
     R_Call(glEnable, GL_DEPTH_TEST);
     R_Call(glDepthFunc, GL_LEQUAL);
-    R_Call(glColorMask, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-    R_Call(glDisable, GL_BLEND);
-    R_SetAlphaKeyState(false);
-    FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments)
-        R_DrawTerrainSegment(segment, (1 << MAPLAYERTYPE_WATER));
-    R_Call(glColorMask, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    if (w3_occlusion_enabled) {
+        R_Call(glColorMask, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        R_Call(glDisable, GL_BLEND);
+        R_SetAlphaKeyState(false);
+        FOR_EACH_LIST(mapsegment_t, segment, g_mapSegments)
+            R_DrawTerrainSegment(segment, (1 << MAPLAYERTYPE_WATER));
+        R_Call(glColorMask, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
 
     R_Call(glEnable, GL_BLEND);
     R_Call(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

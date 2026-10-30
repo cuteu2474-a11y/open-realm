@@ -67,6 +67,8 @@ struct game_import {
      * advancing commands, client simulation, or server simulation. */
     void (*LoadingFrame)(void);
     handle_t (*ReadFile)(cstring_t filename, uint32_t *size);
+    /* Optional: read strictly from the mounted map archive before base overlays. */
+    handle_t (*ReadPriorityFile)(cstring_t filename, uint32_t *size);
     /* Calls callback for every archive copy of filename, lowest priority first.
      * Useful for merging layered data files (e.g. GameData/Assets.txt). */
     void (*ReadFileAll)(cstring_t filename, void (*callback)(handle_t buf, uint32_t size, void *ud), void *ud);

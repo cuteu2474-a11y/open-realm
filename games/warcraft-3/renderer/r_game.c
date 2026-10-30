@@ -10,6 +10,8 @@
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void _W3M_RegisterMap(cstring_t mapFileName);
 void _W3M_DrawWorld(void);
@@ -414,6 +416,21 @@ texture_t const *R_BlightTexture(void) {
 }
 
 static wc3WaterStyle_t g_water_style;
+/* Keep last server-authored value across a map reload; R_LoadWaterStyle
+ * resets the tileset and then reapplies the current override. */
+static color32_t g_water_color_override;
+static bool g_water_color_enabled;
+
+void R_W3SetWaterBaseColor(color32_t color, bool enabled) {
+    if (g_water_color_enabled == enabled &&
+        (!enabled || memcmp(&g_water_color_override, &color, sizeof(color)) == 0))
+        return;
+    g_water_color_override = color;
+    g_water_color_enabled = enabled;
+    g_water_style.base_override = color;
+    g_water_style.base_override_enabled = enabled;
+    R_W3InvalidateWaterColor();
+}
 
 static color32_t R_WaterRowColor(uint32_t const *rgba) {
     return (color32_t){ .r = (uint8_t)MIN(rgba[0], 255), .g = (uint8_t)MIN(rgba[1], 255),
@@ -430,6 +447,8 @@ void R_LoadWaterStyle(uint8_t tileset) {
     uint32_t count;
 
     memset(&g_water_style, 0, sizeof(g_water_style));
+    g_water_style.base_override_enabled = g_water_color_enabled;
+    g_water_style.base_override = g_water_color_override;
     count = ri.LoadSlk("TerrainArt\\Water.slk", water_schema, (void **)&rows, sizeof(w3WaterRow_t));
     FOR_LOOP(i, count) if (rows[i].id == id) { row = &rows[i]; break; }
     if (!row) {
@@ -1236,7 +1255,41 @@ void R_DrawMinimap(rect_t const *screen, cstring_t map) {
     R_DrawMinimapBorder(&content, MAKE(color32_t, 192, 192, 192, 255));
 }
 
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+/* Diagnostic only: no private file paths, game contents, or credentials in
+ * this log. This recording never changes rendering or JASS gameplay. */
+static bool r_ordr_trace_enabled;
+static FILE *r_ordr_trace_file;
+static uint32_t r_ordr_trace_started_ms;
+void R_ORDRMapTrace(cstring_t stage) {
+    if (!r_ordr_trace_enabled || !r_ordr_trace_file) return;
+    fprintf(r_ordr_trace_file, "wall_since_start_ms=%u stage=%s\n",
+            (unsigned)(SDL_GetTicks() - r_ordr_trace_started_ms),
+            stage ? stage : "(null)");
+    fflush(r_ordr_trace_file);
+}
+static void R_ORDRMapTraceBegin(cstring_t map) {
+    r_ordr_trace_enabled = map && strstr(map, "ORDR_S2_2.323") != NULL;
+    if (!r_ordr_trace_enabled) return;
+    r_ordr_trace_started_ms = SDL_GetTicks();
+    if (!r_ordr_trace_file) {
+        char path[1024];
+        cstring_t home = getenv("HOME");
+        if (home && *home &&
+            snprintf(path, sizeof(path), "%s/Documents/ordr-renderer.log", home) < (int)sizeof(path)) {
+            r_ordr_trace_file = fopen(path, "w");
+            if (r_ordr_trace_file) setvbuf(r_ordr_trace_file, NULL, _IOLBF, 0);
+        }
+    }
+    R_ORDRMapTrace("R_REGISTER_MAP_ENTER");
+}
+#else
+#define R_ORDRMapTrace(stage) ((void)(stage))
+#define R_ORDRMapTraceBegin(map) ((void)(map))
+#endif
+
 void R_RegisterMap(cstring_t mapFileName) {
+    R_ORDRMapTraceBegin(mapFileName);
     cursor_active_model = NULL; cursor_anim = NULL;
     R_SetMapAssetScope(mapFileName);
     R_AdvanceTextureGeneration();
@@ -1244,17 +1297,26 @@ void R_RegisterMap(cstring_t mapFileName) {
     R_W3ClearCameraEventStates();
     R_W3ClearEventSplats();
     R_W3ClearEventWarnings();
+    R_ORDRMapTrace("R_BEFORE_SPAWN_DATA");
     R_W3LoadSpawnData();
+    R_ORDRMapTrace("R_AFTER_SPAWN_DATA");
     R_W3LoadSplatData();
+    R_ORDRMapTrace("R_AFTER_SPLAT_DATA");
     R_W3LoadUberSplatData();
+    R_ORDRMapTrace("R_AFTER_UBER_SPLATS");
     memset(event_state, 0, sizeof(event_state));
     memset(&model_texture_cache, 0, sizeof(model_texture_cache));
     R_ClearMinimapSpecialAssets();
     if (mapFileName && *mapFileName) R_LoadMinimapSpecialAssets();
+    R_ORDRMapTrace("R_AFTER_MINIMAP_SPECIAL");
     R_WeatherRegisterMap();
+    R_ORDRMapTrace("R_AFTER_WEATHER");
     R_LightningRegisterMap();
+    R_ORDRMapTrace("R_BEFORE_W3M");
     _W3M_RegisterMap(mapFileName);
+    R_ORDRMapTrace("R_AFTER_W3M");
     R_ReclaimStreamedTextures(0);
+    R_ORDRMapTrace("R_REGISTER_MAP_COMPLETE");
 }
 
 void R_SetupEnvironmentLighting(void) {
@@ -1342,13 +1404,31 @@ static bool R_W3WalkableSurfaceHit(renderEntity_t const *surface, float x, float
     return true;
 }
 
+/* Classify the bridge/deck models once per frame. Most scene entities cannot
+ * support ground-conforming units, so rescanning them for every unit is wasteful. */
+static uint32_t R_W3CollectWalkableSurfaces(viewDef_t const *viewdef,
+                                            uint32_t *indices, uint32_t capacity) {
+    uint32_t count = 0;
+    FOR_LOOP(i, viewdef->num_entities) {
+        renderEntity_t const *ent = &viewdef->entities[i];
+        if (!(ent->flags & RF_GROUND_SURFACE) || (ent->flags & RF_HIDDEN) || !ent->model) continue;
+        if (count < capacity) indices[count] = i;
+        count++;
+    }
+    return count;
+}
+
 /* Warsmash keeps walkable destructable height as presentation state: the
  * simulation decides whether a unit may traverse the bridge, while the model
  * collision/geoset geometry supplies the exact visual support Z. Preserve the
  * explicit server-authored altitude offset (WC3 FlyHeight) and replace only the
  * coarse destructable-origin support height with the highest authored MDX hit. */
 void R_ConformGroundSurfaces(viewDef_t *viewdef) {
+    static uint32_t surface_indices[MAX_GAME_ENTITIES];
+    uint32_t surface_count;
     if (!viewdef || (viewdef->rdflags & RDF_NOWORLDMODEL)) return;
+
+    surface_count = R_W3CollectWalkableSurfaces(viewdef, surface_indices, MAX_GAME_ENTITIES);
 
     FOR_LOOP(i, viewdef->num_entities) {
         renderEntity_t *ent = &viewdef->entities[i];
@@ -1362,11 +1442,14 @@ void R_ConformGroundSurfaces(viewDef_t *viewdef) {
             continue;
         }
 
-        FOR_LOOP(j, viewdef->num_entities) {
-            renderEntity_t const *surface = &viewdef->entities[j];
+        /* If an unusual view exceeds the fixed scratch cap, preserve the
+         * complete old scan rather than dropping a walkable surface. */
+        bool const overflow = surface_count > MAX_GAME_ENTITIES;
+        FOR_LOOP(j, overflow ? viewdef->num_entities : surface_count) {
+            renderEntity_t const *surface = &viewdef->entities[overflow ? j : surface_indices[j]];
             float hit_z;
 
-            if (!(surface->flags & RF_GROUND_SURFACE)) continue;
+            if (overflow && !(surface->flags & RF_GROUND_SURFACE)) continue;
             if (!R_W3WalkableSurfaceHit(surface, ent->origin.x, ent->origin.y, &hit_z)) continue;
             if (!found_surface || hit_z > authored_support) {
                 authored_support = hit_z;

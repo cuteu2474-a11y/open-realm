@@ -185,6 +185,7 @@ static bool G_BuildCommandButtonState(edict_t *ent, cstring_t code, bool researc
     cstring_t ubertip;
     cstring_t hotkey;
     ability_t const *ability;
+    UnitProfile_t const *unit_profile = NULL;
     abilityitem_t item;
     uint32_t ability_code = 0;
     bool toggle_on = false;
@@ -224,25 +225,46 @@ static bool G_BuildCommandButtonState(edict_t *ent, cstring_t code, bool researc
     }
     item = MAKE(abilityitem_t, .code = ability_code, .ability = ability);
     toggle_on = G_CommandButtonToggleOn(ent, &item, research, toggle_state);
+    /* Stock UnitFunc.ini contains buttons for retail types, but user-created
+     * W3U unit IDs are owned by the merged UnitProfile row. FindConfigValue
+     * cannot resolve those map-only IDs, which used to drop every train/shop
+     * command whose button art was otherwise authored correctly. UnitProfile
+     * is authoritative for unit types (including modifications of stock IDs),
+     * not for ability/item/Cmd buttons. */
+    if (!ability && strlen(code) == 4) {
+        UnitProfile_t const *candidate = G_UnitProfile(ability_code);
+        if (candidate && candidate->id) unit_profile = candidate;
+    }
     art = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_ART, research && !upgrade_research)),
+        unit_profile && unit_profile->art && *unit_profile->art
+            ? unit_profile->art : FindConfigValue(art_code, G_ResearchField(STR_ART, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNART) : NULL, toggle_on);
     buttonpos = G_CommandButtonValue(
         FindConfigValue(art_code, G_ResearchField(STR_BUTTONPOS, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNBUTTONPOS) : NULL, toggle_on);
     tip = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_TIP, research && !upgrade_research)),
+        unit_profile && unit_profile->tip && *unit_profile->tip
+            ? unit_profile->tip : FindConfigValue(art_code, G_ResearchField(STR_TIP, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNTIP) : NULL, toggle_on);
     ubertip = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_UBERTIP, research && !upgrade_research)),
+        unit_profile && unit_profile->uberTip && *unit_profile->uberTip
+            ? unit_profile->uberTip : FindConfigValue(art_code, G_ResearchField(STR_UBERTIP, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNUBERTIP) : NULL, toggle_on);
     hotkey = G_CommandButtonValue(
-        FindConfigValue(art_code, G_ResearchField(STR_HOTKEY, research && !upgrade_research)),
+        unit_profile && unit_profile->hotkey && *unit_profile->hotkey
+            ? unit_profile->hotkey : FindConfigValue(art_code, G_ResearchField(STR_HOTKEY, research && !upgrade_research)),
         toggle_on ? FindConfigValue(art_code, STR_UNHOTKEY) : NULL, toggle_on);
     UI_CopyString(art_level, sizeof(art_level), research ? G_StringForLevel(art, level) : art);
     art_path = G_UIArtPath(art_level);
 
-    if (buttonpos && *buttonpos) {
+    if (unit_profile && unit_profile->buttonPosX && unit_profile->buttonPosY &&
+        *unit_profile->buttonPosX && *unit_profile->buttonPosY) {
+        unsigned px, py;
+        if (sscanf(unit_profile->buttonPosX, "%u", &px) == 1 &&
+            sscanf(unit_profile->buttonPosY, "%u", &py) == 1) {
+            x = px; y = py;
+        }
+    } else if (buttonpos && *buttonpos) {
         sscanf(buttonpos, "%u,%u", &x, &y);
     }
 
@@ -486,6 +508,48 @@ static bool G_BuildHeroReviveButton(edict_t *altar, edict_t *hero, uint8_t slot,
     return true;
 }
 
+/* ORDR's authored facility units can keep the Birth presentation even though
+ * they are not construction/building metadata. Their ability/production card
+ * must remain available after creation. No command is invented: each entry
+ * still comes from the original UnitAbilities/UnitProfile rows and passes
+ * the normal authority checks. */
+static bool G_ORDRHasBirthFacilityCommands(edict_t const *unit) {
+    UnitProfile_t const *p;
+    UnitAbilities_t const *a;
+    if (!unit || !strstr(level.map_path, "ORDR_S2_") ||
+        !unit->data.UnitAbilities || !unit->class_id) return false;
+    p = G_UnitProfile(unit->class_id);
+    a = unit->data.UnitAbilities;
+    return (a->abilList && *a->abilList) ||
+           (p && ((p->trains && *p->trains) ||
+                  (p->researches && *p->researches) ||
+                  (p->builds && *p->builds)));
+}
+
+/* Keep the original command-card gating; a scripted map's passive abilities
+ * are not actionable buttons. Report missing active handlers with the authored
+ * rawcode and parent alias so they can be ported rather than silently forging
+ * a button that cannot dispatch its spell/order events. */
+static void G_ORDRLogNonCommandFacilityAbility(edict_t *ent, cstring_t code) {
+    ability_t const *ability;
+    static uint32_t samples;
+    char detail[192];
+    uint32_t rawcode;
+    if (!ent || !code || strlen(code) != 4 || !level.vm ||
+        !jass_functionbyname(level.vm, "CUN") ||
+        (!G_UnitIsStructure(ent) && !G_ORDRHasBirthFacilityCommands(ent)) ||
+        samples >= 96) return;
+    rawcode = FS_SLKKey(code);
+    ability = FindAbilityForCommand(code);
+    snprintf(detail, sizeof(detail),
+             "unit=%u class=0x%08x ability=%.4s parent=0x%08x registered=%u flags=0x%x has_proc=%u",
+             (unsigned)ent->s.number, (unsigned)ent->class_id, code,
+             (unsigned)G_AbilityCode(rawcode), (unsigned)(ability != NULL),
+             (unsigned)(ability ? ability->flags : 0), (unsigned)(ability && ability->proc != NULL));
+    jass_ordr_log_event(level.vm, "ORDR_FACILITY_NONCOMMAND_ABILITY", detail);
+    samples++;
+}
+
 uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t max_buttons) {
     uint8_t count = 0;
     UnitBalance_t const *b;
@@ -530,7 +594,8 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
      * complete and usable. Only suppress the ordinary unit command card for
      * a mobile unit's birth presentation; the construction pointer above owns the
      * actual unfinished-building command state. */
-    if (ent->currentmove && ent->currentmove->think == ai_birth && !G_UnitIsStructure(ent)) {
+    if (ent->currentmove && ent->currentmove->think == ai_birth &&
+        !G_UnitIsStructure(ent) && !G_ORDRHasBirthFacilityCommands(ent)) {
         return 0;
     }
     if (S_AncientIsMorphing(ent)) return 0;
@@ -579,8 +644,11 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
             char ability_code[5] = {0};
             if (strlen(abil) != 4) continue;
             memcpy(ability_code, abil, 4);
-            if (G_IsImplementedAbility(ability_code) && G_ActorHasSkill(ent, ability_code))
+            if (!G_ActorHasSkill(ent, ability_code)) continue;
+            if (G_IsImplementedAbility(ability_code))
                 G_AddAbilityCommandButtons(ent, buttons, max_buttons, &count, ability_code);
+            else
+                G_ORDRLogNonCommandFacilityAbility(ent, ability_code);
         }
     }
     FOR_LOOP(i, ARRAY_COUNT(ent->abilities.added)) {
@@ -588,8 +656,11 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
         uint32_t const code = ent->abilities.added[i];
         if (!code) continue;
         memcpy(abil, &code, 4);
-        if (G_IsImplementedAbility(abil) && G_ActorHasSkill(ent, abil))
+        if (!G_ActorHasSkill(ent, abil)) continue;
+        if (G_IsImplementedAbility(abil))
             G_AddAbilityCommandButtons(ent, buttons, max_buttons, &count, abil);
+        else
+            G_ORDRLogNonCommandFacilityAbility(ent, abil);
     }
     FOR_LOOP(i, MAX_HERO_ABILITIES) {
         heroability_t const *ha = ent->heroabilities + i;
@@ -686,6 +757,39 @@ uint8_t G_GetCommandButtons(edict_t *ent, gameCommandButton_t *buttons, uint8_t 
     }
 
     G_ResolveNagaCommandButtonCollisions(ent, buttons, count);
+    /* iPad ORDR facilities H0C4/H05M look like buildings but were authored
+     * as units. Count their actual server-generated command cards separately
+     * from whether the client's HUD renders/clicks them. Never invent
+     * commands for rows whose original map data has none. */
+    if (level.vm && level.time >= 12000 &&
+        jass_functionbyname(level.vm, "CUN") && ui_current_client &&
+        G_GetMainSelectedUnit(ui_current_client) == ent &&
+        (G_UnitIsStructure(ent) ||
+         ent->class_id == MAKEFOURCC('H','0','C','4') ||
+         ent->class_id == MAKEFOURCC('H','0','5','M'))) {
+        static unsigned logged;
+        if (logged++ < 64) {
+            char info[256];
+            snprintf(info, sizeof(info),
+                     "unit=%u raw=0x%08x command_count=%u first=%.32s second=%.32s",
+                     (unsigned)ent->s.number, (unsigned)ent->class_id,
+                     (unsigned)count, count > 0 ? buttons[0].command : "",
+                     count > 1 ? buttons[1].command : "");
+            jass_ordr_log_event(level.vm, "ORDR_BUILDING_COMMAND_CARD", info);
+            if (!count) {
+                UnitProfile_t const *profile = G_UnitProfile(ent->class_id);
+                snprintf(info, sizeof(info),
+                         "unit=%u raw=0x%08x abilities=%.55s trains=%.40s researches=%.40s builds=%.40s stock_item=%u stock_unit=%u",
+                         (unsigned)ent->s.number, (unsigned)ent->class_id,
+                         a && a->abilList ? a->abilList : "",
+                         profile && profile->trains ? profile->trains : "",
+                         profile && profile->researches ? profile->researches : "",
+                         profile && profile->builds ? profile->builds : "",
+                         (unsigned)G_IsItemShop(ent), (unsigned)G_IsUnitShop(ent));
+                jass_ordr_log_event(level.vm, "ORDR_BUILDING_EMPTY_CARD", info);
+            }
+        }
+    }
     return count;
 }
 

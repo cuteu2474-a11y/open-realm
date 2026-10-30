@@ -59,6 +59,15 @@ See also [WC3 map format](games/warcraft-3/file-formats/map.md) for the W3I fiel
 
 Several UnitBalance.slk columns exist in both a **base** form and a **computed** (real) form. The base column is the editor-entered value; the computed column includes bonuses (hero attributes, etc.). Always read the computed column at runtime — base values are 0 or wrong for heroes.
 
+Optimized map sheets may omit computed cells: ORDR S2 2.323[C] stores `e0IX.HP=10`
+but omits its `realHP` cell. The typed balance decoder marks a missing `realHP`
+with a NaN sentinel, then normalizes it once at table ingestion to
+`HP + STR * 25`, matching the base Strength contribution used by
+`G_RecomputeHeroStats`. Explicit `realHP`, including **zero**, remains authoritative.
+This runs before indexing and map-object overrides, and also on test table replacement.
+It does not change map data or manufacture a minimum HP. Other omitted computed
+columns (`realM`, `realdef`) still require their own parity work.
+
 | Stat | Wrong (base) | Correct (computed) | Source |
 |---|---|---|---|
 | Max HP | `uhp` | `uhpm` → realHP | UnitBalance.slk |

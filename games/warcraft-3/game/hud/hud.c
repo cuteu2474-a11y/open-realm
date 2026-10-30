@@ -22,7 +22,11 @@ hud_t hud;
 
 /* frames[] is defined in fdf_parser.c (common/) */
 
-#define MAX_FRAMES_WRITE 1024
+/* ORDR creates >900 Dz handles plus nested FDF descendants. The old
+ * 1024-entry frame-reference table silently overflowed, resolving later
+ * relative anchors to UI_PARENT and stretching decorative emoji/backdrop
+ * art across its parent instead of retaining its intended button bounds. */
+#define MAX_FRAMES_WRITE 4096
 static frameDef_t const *framesWritten[MAX_FRAMES_WRITE];
 static frameDef_t const * *frameptr;
 
@@ -353,7 +357,7 @@ static uiScrollBar_t MakeScrollBar(frameDef_t const *frame) {
     return result;
 }
 
-static void UI_PrepareScrollBar(frameDef_t const *owner) {
+void UI_PrepareScrollBar(frameDef_t const *owner) {
     frameDef_t *scrollbar = NULL;
     float inset;
 
@@ -453,6 +457,42 @@ static uiSimpleButton_t MakeSimpleButton(frameDef_t const *frame) {
 static bool UI_IsSingleLineText(cstring_t text) {
     if (!text) return true;
     return strchr(text, '\n') == NULL && strchr(text, '\r') == NULL;
+}
+
+/* Warcraft/FDF text uses |n for a line break. Imported map strings may
+ * also contain literal backslash-n or CRLF. Convert only the outgoing UI
+ * payload; JASS DzFrameGetText and authored FDF data keep their own values.
+ * Return false without truncating if the scratch buffer is insufficient. */
+static bool UI_NormalizeWireLineBreaks(char *out, size_t capacity, cstring_t text) {
+    size_t used=0;
+    bool changed=false;
+    if (!out || !capacity || !text) return false;
+    for (cstring_t p=text; *p;) {
+        char c;
+        if (p[0]=='|' && p[1]=='|') {
+            if (used+2>=capacity) return false;
+            out[used++]='|';
+            out[used++]='|';
+            p+=2;
+            continue;
+        }
+        if ((p[0]=='|' && (p[1]=='n'||p[1]=='N')) ||
+            (p[0]=='\\' && p[1]=='n')) {
+            c='\n';
+            p+=2;
+            changed=true;
+        } else if (p[0]=='\r') {
+            c='\n';
+            p+=p[1]=='\n'?2:1;
+            changed=true;
+        } else {
+            c=*p++;
+        }
+        if (used+1>=capacity) return false;
+        out[used++]=c;
+    }
+    out[used]='\0';
+    return changed;
 }
 
 bool UI_BuildFrameForWrite(frameDef_t const *frame,
@@ -602,7 +642,7 @@ bool UI_BuildFrameForWrite(frameDef_t const *frame,
                 .text = label,
                 .border = frame->ListBox.Border,
                 .itemHeight = frame->Font.Size > 0.0f ? frame->Font.Size * 1.33f : 0.018f,
-                .selectedIndex = frame->Text && *frame->Text ? 0 : -1,
+                .selectedIndex = frame->Text && *frame->Text ? frame->ListBox.SelectedIndex : -1,
             };
             strlcpy(data.id, frame->Name, sizeof(data.id));
             strlcpy(data.fetchCommand, frame->ListBox.FetchCommand, sizeof(data.fetchCommand));
@@ -658,6 +698,31 @@ bool UI_BuildFrameForWrite(frameDef_t const *frame,
         case FT_GLUETEXTBUTTON:
         case FT_GLUEBUTTON: {
             uiGlueTextButton_t data = MakeGlueTextButton(frame);
+            if (frame->Type == FT_POPUPMENU || frame->Type == FT_GLUEPOPUPMENU) {
+                frameDef_t *menu = frame->Popup.MenuFrame[0]
+                    ? UI_FindChildFrame((frameDef_t *)frame, frame->Popup.MenuFrame) : NULL;
+                if (!menu && frame->Popup.MenuFrame[0])
+                    menu = UI_FindFrameNear(frame, frame->Popup.MenuFrame);
+                if (menu && menu->Type == FT_MENU && menu->Menu.Items) {
+                    size_t used = 0;
+                    bool fits = true;
+                    FOR_LOOP(i,menu->Menu.ItemCount) {
+                        cstring_t choice = menu->Menu.Items[i].text;
+                        size_t length = strlen(choice);
+                        if (used + length + 2 > textbuf_max) { fits = false; break; }
+                        if (i) textbuf[used++] = '\n';
+                        FOR_LOOP(j,length) {
+                            char c = choice[j];
+                            textbuf[used++] = c == '\n' || c == '\r' ? ' ' : c;
+                        }
+                        textbuf[used] = '\0';
+                    }
+                    if (fits && used) {
+                        out->text = textbuf;
+                        out->value = (float)frame->Popup.SelectedIndex;
+                    }
+                }
+            }
             if (buf.cursize + sizeof(data) <= buf.maxsize) {
                 memcpy(buf.data + buf.cursize, &data, sizeof(data));
                 buf.cursize += sizeof(data);
@@ -715,7 +780,8 @@ bool UI_BuildFrameForWrite(frameDef_t const *frame,
 _Static_assert(sizeof(uiNameTag_t) <= UINT8_MAX, "uiNameTag_t exceeds the one-byte layout payload size");
 
 static void UI_WriteBuiltFrame(frameDef_t const *frame, float value, bool override_value, uiSizeToTextParams_t const *fit) {
-    UINAME textbuf;
+    char textbuf[4096];
+    char normalized_text[4096], normalized_tooltip[2048];
     uiFrame_t tmp;
     uint8_t typedata[256] = { 0 };
     uiNameTag_t sized;
@@ -743,6 +809,15 @@ static void UI_WriteBuiltFrame(frameDef_t const *frame, float value, bool overri
         tmp.buffer.data = &sized;
         tmp.buffer.size = sizeof(sized);
     }
+    /* This is the last common path for cloned Dz frames, FDF-authored
+     * labels and listbox contents, before both normal and window wire codecs.
+     * Avoid interpreting an edit control's literal text as formatting. */
+    if (frame->Type!=FT_EDITBOX && frame->Type!=FT_GLUEEDITBOX &&
+        frame->Type!=FT_SLASHCHATBOX &&
+        UI_NormalizeWireLineBreaks(normalized_text,sizeof(normalized_text),tmp.text))
+        tmp.text=normalized_text;
+    if (UI_NormalizeWireLineBreaks(normalized_tooltip,sizeof(normalized_tooltip),tmp.tooltip))
+        tmp.tooltip=normalized_tooltip;
     if (ui_window_writing) {
         tmp.text = (cstring_t)(uintptr_t)UI_WindowTextOffset(tmp.text);
         tmp.tooltip = (cstring_t)(uintptr_t)UI_WindowTextOffset(tmp.tooltip);

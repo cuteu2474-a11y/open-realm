@@ -17,6 +17,7 @@ void R_UpdateGroundSegment(war3map_t const *map, uint32_t sx, uint32_t sy);
 maplayer_t *R_BuildMapSegmentCliffs(war3map_t const *map, uint32_t sx, uint32_t sy, uint32_t cliff);
 void R_BakeMapSegmentCliffsForWeld(war3map_t const *map, uint32_t sx, uint32_t sy, uint32_t cliff);
 maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy);
+bool R_UpdateMapSegmentWaterColors(war3map_t const *map, uint32_t sx, uint32_t sy, maplayer_t *layer);
 void R_ResetGroundTextures(void);
 void R_BeginTerrainNormalCache(war3map_t const *map);
 void R_EndTerrainNormalCache(void);
@@ -43,6 +44,8 @@ typedef struct {
     uint32_t num_frames;
     float frame_rate; /* frames per second (texRate) */
     color32_t shallow_min, shallow_max, deep_min, deep_max;
+    color32_t base_override;
+    bool base_override_enabled;
     float height; /* tiles below the W3E water level; see W3_WaterSurfaceHeight */
 } wc3WaterStyle_t;
 void R_LoadWaterStyle(uint8_t tileset);
@@ -50,6 +53,8 @@ texture_t const *R_WaterFrame(wc3WaterStyle_t const *style, uint32_t time_ms);
 void R_W3OpenTilesetArchive(uint8_t tileset);
 wc3WaterStyle_t const *R_WaterStyle(void);
 color32_t R_WaterDepthColor(wc3WaterStyle_t const *style, float depth);
+void R_W3InvalidateWaterColor(void);
+void R_W3SetOcclusionEnabled(bool enabled);
 void R_UpdateBlightLayer(void);
 void R_InvalidateBlightLayer(void);
 void R_DrawBlightLayer(void);

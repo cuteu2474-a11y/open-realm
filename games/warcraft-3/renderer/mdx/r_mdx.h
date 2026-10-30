@@ -511,6 +511,8 @@ void MDLX_GetModelKeytrackValue(mdxModel_t const *model, mdxKeyTrack_t const *ke
 void MDLX_GetAnimatedColorTrackValue(mdxModel_t const *model, mdxKeyTrack_t const *keytrack, uint32_t time, vec3_t *output);
 void MDLX_GetGeosetAnimationStaticColor(mdxGeosetAnim_t const *geosetAnim, vec3_t *output);
 void MDLX_BindBoneMatrices(mdxModel_t const *model, mat4_t const *model_matrix, uint32_t frame1, uint32_t frame0);
+void MDLX_BindBoneMatricesLookAt(mdxModel_t const *model, mat4_t const *model_matrix,
+                                uint32_t frame1, uint32_t frame0, uint32_t look_at);
 bool MDLX_EvaluateLight(mdxModel_t const *model, mdxLight_t const *light,
                         mat4_t const *model_matrix, uint32_t frame, bool use_visibility,
                         rModelLight_t *output);

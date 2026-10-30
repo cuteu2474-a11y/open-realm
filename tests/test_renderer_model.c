@@ -1304,6 +1304,32 @@ TEST(renderer_model, unknown_model_release_is_immediate) {
     R_ReleaseRegisteredModel(model); T_EQ(release_count, 1);
 }
 
+/* A .blp command icon reference must still load an imported TGA with the same
+ * name, without changing the original art path or making the importer case-sensitive. */
+static int test_icon_extension_read(cstring_t filename, void **buffer) {
+    static uint32_t fake_image = 0;
+    *buffer = NULL;
+    if (!strcasecmp(filename, "war3mapImported\\BTNCustom.tga")) {
+        *buffer = &fake_image;
+        return sizeof(fake_image);
+    }
+    return -1;
+}
+
+TEST(renderer_texture, imported_command_icon_uses_existing_tga_when_blp_missing) {
+    refImport_t saved = ri;
+    PATHSTR resolved;
+    void *buffer = NULL;
+
+    ri.FS_ReadFile = test_icon_extension_read;
+    T_EQ(R_ReadTextureFile("war3mapImported\\BTNCustom.blp", resolved, &buffer), 4);
+    T_STREQ(resolved, "war3mapImported\\BTNCustom.tga");
+    T_ASSERT(buffer != NULL);
+    T_EQ(R_ReadTextureFile("war3mapImported\\BTNCustom.tga", resolved, &buffer), 4);
+    T_STREQ(resolved, "war3mapImported\\BTNCustom.tga");
+    ri = saved;
+}
+
 TEST(renderer_texture, cached_registration_preserves_newer_texture_indices) {
     texture_t first = { .texid = 100 }, second = { .texid = 101 };
 
@@ -1880,7 +1906,8 @@ TEST(renderer_stats, triangles_include_instanced_amplification) {
     T_EQ(R_PrimitiveTriangles(GL_LINES, 12, 100), (uint64_t)0);
 }
 
-/* File lookup probes the exact reference first and only substitutes the supported BLP representation. */
+/* File lookup probes the exact reference first, then a paired BLP/TGA.
+ * A scoped .w3x archive suffix is not the leaf image extension. */
 static cstring_t texture_file;
 static uint32_t texture_reads;
 static int test_texture_read(cstring_t name, void **buffer) {
@@ -1896,11 +1923,15 @@ TEST(renderer_texture, authored_extensions_resolve_without_losing_real_files) {
         { "Cliff0.tga", "Cliff0.tga", 1, true },
         { "Tree", "Tree.blp", 2, true },
         { "Tree.blp", "Tree.blp", 1, true },
+        { "Custom.blp", "Custom.tga", 2, true },
+        { "Maps\\ORDR.w3x\\war3mapImported\\Icon", "Maps\\ORDR.w3x\\war3mapImported\\Icon.blp", 2, true },
+        { "Maps\\ORDR.w3x\\war3mapImported\\Icon", "Maps\\ORDR.w3x\\war3mapImported\\Icon.tga", 3, true },
         { "Missing.tga", "", 2, false },
-        { "Missing.blp", "", 1, false },
+        { "Missing.blp", "", 2, false },
         { "Missing.dds", "", 1, false },
         { "Missing.pcx", "", 1, false },
-        { "Missing", "", 2, false },
+        { "Missing.png", "", 1, false },
+        { "Missing", "", 3, false },
     };
     int (*read_file)(cstring_t, void **) = ri.FS_ReadFile;
     ri.FS_ReadFile = test_texture_read;
@@ -2008,8 +2039,22 @@ void R_BuildCameraHeightMap(cameraHeightBuild_t const *build) { (void)build; }
 void R_FreeCameraHeightMap(cameraHeightMap_t *map) { (void)map; }
 void R_ShutdownFogOfWar(void) {}
 void R_InitFogOfWar(uint32_t width, uint32_t height) { (void)width; (void)height; }
+static bool test_water_layer_enabled;
+static uint32_t test_water_layer_builds, test_water_layer_updates;
 maplayer_t *R_BuildMapSegmentWater(war3map_t const *map, uint32_t sx, uint32_t sy) {
-    (void)map; (void)sx; (void)sy; return NULL;
+    (void)map; (void)sx; (void)sy;
+    test_water_layer_builds++;
+    if (!test_water_layer_enabled) return NULL;
+    maplayer_t *layer = test_alloc(sizeof(*layer));
+    memset(layer, 0, sizeof(*layer));
+    layer->type = MAPLAYERTYPE_WATER;
+    return layer;
+}
+bool R_UpdateMapSegmentWaterColors(war3map_t const *map, uint32_t sx, uint32_t sy, maplayer_t *layer) {
+    (void)map; (void)sx; (void)sy;
+    if (!layer || layer->type != MAPLAYERTYPE_WATER) return false;
+    test_water_layer_updates++;
+    return true;
 }
 static struct { uint32_t enables, disables, offsets; float factor, units; } splat_bias;
 static void test_splat_enable(GLenum cap) { if (cap == GL_POLYGON_OFFSET_FILL) splat_bias.enables++; }
@@ -2040,12 +2085,57 @@ static void test_ground_update(buffer_t const *buffer, uint32_t first, vertex_t 
 #undef R_RenderRectSplatUV
 #undef R_RenderFlatRectSplat
 #undef R_RenderSplat
+
+/* W3E stores a water-level value even for a corner whose wet bit is clear.
+ * The dry ground must not be darkened by that unpainted water level. */
+TEST(renderer_terrain, dry_ground_does_not_inherit_unpainted_water_depth) {
+    war3mapVertex_t verts[4] = {0};
+    war3map_t map = { .width = 2, .height = 2, .vertices = verts };
+    war3map_t const *saved_world = tr.world;
+    FOR_LOOP(i, 4) verts[i] = (war3mapVertex_t){
+        .accurate_height = 0x2000, .level = 2, .waterlevel = 0x3fff,
+    };
+    tr.world = &map;
+    ground_current_vertex = ground_vertex_buffer;
+    R_MakeTile(&map, 0, 0, 0, NULL);
+    T_EQ(ground_current_vertex - ground_vertex_buffer, 6);
+    FOR_LOOP(i, 6) T_EQ(ground_vertex_buffer[i].color.r, 255);
+
+    FOR_LOOP(i, 4) verts[i].water = 1;
+    ground_current_vertex = ground_vertex_buffer;
+    R_MakeTile(&map, 0, 0, 0, NULL);
+    T_EQ(ground_current_vertex - ground_vertex_buffer, 6);
+    T_ASSERT(ground_vertex_buffer[0].color.r < 255);
+
+    /* Mixed shoreline tiles shade only the corners actually painted wet. */
+    verts[0].water = 0;
+    ground_current_vertex = ground_vertex_buffer;
+    R_MakeTile(&map, 0, 0, 0, NULL);
+    T_EQ(ground_vertex_buffer[0].color.r, 255);
+    T_ASSERT(ground_vertex_buffer[1].color.r < 255);
+    ground_current_vertex = NULL;
+    tr.world = saved_world;
+}
 #define _W3M_ClearMap R_TestClearMap
 #define _W3M_RegisterMap R_TestUnusedRegisterMap
 #include "games/warcraft-3/renderer/w3m/r_war3map.c"
 #undef _W3M_ClearMap
 #undef _W3M_RegisterMap
 void _W3M_RegisterMap(char const *map) { (void)map; }
+
+TEST(renderer_terrain, water_coverage_diagnostic_separates_dry_height_from_wet_surface) {
+    war3mapVertex_t verts[4] = {0};
+    war3map_t map = { .width = 2, .height = 2, .vertices = verts };
+    FOR_LOOP(i, 4) verts[i] = (war3mapVertex_t){
+        .accurate_height = 0x2000, .level = 2, .waterlevel = 0x3fff,
+    };
+    verts[0].water = verts[1].water = 1;
+    wc3WaterCoverage_t const counts = R_W3CountWaterCorners(&map);
+    T_EQ(counts.total, 4);
+    T_EQ(counts.authored_wet, 2);
+    T_EQ(counts.wet_submerged, 2);
+    T_EQ(counts.dry_above, 2);
+}
 
 /* NightElfX04 (55,42) has a mid-ramp corner, but its neighbouring LHBA mesh extends west, not east. */
 TEST(renderer_terrain, nightelfx04_uncovered_ramp_corner_keeps_ground_and_splats) {
@@ -2210,6 +2300,65 @@ TEST(renderer_terrain, deformation_rebuild_rebakes_blight_layer) {
     tr.world = saved_world;
 }
 
+/* Changing only water tint must not rebake the global ground atlas or cliff
+ * geometry. A full terrain rebuild is costly and can expose stale joins. */
+TEST(renderer_terrain, water_color_change_rebuilds_only_water_layers) {
+    war3map_t map = { .width = SEGMENT_SIZE + 1, .height = SEGMENT_SIZE + 1 };
+    war3map_t const *saved_world = tr.world;
+    mapsegment_t *saved_segments = g_mapSegments;
+    maplayer_t *saved_ground = g_groundLayers;
+    maplayer_t cliff = { .type = MAPLAYERTYPE_CLIFF };
+    mapsegment_t segment = { .layers = &cliff };
+    int freed_before;
+    ri.MemAlloc = test_alloc; ri.MemFree = test_free;
+    tr.world = &map; g_mapSegments = &segment;
+    R_W3SetMapTerrainOffsets(&map);
+    g_groundLayers = &cliff;
+    blight_layer_generation = 7;
+    test_water_layer_enabled = true;
+    test_water_layer_builds = test_water_layer_updates = 0;
+
+    R_W3InvalidateWaterColor();
+    T_ASSERT(!w3_terrain_rebuild_pending);
+    T_EQ(w3_terrain_dirty_segments[0], 0);
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 1);
+    T_ASSERT(segment.layers->type == MAPLAYERTYPE_WATER);
+    T_ASSERT(segment.layers->next == &cliff);
+    T_ASSERT(g_groundLayers == &cliff);
+    T_EQ(blight_layer_generation, 7);
+    freed_before = free_count;
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 1); /* no per-frame rebuild */
+    R_W3InvalidateWaterColor();
+    R_W3RefreshWaterColors();
+    T_EQ(test_water_layer_builds, 1); /* recolor existing vertex buffer in place */
+    T_EQ(test_water_layer_updates, 1);
+    T_ASSERT(segment.layers != &cliff);
+    T_ASSERT(segment.layers->next == &cliff);
+    T_EQ(blight_layer_generation, 7);
+    T_EQ(free_count, freed_before); /* persistent water buffer/VAO reused */
+
+    segment.layers->next = NULL;
+    R_FreeMapLayers(&segment.layers);
+    test_water_layer_enabled = false;
+    R_W3ClearTerrainDeformations();
+    tr.world = saved_world; g_mapSegments = saved_segments; g_groundLayers = saved_ground;
+}
+
+TEST(renderer_terrain, original_ordr_zero_alpha_water_has_no_occluding_surface) {
+    wc3WaterStyle_t style = { .base_override_enabled = true,
+        .base_override = { 255, 255, 255, 0 } };
+    /* The original ORDR choice callback uses SetWaterBaseColor(255,255,255,0).
+     * The invisible plane must neither draw nor write depth over units. */
+    T_ASSERT(R_W3WaterHidden(&style));
+    style.base_override.a = 255;
+    T_ASSERT(!R_W3WaterHidden(&style));
+    style.base_override_enabled = false;
+    style.base_override.a = 0;
+    T_ASSERT(!R_W3WaterHidden(&style)); /* per-tileset water still applies */
+}
+
 TEST(renderer_terrain, splat_draw_biases_coplanar_terrain_geometry) {
     memset(&splat_bias, 0, sizeof(splat_bias));
     R_SetSplatDepthBias(true);
@@ -2334,6 +2483,20 @@ TEST(renderer_terrain, water_depth_color_follows_water_slk_bands) {
     c = R_WaterDepthColor(&custom, 64.f / 128); T_EQ(c.b, 103); T_EQ(c.a, 104);
     c = R_WaterDepthColor(&custom, 68.f / 128); T_EQ(c.r, 226); T_EQ(c.a, 229);
     c = R_WaterDepthColor(&custom, 2.0f); T_EQ(c.g, 252); T_EQ(c.a, 254);
+
+    /* ORDR's original script restores default water with white/255; the
+     * shallow alpha still comes from Water.slk instead of becoming opaque. */
+    wc3WaterStyle_t tinted = custom;
+    tinted.base_override_enabled = true;
+    tinted.base_override = (color32_t){255, 255, 255, 255};
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 51); T_EQ(c.g, 52); T_EQ(c.a, 54);
+    tinted.base_override.a = 0;
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 51); T_EQ(c.a, 0);
+    tinted.base_override = (color32_t){128, 255, 255, 128};
+    c = R_WaterDepthColor(&tinted, 37.f / 128);
+    T_EQ(c.r, 26); T_EQ(c.g, 52); T_EQ(c.a, 27);
 }
 /* The cliff material test needs the real bake/finalize lifecycle, but no OpenGL context. */
 static uint32_t cliff_buffer_upload_count;
@@ -2346,6 +2509,97 @@ static buffer_t *test_cliff_buffer(vertex_t const *vertices, uint32_t count) {
 #include "games/warcraft-3/renderer/w3m/r_war3map_cliffs.c"
 #undef WC3_CLIFF_TESTS
 #undef R_MakeVertexArrayObject
+
+TEST(renderer_terrain, dry_cliff_face_does_not_inherit_unpainted_water_depth) {
+    war3mapVertex_t verts[4] = {0};
+    war3map_t map = { .width = 2, .height = 2, .vertices = verts };
+    war3map_t const *saved_world = tr.world;
+    vec3_t point = {0}, normal = {0, 0, 1};
+    vec2_t uv = {0}, offset = {32, 32};
+    mdxGeoset_t geoset = { .vertices = &point, .normals = &normal, .texcoord = &uv };
+    vertex_t rendered;
+    FOR_LOOP(i, 4) verts[i] = (war3mapVertex_t){
+        .accurate_height = 0x2000, .level = 2, .waterlevel = 0x3fff,
+    };
+    tr.world = &map;
+    rendered = R_BakeCliffVertex(&map, &geoset, &offset, 2, 0);
+    T_EQ(rendered.color.r, 255);
+    FOR_LOOP(i, 4) verts[i].water = 1;
+    rendered = R_BakeCliffVertex(&map, &geoset, &offset, 2, 0);
+    T_ASSERT(rendered.color.r < 255);
+    tr.world = saved_world;
+}
+
+/* Compile the real water baker into the headless suite with GPU upload mocked.
+ * A SetWaterBaseColor change must preserve both topology and the existing VAO. */
+static wc3WaterStyle_t test_water_style;
+static wc3WaterStyle_t const *test_renderer_water_style(void) { return &test_water_style; }
+static vertex_t test_water_initial_vertex, test_water_updated_vertex;
+static uint32_t test_water_initial_count, test_water_updated_count, test_water_uploads;
+static buffer_t *test_renderer_water_alloc(vertex_t const *vertices, uint32_t count) {
+    test_water_initial_count = count;
+    test_water_initial_vertex = vertices[0];
+    return test_alloc(sizeof(buffer_t));
+}
+static void test_renderer_water_update(buffer_t const *buffer, uint32_t first,
+                                       vertex_t const *vertices, uint32_t count) {
+    T_NOT_NULL(buffer);
+    T_EQ(first, 0);
+    test_water_updated_count = count;
+    test_water_updated_vertex = vertices[0];
+    test_water_uploads++;
+}
+#define R_WaterStyle test_renderer_water_style
+#define R_BuildMapSegmentWater R_TestRealBuildMapSegmentWater
+#define R_UpdateMapSegmentWaterColors R_TestRealUpdateMapSegmentWaterColors
+#define R_MakeVertexArrayObject test_renderer_water_alloc
+#define R_UpdateVertexArrayObject test_renderer_water_update
+#include "games/warcraft-3/renderer/w3m/r_war3map_water.c"
+#undef R_WaterStyle
+#undef R_BuildMapSegmentWater
+#undef R_UpdateMapSegmentWaterColors
+#undef R_MakeVertexArrayObject
+#undef R_UpdateVertexArrayObject
+
+TEST(renderer_terrain, water_tint_reuses_existing_vertex_array_and_keeps_geometry) {
+    enum { W = SEGMENT_SIZE + 1 };
+    static war3mapVertex_t verts[W * W];
+    war3map_t map = { .width = W, .height = W, .vertices = verts };
+    war3map_t const *saved_world = tr.world;
+    texture_t texture = {0};
+    maplayer_t *layer;
+    ri.MemAlloc = test_alloc; ri.MemFree = test_free;
+    memset(verts, 0, sizeof(verts));
+    FOR_LOOP(i, W * W) verts[i] = (war3mapVertex_t){
+        .accurate_height = 0x2000, .level = 2, .waterlevel = 0x2400,
+    };
+    verts[0].water = verts[1].water = verts[W].water = verts[W + 1].water = 1;
+    test_water_style = (wc3WaterStyle_t){
+        .frames = { &texture }, .num_frames = 1,
+        .shallow_min = { 255, 255, 255, 200 },
+        .shallow_max = { 255, 255, 255, 200 },
+        .deep_min = { 255, 255, 255, 200 },
+        .deep_max = { 255, 255, 255, 200 },
+    };
+    tr.world = &map;
+    test_water_uploads = 0;
+    layer = R_TestRealBuildMapSegmentWater(&map, 0, 0);
+    T_NOT_NULL(layer);
+    T_ASSERT(test_water_initial_count > 0);
+    T_EQ(test_water_initial_vertex.color.a, 200);
+    test_water_style.base_override_enabled = true;
+    test_water_style.base_override = (color32_t){ 255, 255, 255, 128 };
+    T_ASSERT(R_TestRealUpdateMapSegmentWaterColors(&map, 0, 0, layer));
+    T_EQ(test_water_uploads, 1);
+    T_EQ(test_water_updated_count, test_water_initial_count);
+    T_EQ(test_water_updated_vertex.color.a, 100);
+    T_FEQ(test_water_updated_vertex.position.x, test_water_initial_vertex.position.x, 0);
+    T_FEQ(test_water_updated_vertex.position.y, test_water_initial_vertex.position.y, 0);
+    T_FEQ(test_water_updated_vertex.position.z, test_water_initial_vertex.position.z, 0);
+    test_free((void *)layer->buffer);
+    test_free(layer);
+    tr.world = saved_world;
+}
 
 TEST(renderer_terrain, cliff_cache_distinguishes_model_directories) {
     cliffData_t city = { .cliffModelDir = "CityCliffs", .rampModelDir = "CityCliffTrans" };

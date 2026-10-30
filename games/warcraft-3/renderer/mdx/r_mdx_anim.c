@@ -297,7 +297,8 @@ void AddSkin(vec3_t *pos, mat4_t const *mat, vec3_t const *org, float weight) {
     *pos = Vector3_add(pos, &val);
 }
 
-void MDLX_BindBoneMatrices(mdxModel_t const *model, mat4_t const *model_matrix, uint32_t frame1, uint32_t frame0) {
+void MDLX_BindBoneMatricesLookAt(mdxModel_t const *model, mat4_t const *model_matrix,
+                                uint32_t frame1, uint32_t frame0, uint32_t look_at) {
     /* Only the nodes this model actually has need their global matrices
      * recomputed.  The old path memset the full 64KB node_matrices array and
      * scanned all MDX_MAX_NODES slots twice; models have tens of nodes, so the
@@ -307,8 +308,37 @@ void MDLX_BindBoneMatrices(mdxModel_t const *model, mat4_t const *model_matrix, 
         memset(&node_matrices[node->node_id], 0, sizeof(mat4_t)); /* reset the "computed" flag (v[15]==0) */
         R_CalculateNodeMatrix(model, node, frame1, frame0, &local_matrices[node->node_id]);
     }
+    if (look_at & 0x80000000u) {
+        uint8_t const bone = (uint8_t)((look_at >> 24) & 0x7fu);
+        float yaw, pitch;
+        WC3_LookAtUnpack(look_at, &yaw, &pitch);
+        /* Match a named MDX bone rather than rotating the whole actor.
+         * Existing animated rotations are retained and composed with the
+         * additive JASS aim, which travels with the target. */
+        FOR_EACH_LIST(mdxBone_t, b, model->bones) {
+            mdxNode_t *node = &b->node;
+            if (node->node_id >= MDX_MAX_NODES ||
+                WC3_LookBoneHash(node->name) != bone) continue;
+            vec3_t pivot = {0,0,0};
+            if (node->node_id < (uint32_t)model->num_pivots)
+                pivot = *(vec3_t const *)&model->pivots[node->node_id];
+            /* MDX +X forward, +Z up: positive yaw left, pitch raises head. */
+            quaternion_t rotation = Quaternion_fromOrientation(
+                &(orientation_t){.yaw = yaw, .pitch = pitch, .roll = 0});
+            mat4_t aim, combined;
+            Matrix4_from_rotation_origin(&aim, &rotation, &pivot);
+            Matrix4_multiply(&local_matrices[node->node_id], &aim, &combined);
+            local_matrices[node->node_id] = combined;
+            break;
+        }
+    }
     FOR_LOOP(i, model->num_nodes)
         R_GetNodeGlobalMatrix(model, model_matrix, model->node_list[i]);
+}
+
+void MDLX_BindBoneMatrices(mdxModel_t const *model, mat4_t const *model_matrix,
+                           uint32_t frame1, uint32_t frame0) {
+    MDLX_BindBoneMatricesLookAt(model, model_matrix, frame1, frame0, 0);
 }
 
 /* Resolve authored attachment pivots from the same interpolated node pose used

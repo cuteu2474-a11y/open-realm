@@ -3,6 +3,141 @@
 bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *event);
 bool jass_evaluateboolexpr(jass_t *j, jassFunc_t const *expr, edict_t *unit);
 
+/* WC3 TriggerRegisterPlayerChatEvent accepts an empty string as "any chat".
+ * Prefix matching is case-sensitive and does not consume the suffix. */
+static bool G_ChatMatches(cstring_t message, cstring_t pattern, bool exact) {
+    if (!message || !pattern) return false;
+    return exact ? strcmp(message, pattern) == 0 :
+                   strncmp(message, pattern, strlen(pattern)) == 0;
+}
+
+/* ORDR's own offline mode is enabled by its JASS chat command,
+ * not by disabling the engine's networking or simulating save bonuses.
+ * Both -오프라인모드 and -offline are published by the original game.
+ * Prefer the ASCII alias where a catch-all handler is registered, since
+ * map-language and native filesystem encodings may differ on iPad. */
+static cstring_t G_ORDROfflineMatch(cstring_t pattern, bool exact) {
+    if (G_ChatMatches("-offline", pattern, exact)) return "-offline";
+    if (G_ChatMatches("-오프라인모드", pattern, exact)) return "-오프라인모드";
+    return NULL;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_chat, register_filter_exact_prefix_and_empty) {
+    T_ASSERT(G_ChatMatches("-help", "-help", true));
+    T_ASSERT(!G_ChatMatches("-help more", "-help", true));
+    T_ASSERT(G_ChatMatches("-help more", "-help", false));
+    T_ASSERT(!G_ChatMatches("help", "-help", false));
+    T_ASSERT(G_ChatMatches("-anything", "", false));
+    T_ASSERT(!G_ChatMatches("-anything", "", true));
+}
+TEST(wc3_chat, ordr_offline_mode_uses_authored_command) {
+    T_STREQ(G_ORDROfflineMatch("-offline", true), "-offline");
+    T_STREQ(G_ORDROfflineMatch("-오프라인모드", true), "-오프라인모드");
+    T_STREQ(G_ORDROfflineMatch("", false), "-offline");
+    T_STREQ(G_ORDROfflineMatch("-off", false), "-offline");
+    T_ASSERT(G_ORDROfflineMatch("-offline", false));
+    T_ASSERT(!G_ORDROfflineMatch("-help", true));
+    T_ASSERT(!G_ORDROfflineMatch("-offline", false) == false);
+}
+
+#endif
+
+/* A solo ORDR session must be in *the map's* offline mode before the player
+ * reaches the difficulty screen. The stock map only registers CIh (the
+ * -offline/-오프라인모드 chat triggers) from a later startup trigger. CIh merely
+ * calls Bcx/TriggerRegisterPlayerChatEvent for each player. Register that
+ * original handler early, then activate CIg via a real chat event AFTER the
+ * map's 2-second CUX initialization (which resets Sw/player clear counts).
+ * Independently, Warcraft's Cheat("greedisgood") native makes the map's BJJ
+ * single-player/online probe evaluate the original Lw flag correctly.
+ * Do not mutate JASS's jK/Sw globals or Warcraft networking. */
+void G_ORDRTryAutoOfflineMode(void) {
+    edict_t *player;
+    gameClient_t *client;
+    cstring_t command = NULL;
+    gameEvent_t *evt;
+
+    if (level.ordr_auto_offline_queued || !level.started ||
+        !level.vm || !G_IsSinglePlayer() ||
+        /* This command belongs only to the original ORDR S2 map script. */
+        !jass_hasfunction(level.vm, "CUO") ||
+        !jass_hasfunction(level.vm, "CUW") ||
+        !jass_hasfunction(level.vm, "CUN") ||
+        !jass_hasfunction(level.vm, "CIh"))
+        return;
+
+    client = G_SinglePlayerLocalClient();
+    if (!client || !client->connected) return;
+    player = G_GetPlayerEntityByNumber(client->ps.number);
+    if (!player) return;
+
+    /* A slow iPad load may complete ClientBegin after the first second.
+     * The original command still has to be present before the 2.1s offline
+     * dispatch, so prepare it on the first *connected* frame rather than
+     * irrevocably skipping the registration after a fixed 1s wall. */
+    if (!level.ordr_offline_chat_registered_early) {
+        bool already_registered = false;
+        FOR_EACH_EVENT(reg) {
+            if (reg->type != EVENT_PLAYER_CHAT || !G_EventSubjectIsCurrent(reg) ||
+                reg->subject != player || !reg->trigger || reg->trigger->disabled)
+                continue;
+            if (G_ORDROfflineMatch(reg->chat_match, reg->chat_exact)) {
+                already_registered = true;
+                break;
+            }
+        }
+        level.ordr_offline_chat_registered_early = true;
+        if (!already_registered) {
+            jass_callbyname(level.vm, "CIh", false);
+            jass_ordr_log_event(level.vm, "ORDR_OFFLINE_PREPARE",
+                                "map-native CIh chat handlers registered before choice screen");
+        }
+    }
+
+    /* In the original map, CUX resets Sw[player] at t=2.0 s. CIg grants
+     * Sw[player]=50, so running it earlier would silently wipe that reward.
+     * The difficulty choices only spawn at ~t=4.0 s. */
+    if (level.time < 2100) return;
+
+    /* Prefer the exact registered command over a wildcard handler.
+     * If only a wildcard exists, the English alias is used as the
+     * original map already accepts it in ORDR S2. */
+    FOR_EACH_EVENT(reg) {
+        if (reg->type != EVENT_PLAYER_CHAT ||
+            !G_EventSubjectIsCurrent(reg) || reg->subject != player ||
+            !reg->trigger || reg->trigger->disabled ||
+            !reg->chat_match[0])
+            continue;
+        command = G_ORDROfflineMatch(reg->chat_match, reg->chat_exact);
+        if (command) break;
+    }
+    if (!command) {
+        FOR_EACH_EVENT(reg) {
+            if (reg->type != EVENT_PLAYER_CHAT ||
+                !G_EventSubjectIsCurrent(reg) || reg->subject != player ||
+                !reg->trigger || reg->trigger->disabled)
+                continue;
+            command = G_ORDROfflineMatch(reg->chat_match, reg->chat_exact);
+            if (command) break;
+        }
+    }
+    if (!command) return;
+
+    evt = G_PublishEvent(player, EVENT_PLAYER_CHAT);
+    if (!evt) return;
+    strlcpy(evt->chat_text, command, sizeof(evt->chat_text));
+    level.ordr_auto_offline_queued = true;
+
+    /* The next G_RunEvents/JASS pass dispatches this through the same
+     * player chat triggers used by the original manual command. */
+    char info[144];
+    snprintf(info, sizeof(info), "player=%u command=%s via=registered_chat",
+             (unsigned)client->ps.number, command);
+    jass_ordr_log_event(level.vm, "ORDR_OFFLINE_STARTUP", info);
+}
+
 /* GetSaveBasicFilename is a short-lived context provided by the host save/load
  * operation, not a physical filesystem path or a script-selectable scope. */
 static char save_basic_filename[MAX_PATHLEN];
@@ -74,6 +209,32 @@ bool G_LimitMatches(uint32_t op, float value, float limit) {
         case WC3_LIMITOP_GREATER_THAN: return value > limit;
         case WC3_LIMITOP_NOT_EQUAL: return value != limit;
         default: return false;
+    }
+}
+
+/* WC3 player-state triggers fire on transitions INTO the registered limit.
+ * Publish the matching registration, not a synthetic global event, so the
+ * callback sees the original player and GetEventPlayerState context. */
+void G_JassPlayerStateChanged(uint32_t player_num, uint32_t state,
+                              float before, float after) {
+    edict_t *player;
+    if (before == after || !level.vm) return;
+    player = G_GetPlayerEntityByNumber(player_num);
+    if (!player) return;
+    FOR_EACH_EVENT(reg) {
+        if (reg->type != EVENT_PLAYER_STATE_LIMIT || reg->subject != player ||
+            reg->state != state || !reg->trigger || reg->trigger->disabled)
+            continue;
+        if (!G_LimitMatches(reg->limitop, before, reg->limitval) &&
+            G_LimitMatches(reg->limitop, after, reg->limitval)) {
+            gameEvent_t *evt = G_PublishEvent(player, EVENT_PLAYER_STATE_LIMIT);
+            if (evt) {
+                evt->responseTo = reg;
+                /* JASS GetEventPlayerState reads the registered state from
+                 * this existing per-event context value. */
+                evt->value = (int32_t)state;
+            }
+        }
     }
 }
 
@@ -155,11 +316,37 @@ bool G_RemovePlayerWithResult(uint32_t player_num, uint32_t game_result) {
     return true;
 }
 
+/* Player-unit registrations use a numerical owner slot because player
+ * entities are not guaranteed to exist for unconnected/AI WC3 slots. Other
+ * event registrations have their own subject semantics. */
+static bool G_IsPlayerUnitRegistrationType(EVENTTYPE type) {
+    return (type >= EVENT_PLAYER_UNIT_ATTACKED && type <= EVENT_PLAYER_UNIT_LOADED) ||
+           (type >= EVENT_PLAYER_UNIT_SELL && type <= EVENT_PLAYER_UNIT_PAWN_ITEM) ||
+           type == EVENT_PLAYER_UNIT_DAMAGED;
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(wc3_events, player_unit_event_type_limits) {
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_DEATH));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_SELECTED));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_SPELL_EFFECT));
+    T_ASSERT(G_IsPlayerUnitRegistrationType(EVENT_PLAYER_UNIT_DAMAGED));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_UNIT_DEATH));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_PLAYER_CHAT));
+    T_ASSERT(!G_IsPlayerUnitRegistrationType(EVENT_UNIT_SPELL_EFFECT));
+}
+#endif
+
 static void G_ExecuteEvent(gameEvent_t *evt) {
     edict_t *subject = evt->edict;
     bool misha_summon_event = false;
     bool result_event = evt->type == EVENT_PLAYER_VICTORY || evt->type == EVENT_PLAYER_DEFEAT;
     uint32_t matching_handlers = 0, invoked_handlers = 0;
+    bool const ordr_wave_death = evt->type == EVENT_PLAYER_UNIT_DEATH &&
+        subject && subject->s.player == 6 && level.vm &&
+        jass_functionbyname(level.vm, "CUN");
+    uint32_t wave_registrations = 0, wave_matched = 0, wave_queued = 0;
     /* KillUnit followed by RemoveUnit still owes death notifications while the corpse exists. */
     if (evt->edict_spawn_tracked &&
         (!subject || !subject->inuse || subject->spawn_time != evt->edict_spawn_time ||
@@ -199,6 +386,16 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                     (!e->button_id || evt->button_id == e->button_id))
                     jass_calltriggerevent(level.vm, e->trigger, evt);
                 break;
+            case EVENT_PLAYER_CHAT:
+                if (evt->type == EVENT_PLAYER_CHAT && subject && e->subject == subject &&
+                    G_ChatMatches(evt->chat_text, e->chat_match, e->chat_exact)) {
+                    /* Pass the matched registration to GetEventPlayerChatStringMatched.
+                     * The full message is retained separately in the queued event. */
+                    evt->responseTo = e;
+                    jass_calltriggerevent(level.vm, e->trigger, evt);
+                    evt->responseTo = NULL;
+                }
+                break;
             case EVENT_GAME_SAVE:
             case EVENT_GAME_LOADED:
                 /* Game events are global, with no unit/player subject. */
@@ -213,9 +410,16 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                 if (evt->responseTo == e) jass_calltriggerevent(level.vm, e->trigger, evt);
                 break;
             case EVENT_GAME_STATE_LIMIT:
-                if (evt->responseTo == e) {
+            case EVENT_PLAYER_STATE_LIMIT:
+                if (evt->type == e->type && evt->responseTo == e) {
                     jass_calltriggerevent(level.vm, e->trigger, evt);
                 }
+                break;
+            case EVENT_PLAYER_ALLIANCE_CHANGED:
+                if (evt->type == EVENT_PLAYER_ALLIANCE_CHANGED &&
+                    subject && e->subject == subject &&
+                    e->state == (uint32_t)evt->value)
+                    jass_calltriggerevent(level.vm, e->trigger, evt);
                 break;
             case EVENT_GAME_TIMER_EXPIRED:
                 break;
@@ -254,9 +458,26 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                  *    context unit so GetTriggerUnit()/GetDyingUnit() resolve to
                  *    it (e.g. Naga_Victory_Check counts the dying naga). */
                 if (e->type == evt->type) {
+                    if (ordr_wave_death) wave_registrations++;
                     bool direct = subject && e->subject == subject;
-                    bool owner_match = subject &&
-                        e->subject == G_GetPlayerEntityByNumber(subject->s.player);
+                    /* Selection belongs to the player who clicked the
+                     * unit, not the unit owner. The original ORDR menu
+                     * renders Neutral Passive button units and registers
+                     * SELECTED on human Players 0-3. Other player-unit event
+                     * types (death, spell, training) still use unit owner. */
+                    bool const player_selection =
+                        evt->type == EVENT_PLAYER_UNIT_SELECTED ||
+                        evt->type == EVENT_PLAYER_UNIT_DESELECTED;
+                    uint32_t const event_player = player_selection && evt->dialog_player
+                        ? evt->dialog_player - 1 : (subject ? subject->s.player : 0);
+                    /* Player-unit event registrations are anchored to a
+                     * numerical player slot, not a possibly-null player
+                     * edict. Match other player events only with a real
+                     * subject; NULL == NULL is never ownership. */
+                    bool const owner_match = subject &&
+                        (G_IsPlayerUnitRegistrationType(e->type)
+                         ? (!e->subject_spawn_tracked && e->state == event_player)
+                         : (e->subject && e->subject == G_GetPlayerEntityByNumber(event_player)));
                     int32_t quest_trigger_ordinal = e->trigger
                         ? (int32_t)(e->trigger - level.triggers) : -1L;
                     if (misha_summon_event) {
@@ -322,7 +543,22 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                             (unsigned)direct, (unsigned)owner_match);
                     }
                     if (direct || owner_match) {
+                        /* The filter is evaluated in GetFilterUnit context,
+                         * just like TriggerRegisterEnterRegion. A rejected
+                         * filter must never run actions or update ORDR's
+                         * map-owned kill counters. */
+                        if (e->filter && !jass_evaluateboolexpr(level.vm, e->filter, subject))
+                            break;
+                        if (ordr_wave_death) wave_matched++;
+                        if (evt->type == EVENT_PLAYER_UNIT_SELL) {
+                            fprintf(stderr,
+                                    "WC3_SELL_DISPATCH unit=%u owner=%u reg_owner=%u value=%d trigger=%ld\n",
+                                    subject ? (unsigned)subject->s.number : 0,
+                                    subject ? (unsigned)subject->s.player : 0,
+                                    (unsigned)e->state, evt->value, (long)quest_trigger_ordinal);
+                        }
                         bool queued = jass_calltriggerevent(level.vm, e->trigger, evt);
+                        if (ordr_wave_death && queued) wave_queued++;
                         if (misha_summon_event)
                             fprintf(stderr, "WC3_MISHA summon-handler-result event=%u trigger=%ld queued=%u enabled=%u\n",
                                     (unsigned)evt->type, (long)quest_trigger_ordinal,
@@ -356,6 +592,18 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
                 break;
         }
     }
+    if (ordr_wave_death) {
+        static unsigned dispatch_samples;
+        if (dispatch_samples++ < 80) {
+            char detail[174];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u owner=6 registrations=%u owner_matched=%u actions_queued=%u marker_A901=%u marker_A902=%u",
+                     (unsigned)subject->s.number, wave_registrations, wave_matched, wave_queued,
+                     (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','1')),
+                     (unsigned)G_UnitAbilityLevel(subject, MAKEFOURCC('A','9','0','2')));
+            jass_ordr_log_event(level.vm, "ORDR_WAVE_DEATH_DISPATCH", detail);
+        }
+    }
     if (result_event) {
         G_GameResultDebug("execute event complete type=%s matching_handlers=%u invoked_handlers=%u",
             evt->type == EVENT_PLAYER_VICTORY ? "VICTORY" : "DEFEAT",
@@ -363,8 +611,44 @@ static void G_ExecuteEvent(gameEvent_t *evt) {
     }
 }
 
-static void G_TouchTriggers(edict_t *ent) {
+/* Unit creation in a JASS-authored region is an enter, even when the new
+ * actor has never translated. ORDR spawns each Player(6) wave at the center
+ * of the first waypoint rect and expects that region event to issue Move.
+ * Existing movement crossings retain their former behavior. */
+static void G_TouchTriggers(edict_t *ent, bool just_spawned) {
+    /* Original ORDR S2 2.323[C] uses BDQ(CH, CRy) for its random-wisp
+     * beacon. CH = Rect(-3584,-9504,-3328,-9216), e0IX is the wisp.
+     * Log just the actual boundary crossing, not each simulation tick. */
+    if (!just_spawned && ent && level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
+        jass_functionbyname(level.vm, "CRy")) {
+        static unsigned beacon_crossings_logged;
+        bool const before = ent->old_origin.x >= -3584.0f &&
+            ent->old_origin.x <= -3328.0f &&
+            ent->old_origin.y >= -9504.0f &&
+            ent->old_origin.y <= -9216.0f;
+        bool const after = ent->s.origin2.x >= -3584.0f &&
+            ent->s.origin2.x <= -3328.0f &&
+            ent->s.origin2.y >= -9504.0f &&
+            ent->s.origin2.y <= -9216.0f;
+        if (before != after && beacon_crossings_logged++ < 24) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "unit=%u entered=%u from=(%.1f,%.1f) to=(%.1f,%.1f) hp=%.0f/%.0f active=%u",
+                     (unsigned)ent->s.number, (unsigned)after,
+                     (double)ent->old_origin.x, (double)ent->old_origin.y,
+                     (double)ent->s.origin2.x, (double)ent->s.origin2.y,
+                     (double)ent->health.value, (double)ent->health.max_value,
+                     (unsigned)G_UnitIsWorldActive(ent));
+            jass_ordr_log_event(level.vm,"ORDR_WISP_BEACON",detail);
+        }
+    }
+    /* A region filter can register new events during this very crossing.
+     * Newly created handlers must not observe a movement that predates their
+     * registration, regardless of whether they reuse a retired slot or use
+     * a fresh high-index slot in ORDR's enlarged event arena. */
+    uint32_t const registrations_before_crossing = level.events.registration_sequence;
     FOR_EACH_EVENT(evt) {
+        if (evt->registration_sequence > registrations_before_crossing) continue;
         switch (evt->type) {
             case EVENT_GAME_ENTER_REGION: {
                 handle_t event_handle, region_handle;
@@ -376,15 +660,44 @@ static void G_TouchTriggers(edict_t *ent) {
                 region = G_RegionFromHandle(evt->region);
                 spawn_time = ent->spawn_time;
                 if (region && G_RegionContains(region, &ent->s.origin2) &&
-                    !G_RegionContains(region, &ent->old_origin) && jass_evaluateboolexpr(level.vm, evt->filter, ent) &&
+                    (just_spawned || !G_RegionContains(region, &ent->old_origin)) &&
+                    jass_evaluateboolexpr(level.vm, evt->filter, ent) &&
                     ent->inuse && ent->spawn_time == spawn_time && !G_IsDeferredFree(ent) &&
                     G_EventFromHandle(event_handle) == evt && evt->region == region_handle)
                 {
                     G_PublishEventResponse(ent, EVENT_GAME_ENTER_REGION, evt);
+                    if (just_spawned && ent->s.player == 6 && level.vm &&
+                        jass_functionbyname(level.vm, "CUN")) {
+                        static unsigned sampled;
+                        if (sampled++ < 96) {
+                            char detail[170];
+                            snprintf(detail, sizeof(detail),
+                                     "unit=%u raw=0x%08x owner=%u x=%.0f y=%.0f registration=%u",
+                                     (unsigned)ent->s.number, (unsigned)ent->class_id,
+                                     (unsigned)ent->s.player, (double)ent->s.origin2.x,
+                                     (double)ent->s.origin2.y,
+                                     (unsigned)evt->registration_sequence);
+                            jass_ordr_log_event(level.vm, "ORDR_WAVE_SPAWN_ENTER", detail);
+                        }
+                    }
+                    if (level.vm && ent->class_id == MAKEFOURCC('e','0','I','X') &&
+                        jass_functionbyname(level.vm, "CRy")) {
+                        static unsigned published;
+                        if (published++ < 24) {
+                            char detail[128];
+                            snprintf(detail,sizeof(detail),
+                                     "unit=%u handler_seq=%u region_rects=%u",
+                                     (unsigned)ent->s.number,
+                                     (unsigned)evt->registration_sequence,
+                                     (unsigned)region->num_rects);
+                            jass_ordr_log_event(level.vm,"ORDR_WISP_REGION_EVENT",detail);
+                        }
+                    }
                 }
                 break;
             }
             case EVENT_GAME_LEAVE_REGION: {
+                if (just_spawned) break; /* a spawn cannot leave a region */
                 handle_t event_handle = G_EventHandle(evt), region_handle = evt->region;
                 region_t *region = G_RegionFromHandle(evt->region);
                 uint32_t spawn_time = ent->spawn_time;
@@ -399,6 +712,7 @@ static void G_TouchTriggers(edict_t *ent) {
                 break;
             }
             case EVENT_UNIT_IN_RANGE:
+                if (just_spawned) break; /* entering unrelated range alarms needs its own creation contract */
                 if (!G_EventSubjectIsCurrent(evt)) break;
                 if (ent == evt->subject) {
                     edict_t *target;
@@ -435,12 +749,45 @@ static void G_TouchTriggers(edict_t *ent) {
 
 /* Explicit JASS position changes happen before G_RunEntities samples old_origin.
  * Evaluate the crossing here, then make the teleported position the next baseline. */
+/* New JASS-created units must receive initial rect-enter triggers exactly
+ * once. The queued callbacks run through the usual deferred G_RunEvents and
+ * jass_runevents sequence, after CreateUnit's caller finishes initializing
+ * ability markers and levels; this never directly issues a movement order. */
+void G_UnitSpawnedRegionEvents(edict_t *ent) {
+    if (!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) || !level.vm)
+        return;
+    ent->old_origin = ent->s.origin2;
+    G_TouchTriggers(ent, true);
+}
+
 void G_UnitPositionChanged(edict_t *ent, vec2_t const *old_position) {
     if (!ent || !ent->inuse || !old_position ||
         !memcmp(old_position, &ent->s.origin2, sizeof(*old_position))) return;
     ent->old_origin = *old_position;
-    G_TouchTriggers(ent);
+    G_TouchTriggers(ent, false);
     ent->old_origin = ent->s.origin2;
+}
+
+/* Bone-only cosmetic aim: compute relative direction using the moving
+ * target's current position, while preserving the gameplay actor heading. */
+void G_UpdateUnitLookAt(edict_t *unit) {
+    if (!unit || !unit->inuse || !unit->look_at_target_number) return;
+    uint32_t const id = unit->look_at_target_number;
+    if (id >= globals.num_edicts) {
+        unit->look_at_target_number = 0; unit->s.look_at_packed = 0;
+        return;
+    }
+    edict_t const *target = &globals.edicts[id];
+    if (!target->inuse || target->spawn_time != unit->look_at_target_generation) {
+        unit->look_at_target_number = 0; unit->s.look_at_packed = 0;
+        return;
+    }
+    float dx = target->s.origin.x + unit->look_at_offset.x - unit->s.origin.x;
+    float dy = target->s.origin.y + unit->look_at_offset.y - unit->s.origin.y;
+    float dz = target->s.origin.z + unit->look_at_offset.z - unit->s.origin.z;
+    float yaw = atan2f(dy, dx) - unit->s.angle;
+    float pitch = atan2f(dz, sqrtf(dx*dx + dy*dy));
+    unit->s.look_at_packed = WC3_LookAtPack(unit->look_at_bone_hash, yaw, pitch);
 }
 
 void G_RunEntities(void) {
@@ -469,6 +816,7 @@ void G_RunEntities(void) {
         edict_t *ent = globals.edicts+i;
         if (!ent->inuse) continue;
         G_RunEntity(ent);
+        if (ent->inuse) G_UpdateUnitLookAt(ent);
     }
     FOR_LOOP(i, globals.num_edicts) {
         edict_t *ent = globals.edicts+i;
@@ -476,7 +824,7 @@ void G_RunEntities(void) {
         if (!G_UnitIsWorldActive(ent)) continue;
         if (!memcmp(&ent->old_origin, &ent->s.origin2, sizeof(vec2_t)))
             continue;
-        G_TouchTriggers(ent);
+        G_TouchTriggers(ent, false);
     }
 }
 

@@ -22,7 +22,7 @@
 #define INF_LOOP_PROTECTION 1000000  /* SC2 Galaxy scripts have large but legitimate loops */
 #define SYNTAX_C_OPERATORS 1 // bitmask; enables Galaxy symbolic logic and shift operators
 #define SYNTAX_INCLUDES    2 // bitmask; enables Galaxy include preprocessing
-#define BZ_JASS_SNAPSHOT_VERSION 8 // format version; v8 persists GetEnumUnit callback context
+#define BZ_JASS_SNAPSHOT_VERSION 9 // v9 persists event identity and learned rank
 #define BZ_JASS_SNAPSHOT_MAX_COUNT (1u << 20) // records; bounds allocations and list walks from corrupt snapshots
 #define BZ_JASS_SNAPSHOT_MAX_STRING (1u << 20) // bytes; bounds strings from corrupt snapshots
 
@@ -31,7 +31,9 @@ typedef struct {
     edict_t *unit;
     edict_t *source;
     int32_t value;
+    uint32_t event_id, learned_level;
     uint32_t dialog_id, dialog_button_id;
+    cstring_t chat_text, chat_matched;
     player_t *event_player;
     vec2_t const *point;
     bool has_point;
@@ -128,12 +130,15 @@ jassType_t jass_types[] = {
  * ========================================================================= */
 
 static void jass_missingcall(jass_t *j, cstring_t name, bool native);
+/* Flush notable ORDR runtime diagnostics into the Files-visible JASS log. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail);
 static jassVar_t *jass_stackvalue(jass_t *j, int index);
 static jassVar_t *jass_topvalue(jass_t *j);
 static JASSTYPEID jass_getvarbasetype(jassVar_t const *var);
 static uint32_t jass_dotoken(jass_t *j, token_t const *token);
 static jassFunc_t const *find_function(jass_t const *j, cstring_t name);
 static jassVar_t *find_global(jass_t const *j, cstring_t name);
+static jassVar_t *find_dict(jassdict_t *dict, cstring_t name);
 static void eval_SINGLETOKEN(jass_t *j, token_t const *token);
 static void eval_VARDECL(jass_t *j, token_t const *token);
 void eval_TOKENS(jass_t *j, token_t const *token);
@@ -218,7 +223,24 @@ uint32_t __unm(jass_t *j) {
 
 JASS_NUMOP(__sub, -);
 JASS_NUMOP(__mul, *);
-JASS_NUMOP(__div, /);
+
+/* C integer division raises SIGFPE for zero divisors and INT_MIN / -1.
+ * A map arithmetic error must unwind through the JASS runtime boundary,
+ * not kill the host app before the offending trigger can be diagnosed. */
+uint32_t __div(jass_t *j) {
+    if (jass_gettype(j, 1) == jasstype_integer && jass_gettype(j, 2) == jasstype_integer) {
+        int32_t left = jass_checkinteger(j, 1), right = jass_checkinteger(j, 2);
+        if (!right || (left == INT32_MIN && right == -1)) {
+            char detail[96];
+            snprintf(detail, sizeof(detail), "left=%d right=%d", left, right);
+            jass_ordr_log_event(j, "ARITHMETIC_ERROR", detail);
+            jass_rterror(j, !right ? "integer division by zero" : "integer division overflow");
+            return 0;
+        }
+        return jass_pushinteger(j, left / right);
+    }
+    return jass_pushnumber(j, jass_checknumber(j, 1) / jass_checknumber(j, 2));
+}
 JASS_CMPOP(__le, <=);
 JASS_CMPOP(__ge, >=);
 JASS_CMPOP(__gt, >);
@@ -226,7 +248,7 @@ JASS_CMPOP(__lt, <);
 
 static bool jass_valuehandle(cstring_t type) {
     static cstring_t const value_handles[] = {
-        "race", "alliancetype", "racepreference", "igamestate", "fgamestate", "playerstate",
+        "eventid", "race", "alliancetype", "racepreference", "igamestate", "fgamestate", "playerstate",
         "playergameresult", "unitstate", "gameevent", "playerevent", "playerunitevent", "widgetevent",
         "dialogevent", "unitevent", "limitop", "unittype", "gamespeed", "placement", "startlocprio",
         "gamedifficulty", "aidifficulty", "gametype", "mapflag", "mapvisibility", "mapsetting", "mapdensity", "mapcontrol",
@@ -234,6 +256,12 @@ static bool jass_valuehandle(cstring_t type) {
         "texmapflags", "fogstate", "effecttype", "itemtype"
     };
     FOR_LOOP(i, sizeof(value_handles) / sizeof(value_handles[0])) if (!strcmp(type, value_handles[i])) return true;
+    return false;
+}
+
+static bool jass_eventtype(jassType_t const *type) {
+    for (; type; type = type->inherit)
+        if (!strcmp(type->name, "eventid")) return true;
     return false;
 }
 
@@ -252,6 +280,8 @@ static bool var_eq(jassVar_t const *a, jassVar_t const *b) {
         case jasstype_cfunction: return !memcmp(a->value, b->value, sizeof(handle_t));
         case jasstype_handle:
             if (a->value == b->value) return true;
+            if (jass_eventtype(a->type) && jass_eventtype(b->type))
+                return !memcmp(a->value, b->value, sizeof(uint32_t));
             if (a->type != b->type) return false;
             /* Galaxy opaque types have no JASS declaration; unequal identities must not dereference a null type. */
             return a->type && jass_valuehandle(a->type->name) && !memcmp(a->value, b->value, sizeof(uint32_t));
@@ -430,6 +460,124 @@ static void jass_free_coroutine(jasscoroutine_t *co) {
     jass_free(co);
 }
 
+/* ORDR's difficulty selector is world-unit based, not a DzFrame popup.
+ * Keep this trace limited to exact milestones on maps exposing both CUO and CUW,
+ * so other maps do not get verbose interpreter logging.  It never changes
+ * script execution or emits synthetic events.
+ *
+ * Expected path:
+ * main -> BJG (2s trigger) -> BB4 -> CUa/CUX (2s timer) -> CUW -> CUN.
+ * UI picks: CUK / CUL; game start: CUM -> CT9.
+ */
+static jass_t *ordr_flow_vm;
+static uint32_t ordr_flow_mask;
+static FILE *ordr_jass_log;
+static unsigned ordr_jass_log_lines;
+static bool ordr_jass_log_open_attempted;
+/* Crash probe is armed only while resuming post-main ORDR callbacks. */
+static bool ordr_native_probe_active;
+static unsigned ordr_native_probe_calls;
+
+uint32_t jass_ordr_flow_mask(jass_t *j) {
+    return j && jass_root(j) == ordr_flow_vm ? ordr_flow_mask : 0;
+}
+
+/* The iPad bundle opts into iOS Files document sharing. Keep the trace in
+ * Documents so users can share it without Xcode or a debugger. Never store
+ * JASS arguments (which can contain player names or chat messages). */
+static void jass_ordr_log_open(void) {
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+    char path[1024];
+    char const *home = getenv("HOME");
+    if (ordr_jass_log_open_attempted) return;
+    ordr_jass_log_open_attempted = true;
+    if (!home || !*home ||
+        snprintf(path, sizeof(path), "%s/Documents/ordr-jass.log", home) >= (int)sizeof(path))
+        return;
+    ordr_jass_log = fopen(path, "w");
+    if (ordr_jass_log) {
+        setvbuf(ordr_jass_log, NULL, _IOLBF, 0);
+        fprintf(ordr_jass_log, "OpenRealm ORDR JASS execution log\n");
+        fprintf(ordr_jass_log, "Format: function entry, invocation mode, game time\n");
+    }
+#endif
+}
+
+/* Public to the server game module: timer/heartbeat information is written
+ * into the same map-specific log without reopening the file from a different
+ * framework. Entries are flushed immediately so a process crash preserves
+ * the last observed JASS stage. */
+void jass_ordr_log_event(jass_t *j, cstring_t event, cstring_t detail) {
+    if (!j) return;
+    /* The map loader identifies ORDR from its source even if the JASS
+     * parser rejected it and never registered CUO/CUW. */
+    if (event && (!strcmp(event, "MAP_PARSE") || !strcmp(event, "PARSE_POSITION"))) {
+        if (ordr_flow_vm != jass_root(j)) {
+            if (ordr_jass_log) { fclose(ordr_jass_log); ordr_jass_log = NULL; }
+            ordr_jass_log_open_attempted = false;
+            ordr_jass_log_lines = 0;
+            ordr_flow_vm = jass_root(j);
+            ordr_flow_mask = 0;
+        }
+    }
+    if (jass_root(j) != ordr_flow_vm || !ordr_flow_vm) return;
+    jass_ordr_log_open();
+    if (!ordr_jass_log) return;
+    fprintf(ordr_jass_log, "%u ms  [%-16s]  %s\n",
+            (unsigned)jass_gettime(),
+            event ? event : "EVENT",
+            detail ? detail : "");
+    fflush(ordr_jass_log);
+}
+
+/* Sample routine calls rather than stopping after 20,000 entries. The first
+ * 96 calls describe startup, and later entries reveal continued progress
+ * without hiding a later crash behind a trace limit. */
+static void jass_ordr_log_function(cstring_t name, cstring_t via, uint32_t now) {
+    ++ordr_jass_log_lines;
+    if (ordr_jass_log_lines > 96 && (ordr_jass_log_lines % 2048) != 0) return;
+    jass_ordr_log_open();
+    if (!ordr_jass_log) return;
+    fprintf(ordr_jass_log, "%u ms  [FUNCTION_SAMPLE ]  call=%u via=%s name=%s\n",
+            (unsigned)now, ordr_jass_log_lines, via, name);
+    fflush(ordr_jass_log);
+}
+
+static void jass_ordr_milestone(jass_t *j, cstring_t name, cstring_t via) {
+    static unsigned hits[18];
+    static cstring_t const watched[] = {
+        "config", "main", "BJG", "BB4", "CUO", "CUa", "CUX", "CUW",
+        "CUN", "CUK", "CUL", "CUM", "CT9", "CCL", "CWd",
+        "CWv", "CWw", "CWz"
+    };
+    jass_t *root;
+    if (!j || !name) return;
+    root = jass_root(j);
+    if (root != ordr_flow_vm) {
+        if (ordr_jass_log) { fclose(ordr_jass_log); ordr_jass_log = NULL; }
+        ordr_jass_log_open_attempted = false;
+        ordr_jass_log_lines = 0;
+        ordr_flow_vm = root;
+        ordr_flow_mask = 0;
+        memset(hits, 0, sizeof(hits));
+    }
+    if (!find_function(root, "CUO") || !find_function(root, "CUW")) return;
+    jass_ordr_log_function(name, via, jass_gettime());
+    FOR_LOOP(i, sizeof(watched) / sizeof(watched[0])) {
+        char detail[160];
+        if (strcmp(name, watched[i])) continue;
+        /* Preserve the original bitmask indices for the game/monitor. */
+        if (i == 1) ordr_flow_mask |= 1u << 0;  /* main */
+        if (i >= 2 && i <= 12) ordr_flow_mask |= 1u << (i - 1);
+        if (hits[i]++ < 8) {
+            snprintf(detail, sizeof(detail), "function=%s via=%s hit=%u calls=%u",
+                     name, via, hits[i], ordr_jass_log_lines);
+            jass_ordr_log_event(j, "FLOW_ENTER", detail);
+        }
+        return;
+    }
+}
+
 static jassCoroutineframe_t *jass_coroutine_pushframe(jasscoroutine_t *co,
                                                      JASSFRAMETYPE type,
                                                      jassFunc_t const *func,
@@ -445,6 +593,8 @@ static jassCoroutineframe_t *jass_coroutine_pushframe(jasscoroutine_t *co,
     frame->return_boolean = false;
     frame->negate_condition = false;
     frame->condition_result = false;
+    if (type == JASS_FRAME_FUNCTION && func)
+        jass_ordr_milestone(co->state, func->name, "coroutine");
     ADD_TO_LIST(frame, co->frames);
     return frame;
 }
@@ -453,6 +603,24 @@ static void jass_coroutine_popframe(jasscoroutine_t *co) {
     jassCoroutineframe_t *frame = co->frames;
     if (frame) {
         JASSFRAMETYPE type = frame->type;
+        if (type == JASS_FRAME_FUNCTION && frame->func &&
+            co->state && jass_root(co->state) == ordr_flow_vm) {
+            cstring_t name = jass_functionname(frame->func);
+            static cstring_t const tracked[] = {
+                "config", "main", "BJG", "BB4", "CUO", "CUa", "CUX",
+                "CUW", "CUN", "CCL", "CWd", "CWv", "CWw", "CWz"
+            };
+            static unsigned return_hits[14];
+            FOR_LOOP(i, sizeof(tracked) / sizeof(*tracked)) {
+                if (name && !strcmp(name, tracked[i]) && return_hits[i]++ < 8) {
+                    char detail[128];
+                    snprintf(detail, sizeof(detail), "function=%s hit=%u calls=%u",
+                             name, return_hits[i], ordr_jass_log_lines);
+                    jass_ordr_log_event(co->state, "FLOW_RETURN", detail);
+                    break;
+                }
+            }
+        }
         co->frames = frame->next;
         jass_free_frame(co, frame);
         /* Coroutine calls used as statements discard returned values.  The old path retained one value per return. */
@@ -638,7 +806,7 @@ jassFunc_t const *jass_functionbyname(jass_t *j, cstring_t name) { return find_f
 void jass_settimercontext(handle_t timer) { currenttimer = timer; }
 
 bool jass_triggerdisabled(trigger_t *trigger) {
-    return trigger ? trigger->disabled : false;
+    return trigger ? trigger->destroyed || trigger->disabled : false;
 }
 
 /* =========================================================================
@@ -669,6 +837,7 @@ static void jass_setruntimeerror(jass_t *j, cstring_t message) {
     jass_t *root = jass_root(j);
     root->rterror_pending = true;
     snprintf(root->rterror_message, sizeof(root->rterror_message), "%s", message ? message : "(nil)");
+    jass_ordr_log_event(root, "RUNTIME_ERROR", root->rterror_message);
     jass_host.RuntimeError(root->rterror_message);
 }
 
@@ -685,6 +854,7 @@ static void jass_missingcall(jass_t *j, cstring_t name, bool native) {
         root->missing = item;
     }
     snprintf(message, sizeof(message), "%s: %s", native ? "unimplemented native" : "unknown function", name);
+    jass_ordr_log_event(j, native ? "MISSING_NATIVE" : "UNKNOWN_FUNCTION", name);
 #ifdef WC3_TRACE_AI
     if (native && (!strcmp(name, "AddAssault") || !strcmp(name, "SuicidePlayer") ||
                    !strcmp(name, "CommandsWaiting") || !strcmp(name, "GetLastCommand")))
@@ -875,7 +1045,20 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
     }
 
     co->yielded = false;
+    /* A large initial script can spend many interpreter steps at game
+     * time zero. This heartbeat identifies the active call chain without
+     * requiring a frame to return or the game clock to advance. */
+    uint64_t ordr_resume_steps = 0;
     while (co->frames && !co->yielded) {
+        if (++ordr_resume_steps % 16384 == 0 &&
+            jass_root(j) == ordr_flow_vm) {
+            char chain[192], detail[256];
+            jass_formatcallchain(j, chain, sizeof(chain));
+            snprintf(detail, sizeof(detail), "steps=%llu calls=%u chain=%s",
+                     (unsigned long long)ordr_resume_steps,
+                     ordr_jass_log_lines, chain);
+            jass_ordr_log_event(j, "INIT_PROGRESS", detail);
+        }
         jassCoroutineframe_t *frame = co->frames;
         token_t const *token = frame->pc;
         token_t const *next;
@@ -983,6 +1166,14 @@ static void jass_resumecoroutine(jasscoroutine_t *co) {
     if (!co->yielded && !co->frames) {
         co->done = true;
     }
+    if (jass_root(j) == ordr_flow_vm) {
+        char detail[160];
+        snprintf(detail, sizeof(detail), "steps=%llu yielded=%d done=%d remaining_frames=%d calls=%u",
+                 (unsigned long long)ordr_resume_steps,
+                 (int)co->yielded, (int)co->done, co->frames != NULL,
+                 ordr_jass_log_lines);
+        jass_ordr_log_event(j, "RESUME_EXIT", detail);
+    }
 }
 
 bool jass_coroutinedone(jasscoroutine_t const *co) {
@@ -1078,28 +1269,73 @@ bool jass_resume(jass_t *j, jasscoroutine_t *co) {
     return true;
 }
 
+/* Log both sides of every lifecycle boundary during the initial ORDR map
+ * startup. The two recorded device crashes happened after RESUME_EXIT but
+ * before G_StartScripts returned: that does not establish whether the next
+ * resume, completed-coroutine free, or list advancement failed. Keep these
+ * checkpoints uncoupled from game semantics and cap startup volume. */
+static void jass_ordr_scheduler_checkpoint(jass_t *root, cstring_t stage,
+                                           jasscoroutine_t const *co,
+                                           unsigned ordinal) {
+    if (root != ordr_flow_vm || ordinal > 128) return;
+    char detail[208];
+    cstring_t function = "(none)";
+    if (co && co->state && co->state->context.func) {
+        cstring_t name = jass_functionname(co->state->context.func);
+        if (name && *name) function = name;
+    }
+    snprintf(detail, sizeof(detail),
+             "ordinal=%u co=%p function=%s done=%d yielded=%d wake_ms=%u",
+             ordinal, (void *)co, function, co ? (int)co->done : -1,
+             co ? (int)co->yielded : -1,
+             co ? (unsigned)co->wake_time : 0u);
+    jass_ordr_log_event(root, stage, detail);
+}
+
 void jass_runevents(jass_t *j) {
     jass_t *root = jass_root(j);
     jasscoroutine_t *prev = NULL;
     jasscoroutine_t *co = root->coroutines;
+    unsigned ordinal = 0;
 
+    if (root == ordr_flow_vm)
+        jass_ordr_log_event(root, "EVENT_DRAIN_ENTER",
+                            "queued JASS coroutines entering event scheduler");
     while (co) {
         jasscoroutine_t *next;
+        ordinal++;
+        jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_RESUME", co, ordinal);
+        bool const previous_probe = ordr_native_probe_active;
+        /* BB4 is ordinal 2 in the captured stall: starting at 6 suppressed
+         * native checkpoints for the only resume that failed to return. */
+        if (root == ordr_flow_vm && ordinal >= 2 && ordinal <= 32 &&
+            ordr_native_probe_calls < 512)
+            ordr_native_probe_active = true;
         jass_resume(root, co);
+        ordr_native_probe_active = previous_probe;
+        jass_ordr_scheduler_checkpoint(root, "EVENT_AFTER_RESUME", co, ordinal);
 
         next = co->next;
         if (co->done) {
+            jass_ordr_scheduler_checkpoint(root, "EVENT_BEFORE_FREE", co, ordinal);
             if (prev) {
                 prev->next = next;
             } else {
                 root->coroutines = next;
             }
             jass_free_coroutine(co);
+            jass_ordr_scheduler_checkpoint(root, "EVENT_AFTER_FREE", NULL, ordinal);
         } else {
             prev = co;
         }
         if (root->halt_events) break;
         co = next;
+    }
+    if (root == ordr_flow_vm) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "visited=%u queue_empty=%d halted=%d",
+                 ordinal, root->coroutines == NULL, (int)root->halt_events);
+        jass_ordr_log_event(root, "EVENT_DRAIN_EXIT", detail);
     }
 }
 
@@ -1108,10 +1344,32 @@ void jass_runevents(jass_t *j) {
  * ========================================================================= */
 
 static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
+    /* Warcraft JASS permits null trigger handles. In ORDR 2.323[C],
+     * main ends with ConditionalTriggerExecute(ve), where ve stays null.
+     * TriggerEvaluate(null) must fail cleanly rather than dereferencing
+     * params->trigger->conditions and crashing the app at game time zero. */
+    if (!params || !params->trigger || params->trigger->destroyed) {
+        jass_ordr_log_event(j, "NULL_TRIGGER_EVAL", "null trigger handle ignored");
+        return false;
+    }
     player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
     jass_t *tmp_state = jass_alloc(sizeof(*tmp_state));
+    bool all_true = true;
+    bool after_cux = false;
+    unsigned cond_index = 0, follow_remaining = 0;
     if (!tmp_state) return false;
+    if (params->trigger->evaluation_count < UINT32_MAX)
+        params->trigger->evaluation_count++;
     FOR_EACH_LIST(gTriggerCondition_t, cond, params->trigger->conditions) {
+        cstring_t cond_name = cond->expr ? jass_functionname(cond->expr) : NULL;
+        bool const cux = jass_root(j) == ordr_flow_vm && cond_name && !strcmp(cond_name, "CUX");
+        bool const trace = cux || follow_remaining > 0;
+        char detail[160];
+        if (trace) {
+            snprintf(detail, sizeof(detail), "index=%u function=%s", cond_index,
+                     cond_name ? cond_name : "(null)");
+            jass_ordr_log_event(j, "CONDITION_ENTER", detail);
+        }
         memcpy(tmp_state, j, sizeof(struct jass_s));
         memset(tmp_state->stack, 0, sizeof(tmp_state->stack));
         tmp_state->num_stack = 0;
@@ -1119,30 +1377,77 @@ static bool jass_evaluatetriggercontext(jass_t *j, jassTriggerContextParams_t co
         tmp_state->context.unit = params->unit;
         tmp_state->context.source = params->source;
         tmp_state->context.eventValue = params->value;
+        tmp_state->context.event_id = params->event_id;
+        tmp_state->context.learned_level = params->learned_level;
         tmp_state->context.dialog_id = params->dialog_id;
         tmp_state->context.dialog_button_id = params->dialog_button_id;
+        snprintf(tmp_state->context.chat_text, sizeof(tmp_state->context.chat_text), "%s", params->chat_text ? params->chat_text : "");
+        snprintf(tmp_state->context.chat_matched, sizeof(tmp_state->context.chat_matched), "%s", params->chat_matched ? params->chat_matched : "");
         tmp_state->context.point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f };
         tmp_state->context.hasPoint = params->has_point;
         tmp_state->context.playerState = player;
         tmp_state->context.localPlayerState = currentplayer;
-        tmp_state->context.timer = currenttimer;
+        tmp_state->context.timer = params->timer ? params->timer : currenttimer;
         tmp_state->context.region = params->region ? params->region : jass_getcontext(j)->region;
         jass_pushfunction(tmp_state, cond->expr);
         edict_t *previous_unit = currentunit;
         currentunit = params->unit;
+        if (cux)
+            jass_ordr_log_event(j, "CUX_CONDITION_BEFORE", "evaluating authored trigger condition");
         uint32_t result_count = jass_call(tmp_state, 0);
+        if (cux)
+            jass_ordr_log_event(j, "CUX_CONDITION_AFTER", "authored trigger condition returned");
+        if (trace) {
+            snprintf(detail, sizeof(detail), "index=%u function=%s returns=%u stack=%u destroyed=%d",
+                     cond_index, cond_name ? cond_name : "(null)", result_count,
+                     tmp_state->num_stack, (int)params->trigger->destroyed);
+            jass_ordr_log_event(j, "CONDITION_RESULT", detail);
+        }
+        if (cux) { after_cux = true; follow_remaining = 32; }
+        else if (follow_remaining) follow_remaining--;
+        cond_index++;
         currentunit = previous_unit;
+        /* A condition may destroy its own list: do not dereference cond again. */
+        if (params->trigger->destroyed) { jass_free(tmp_state); return false; }
+        /* ORDR registers initialization procedures that return nothing as
+         * trigger conditions. They still have required side effects, so a
+         * missing boolean result must not suppress later registered
+         * procedures. Preserve the false outcome of a void condition but
+         * continue; an explicit boolean false retains short-circuiting. */
+        if (result_count == 0) {
+            all_true = false;
+            if (trace) jass_ordr_log_event(j, "CONDITION_ADVANCE", "void condition: advancing");
+            continue;
+        }
         if (result_count != 1 || !jass_popboolean(tmp_state)) {
             jass_free(tmp_state);
             return false;
         }
+        if (trace) jass_ordr_log_event(j, "CONDITION_ADVANCE", "boolean condition accepted");
     }
+    if (after_cux) jass_ordr_log_event(j, "CONDITION_LIST_DONE", "trigger condition loop completed");
     jass_free(tmp_state);
-    return true;
+    return all_true;
+}
+
+static jassTriggerContextParams_t jass_inherittriggercontext(jass_t *j, trigger_t *trigger, edict_t *unit) {
+    jassTriggerContextParams_t p = { .trigger = trigger, .unit = unit };
+    jassContext_t const *c = jass_getcontext(j);
+    if (c && c->unit == unit) {
+        p.source = c->source; p.value = c->eventValue;
+        p.event_id = c->event_id; p.learned_level = c->learned_level;
+        p.event_player = c->playerState;
+        p.dialog_id = c->dialog_id; p.dialog_button_id = c->dialog_button_id;
+        p.chat_text = c->chat_text; p.chat_matched = c->chat_matched;
+        p.point = &c->point; p.has_point = c->hasPoint;
+        p.timer = c->timer; p.region = c->region;
+    }
+    return p;
 }
 
 bool jass_evaluatetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    return jass_evaluatetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit });
+    jassTriggerContextParams_t p = jass_inherittriggercontext(j, trigger, unit);
+    return jass_evaluatetriggercontext(j, &p);
 }
 
 /* Scratch VMs are heap allocated: the two 4096-slot hash tables and value
@@ -1215,15 +1520,21 @@ bool jass_evaluateplayerinteger(jass_t *j, jassFunc_t const *expr, player_t *pla
 }
 
 static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t const *params, bool immediate) {
+    /* TriggerExecute(null) is a no-op in JASS, not a reason to crash. */
+    if (!params || !params->trigger || params->trigger->destroyed) return;
+    if (params->trigger->execution_count < UINT32_MAX)
+        params->trigger->execution_count++;
     jasscoroutine_t *first = NULL, *last = NULL;
     FOR_EACH_LIST(gTriggerAction_t, action, params->trigger->actions) {
         player_t *player = params->event_player ? params->event_player : jass_eventplayer(params->unit);
-        jasscoroutine_t *co = jass_startcoroutine(j, &MAKE(jassContext_t,
+        jassContext_t chat_context = MAKE(jassContext_t,
                                   .trigger = params->trigger,
                                   .func = action->func,
                                   .unit = params->unit,
                                   .source = params->source,
                                   .eventValue = params->value,
+                                  .event_id = params->event_id,
+                                  .learned_level = params->learned_level,
                                   .dialog_id = params->dialog_id,
                                   .dialog_button_id = params->dialog_button_id,
                                   .point = params->point ? *params->point : (vec2_t){ 0.0f, 0.0f },
@@ -1234,7 +1545,10 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
                                   .region = params->region,
                                   .timer_generation = params->timer ? ((gtimer_t const *)params->timer)->generation : 0,
                                   .timer_pending = params->timer_pending,
-                              ));
+                              );
+        snprintf(chat_context.chat_text, sizeof(chat_context.chat_text), "%s", params->chat_text ? params->chat_text : "");
+        snprintf(chat_context.chat_matched, sizeof(chat_context.chat_matched), "%s", params->chat_matched ? params->chat_matched : "");
+        jasscoroutine_t *co = jass_startcoroutine(j, &chat_context);
         jassVar_t *loop_index = find_global(j, "bj_forLoopAIndex");
         /* Keep queued and suspended actions on the loop index captured at dispatch. */
         if (co && loop_index && loop_index->value && jass_getvarbasetype(loop_index) == jasstype_integer) {
@@ -1260,7 +1574,8 @@ static void jass_executetriggercontext(jass_t *j, jassTriggerContextParams_t con
 }
 
 void jass_executetrigger(jass_t *j, trigger_t *trigger, edict_t *unit) {
-    jass_executetriggercontext(j, &(jassTriggerContextParams_t){ .trigger = trigger, .unit = unit }, true);
+    jassTriggerContextParams_t p = jass_inherittriggercontext(j, trigger, unit);
+    jass_executetriggercontext(j, &p, true);
 }
 
 static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const *params) {
@@ -1268,7 +1583,7 @@ static bool jass_calltriggercontext(jass_t *j, jassTriggerContextParams_t const 
      * evaluation/execution is separate: Blizzard.j queue helpers evaluate a
      * trigger before executing it, and maps can intentionally queue disabled
      * triggers for later scripted execution. */
-    if (!params->trigger || params->trigger->disabled)
+    if (!params->trigger || params->trigger->destroyed || params->trigger->disabled)
         return false;
     if (!jass_evaluatetriggercontext(j, params))
         return false;
@@ -1289,7 +1604,10 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
     if (!event) return false;
     return jass_calltriggercontext(j, &(jassTriggerContextParams_t){
         .trigger = trigger, .unit = event->edict, .source = event->source, .value = event->value,
+        .event_id = (uint32_t)event->type + 1, .learned_level = event->learned_level,
         .dialog_id = event->dialog_id, .dialog_button_id = event->button_id,
+        .chat_text = event->type == EVENT_PLAYER_CHAT ? event->chat_text : NULL,
+        .chat_matched = event->type == EVENT_PLAYER_CHAT && event->responseTo ? event->responseTo->chat_match : NULL,
         .event_player = event->dialog_player
             ? jass_getplayerbyindex(event->dialog_player - 1) : NULL,
         .point = event->has_point ? &event->point : NULL, .has_point = event->has_point,
@@ -1299,7 +1617,8 @@ bool jass_calltriggerevent(jass_t *j, trigger_t *trigger, gameEvent_t const *eve
 
 bool jass_calltriggerwithtimer(jass_t *j, trigger_t *trigger, handle_t timer) {
     bool queued;
-    jassTriggerContextParams_t params = { .trigger = trigger, .timer = timer, .timer_pending = true };
+    jassTriggerContextParams_t params = { .trigger = trigger, .timer = timer, .timer_pending = true,
+        .event_id = EVENT_GAME_TIMER_EXPIRED + 1 };
     currenttimer = timer;
     queued = jass_calltriggercontext(j, &params);
     currenttimer = NULL;
@@ -1750,9 +2069,18 @@ jassFunc_t const *jass_checkcode(jass_t *j, int index) {
     return var->value;
 }
 
+/* Value handles use their enum payload as GetHandleId, including event zero.
+ * Object handles still use their registry identity; never hash enum storage. */
+bool jass_enumvalue(jass_t *j, int index, uint32_t *value) {
+    jassVar_t const *var = jass_stackvalue(j, index);
+    if (!var->value || !var->type || !jass_valuehandle(var->type->name)) return false;
+    *value = *(uint32_t const *)var->value;
+    return true;
+}
+
 handle_t jass_checkhandle(jass_t *j, int index, cstring_t type) {
     jassVar_t const *var = jass_stackvalue(j, index);
-    if (!var->value) {
+    if (!var->value || (var->ref && var->ref->destroyed)) {
         return NULL;
     }
     /* Skip type check for Galaxy — SC2 types are unregistered (type == NULL). */
@@ -1763,6 +2091,19 @@ handle_t jass_checkhandle(jass_t *j, int index, cstring_t type) {
         }
     }
     return var->value;
+}
+
+/* Retire a VM-owned handle without dereferencing freed shared aliases.
+ * The allocated payload is collected by normal JASS ref lifetime; native
+ * light handles (GetUnitPositionLoc etc.) are never owned by this VM. */
+bool jass_destroyownedhandle(jass_t *j, int index, cstring_t type) {
+    jassVar_t *var = jass_stackvalue(j, index);
+    jassType_t const *expected = find_type(j, type);
+    if (!var || !var->value || !var->ref || !var->ref->size ||
+        var->ref->destroyed || !expected || !var->type ||
+        !is_handle_convertible(var->type, expected)) return false;
+    var->ref->destroyed = true;
+    return true;
 }
 
 bool jass_popboolean(jass_t *j) {
@@ -1799,6 +2140,49 @@ uint32_t VM_EvalBoolean(jass_t *j, token_t const *token) {
     return jass_pushboolean(j, jass_atob(token->primary));
 }
 
+/* JASS lexical scope: a function-local/argument shadows a global of
+ * the same name. Several converted maps reuse terse identifiers such as
+ * EK and vP; looking up globals first silently substituted an unrelated
+ * zero-valued global and could abort a coroutine on division by zero. */
+static jassVar_t *jass_find_visible_variable(jass_t *j, cstring_t name,
+                                              bool *is_local) {
+    jassVar_t *var = NULL;
+    if (is_local) *is_local = false;
+    if (j->stack_pointer && j->num_stack > 0)
+        var = find_dict(jass_stackvalue(j, 0)->env.locals, name);
+    if (var) {
+        if (is_local) *is_local = true;
+        return var;
+    }
+    return find_global(j, name);
+}
+
+#ifdef BZ_TESTS
+#include "shared/test.h"
+TEST(jass, local_variables_shadow_global_variables) {
+    jass_t *state = calloc(1, sizeof(*state));
+    jassdict_t local = {0}, global = {0};
+    bool is_local = false;
+    T_ASSERT(state != NULL);
+    if (!state) return;
+    state->num_stack = 1;
+    state->stack_pointer = state->stack;
+    state->stack[0].env.locals = &local;
+    local.key = "EK";
+    global.key = "EK";
+    state->global_hash[jass_hash("EK")] = &global;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &local.value);
+    T_ASSERT(is_local);
+    state->stack[0].env.locals = NULL;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &global.value);
+    T_ASSERT(!is_local);
+    state->num_stack = 0;
+    state->stack_pointer = NULL;
+    T_ASSERT(jass_find_visible_variable(state, "EK", &is_local) == &global.value);
+    free(state);
+}
+#endif
+
 uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassVar_t const *v = NULL;
@@ -1808,9 +2192,29 @@ uint32_t VM_EvalIdentifier(jass_t *j, token_t const *token) {
         } else {
             return jass_pushnull(j);
         }
-    } else if ((v = find_global(j, token->primary))) {
-        return jass_pushvalue(j, v);
-    } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary))) {
+    } else if ((v = jass_find_visible_variable(j, token->primary, NULL))) {
+        /* Diagnose the real scoped CV5 divisor at the point of evaluation.
+         * A post-abort lookup sees no locals and reported EK 'missing',
+         * obscuring whether EK was an unset local or a global shadow. */
+        if (jass_root(j) == ordr_flow_vm && token->primary &&
+            (!strcmp(token->primary, "EK") || !strcmp(token->primary, "vP"))) {
+            static unsigned logged;
+            if (logged++ < 32) {
+                bool local = false;
+                (void)jass_find_visible_variable(j, token->primary, &local);
+                char detail[208];
+                int value = v->value && jass_getvarbasetype(v) == jasstype_integer
+                    ? *(int32_t *)v->value : 0;
+                snprintf(detail, sizeof(detail),
+                         "name=%s scope=%s value=%d local_present=%u global_present=%u function=%.32s",
+                         token->primary, local ? "local" : "global", value,
+                         (unsigned)(j->stack_pointer && j->num_stack &&
+                             find_dict(jass_stackvalue(j, 0)->env.locals, token->primary) != NULL),
+                         (unsigned)(find_global(j, token->primary) != NULL),
+                         jass_currentfunctionname(j) ? jass_currentfunctionname(j) : "?");
+                jass_ordr_log_event(j, "JASS_SCOPED_OPERAND", detail);
+            }
+        }
         return jass_pushvalue(j, v);
     } else {
         return jass_pushnull(j);
@@ -1833,8 +2237,7 @@ uint32_t VM_EvalArrayAccess(jass_t *j, token_t const *token) {
     uint32_t count = jass_dotoken(j, token->index);
     if (count != 1) { jass_pushnull(j); }
     uint32_t index_val = jass_popinteger(j);
-    jassVar_t *var = find_global(j, token->primary);
-    if (!var) var = find_dict(jass_stackvalue(j, 0)->env.locals, token->primary);
+    jassVar_t *var = jass_find_visible_variable(j, token->primary, NULL);
     if (!var) return jass_pushnull(j);
     jassVar_t null_value = { .type = var->type };
     jassVar_t const *item = find_array_value(var, index_val);
@@ -1853,10 +2256,62 @@ uint32_t VM_EvalFourCC(jass_t *j, token_t const *token) {
     return jass_pushinteger(j, *(uint32_t *)token->primary);
 }
 
+/* An ORDR arithmetic failure needs its operand origins, not just the numbers.
+ * Keep signatures bounded and omit string literals (which may contain user data). */
+static void jass_ordr_expr_signature(token_t const *tok, char *out, size_t cap, int depth) {
+    cstring_t name;
+    size_t used;
+    if (!cap) return;
+    if (!tok) { snprintf(out, cap, "(missing)"); return; }
+    if (tok->type == TT_STRING) { snprintf(out, cap, "(string)"); return; }
+    if (tok->type != TT_CALL && tok->type != TT_IDENTIFIER && tok->type != TT_ARRAYACCESS &&
+        tok->type != TT_INTEGER && tok->type != TT_REAL && tok->type != TT_FOURCC) {
+        snprintf(out, cap, "(token:%u)", (unsigned)tok->type);
+        return;
+    }
+    name = tok->primary ? tok->primary : "(unnamed)";
+    snprintf(out, cap, "%.60s", name);
+    if (!depth || (tok->type != TT_CALL && tok->type != TT_ARRAYACCESS)) return;
+    used = strlen(out);
+    if (used + 2 >= cap) return;
+    snprintf(out + used, cap - used, "%s", tok->type == TT_CALL ? "(" : "[");
+    used = strlen(out);
+    token_t const *arg = tok->type == TT_CALL ? tok->args : tok->index;
+    for (unsigned i = 0; arg && i < 2 && used + 2 < cap; i++, arg = arg->next) {
+        char part[96];
+        if (i) { snprintf(out + used, cap - used, ","); used = strlen(out); }
+        jass_ordr_expr_signature(arg, part, sizeof(part), depth - 1);
+        snprintf(out + used, cap - used, "%s", part);
+        used = strlen(out);
+    }
+    if (arg && used + 4 < cap) { snprintf(out + used, cap - used, ",..."); used = strlen(out); }
+    if (used + 2 < cap) snprintf(out + used, cap - used, "%s", tok->type == TT_CALL ? ")" : "]");
+}
+
 uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
     jassFunc_t const *f = NULL;
     jassCFunction_t cf = NULL;
     uint32_t stacksize = j->num_stack;
+    /* JASS boolean operators short-circuit. Eager native argument evaluation
+     * previously ran a skipped condition, including calls with side effects. */
+    bool const logic_and = !strcmp(token->primary, "__and");
+    bool const logic_or = !strcmp(token->primary, "__or");
+    if (logic_and || logic_or) {
+        token_t const *arg = token->args;
+        if (!arg || !arg->next) {
+            jass_rterror(j, "missing boolean operand");
+            return 0;
+        }
+        if (!jass_dotoken(j, arg)) jass_pushnull(j);
+        bool result = jass_toboolean(j, -1);
+        jass_discard(j, j->num_stack - stacksize);
+        if ((logic_and && result) || (logic_or && !result)) {
+            if (!jass_dotoken(j, arg->next)) jass_pushnull(j);
+            result = jass_toboolean(j, -1);
+            jass_discard(j, j->num_stack - stacksize);
+        }
+        return jass_pushboolean(j, result);
+    }
     if (!strcmp(token->primary, "CommentString") && token->args) {
         fprintf(stdout, "%s\n", token->args->primary);
         return 0;
@@ -1901,6 +2356,17 @@ uint32_t VM_EvalCall(jass_t *j, token_t const *token) {
                 jass_pushnull(j);
             }
             args++;
+        }
+        /* Report any remaining ORDR division fault using bounded AST tokens;
+         * never export the private map source or alter arithmetic semantics. */
+        if (jass_root(j) == ordr_flow_vm && !strcmp(token->primary, "__div") && args == 2 &&
+            j->num_stack == stacksize + 3 && jass_gettype(j, -1) == jasstype_integer &&
+            jass_gettype(j, -2) == jasstype_integer && jass_checkinteger(j, -1) == 0) {
+            char lhs[160], rhs[160], detail[368];
+            jass_ordr_expr_signature(token->args, lhs, sizeof(lhs), 3);
+            jass_ordr_expr_signature(token->args ? token->args->next : NULL, rhs, sizeof(rhs), 3);
+            snprintf(detail, sizeof(detail), "numerator=%s denominator=%s", lhs, rhs);
+            jass_ordr_log_event(j, "DIVIDE_SOURCE", detail);
         }
         jass_call(j, args);
         return j->num_stack - stacksize;
@@ -2038,18 +2504,14 @@ TOKENFUNC(IF) {
 }
 
 TOKENFUNC(SET) {
-    jassVar_t *v = NULL;
-    if ((v = find_global(j, token->secondary))) {
+    bool is_local = false;
+    jassVar_t *v = jass_find_visible_variable(j, token->secondary, &is_local);
+    if (v) {
         if (token->index) {
             return jass_set_array_value(j, v, token, token->init);
         } else {
-            return jass_set_value(j, v, token->init, token->secondary);
-        }
-    } else if ((v = find_dict(jass_stackvalue(j, 0)->env.locals, token->secondary))) {
-        if (token->index) {
-            return jass_set_array_value(j, v, token, token->init);
-        } else {
-            return jass_set_value(j, v, token->init, NULL);
+            return jass_set_value(j, v, token->init,
+                                  is_local ? NULL : token->secondary);
         }
     } else {
         fprintf(stderr, "Can't find variable %s\n",
@@ -2203,20 +2665,45 @@ TOKENFUNC(TOKENS) {
  * ========================================================================= */
 
 static void jass_remove_comments(string_t buf) {
-    bool in_line  = false;
+    bool in_line = false;
     bool in_block = false;
-    uint32_t quotes  = 0;
+    bool in_string = false;
     char *src = buf, *dst = buf;
     while (*src) {
-        if (!in_line && !in_block) {
-            if (*src == '"') { quotes++; *dst++ = *src++; }
-            else if (quotes & 1) { *dst++ = *src++; }
-            else if (src[0] == '/' && src[1] == '/') { in_line  = true;  src += 2; }
-            else if (src[0] == '/' && src[1] == '*') { in_block = true;  src += 2; }
-            else { *dst++ = *src++; }
-        } else if (in_line && (*src == '\n' || *src == '\r')) { in_line = false; *dst++ = *src++; }
-          else if (in_block && src[0] == '*' && src[1] == '/')      { in_block = false; src += 2; }
-          else { src++; }
+        if (in_line) {
+            if (*src == '\n' || *src == '\r') {
+                in_line = false;
+                *dst++ = *src++;
+            } else src++;
+        } else if (in_block) {
+            if (src[0] == '*' && src[1] == '/') {
+                in_block = false;
+                src += 2;
+            } else {
+                /* Preserve source line numbers for parser diagnostics. */
+                if (*src == '\n' || *src == '\r') *dst++ = *src;
+                src++;
+            }
+        } else if (in_string) {
+            /* An escaped quote is part of the JASS string, not its terminator.
+             * Copy the escaped byte together with the backslash. */
+            if (src[0] == '\\' && src[1]) {
+                *dst++ = *src++;
+                *dst++ = *src++;
+            } else if (*src == '"') {
+                in_string = false;
+                *dst++ = *src++;
+            } else *dst++ = *src++;
+        } else if (*src == '"') {
+            in_string = true;
+            *dst++ = *src++;
+        } else if (src[0] == '/' && src[1] == '/') {
+            in_line = true;
+            src += 2;
+        } else if (src[0] == '/' && src[1] == '*') {
+            in_block = true;
+            src += 2;
+        } else *dst++ = *src++;
     }
     *dst = '\0';
 }
@@ -2331,8 +2818,43 @@ bool jass_dobuffer_ex(jass_t *j, string_t buffer, JASSMODE mode) {
     token_t *program = syntax->parse(&parser);
     if (parser.error) {
         jass_t *root = jass_root(j);
+        char detail[256];
+        size_t line = 1, column = 1;
+        cstring_t cur = buffer;
+        cstring_t stop = parser.buffer ? parser.buffer : buffer;
+        size_t const bytes = strlen(buffer);
+        size_t offset;
+        char excerpt[96];
+        size_t n = 0;
+        if (stop < buffer || stop > buffer + bytes) stop = buffer;
+        offset = (size_t)(stop - buffer);
+        while (cur < stop) {
+            if (*cur++ == '\n') { line++; column = 1; }
+            else column++;
+        }
+        /* Capture bytes before the failure as well: tokenization often
+         * advances beyond the actual malformed string or expression. */
+        cur = stop > buffer + 80 ? stop - 80 : buffer;
+        while (cur < stop && n < sizeof(excerpt) - 1) {
+            unsigned char ch = (unsigned char)*cur++;
+            excerpt[n++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
+        }
+        if (n < sizeof(excerpt) - 1) excerpt[n++] = '^';
+        cur = stop;
+        while (*cur && *cur != '\n' && *cur != '\r' && n < sizeof(excerpt) - 1) {
+            unsigned char ch = (unsigned char)*cur++;
+            excerpt[n++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
+        }
+        excerpt[n] = 0;
+        snprintf(detail, sizeof(detail),
+                 "line=%u column=%u offset=%u near=%.90s",
+                 (unsigned)line, (unsigned)column, (unsigned)offset, excerpt);
+        fprintf(stderr, "JASS-PARSE-ERROR: %s\n", detail);
+        jass_ordr_log_event(j, "PARSE_POSITION", detail);
         root->rterror_pending = true;
-        snprintf(root->rterror_message, sizeof(root->rterror_message), "parse error");
+        snprintf(root->rterror_message, sizeof(root->rterror_message),
+                 "parse error line %u column %u offset %u",
+                 (unsigned)line, (unsigned)column, (unsigned)offset);
         return false;
     }
     jassprogram_t *owned = JASSALLOC(jassprogram_t);
@@ -2475,6 +2997,12 @@ static bool jass_snapshot_writehandle(jass_t *j, jassSnapshot_t *snapshot, jassV
         encoding = JASS_SNAPSHOT_HANDLE_VALUE;
         return jass_snapshot_io(snapshot, &encoding, sizeof(encoding)) &&
             jass_snapshot_io(snapshot, var->value, sizeof(uint32_t));
+    }
+    /* Retired locations remain referenced by JASS globals but have no live
+     * handle payload; serialise them as null rather than resurrecting them. */
+    if (var->ref && var->ref->destroyed) {
+        encoding = JASS_SNAPSHOT_HANDLE_NULL;
+        return jass_snapshot_io(snapshot, &encoding, sizeof(encoding));
     }
     /* VM-owned and function handles must bypass the host: a host miss means stale only for host-owned domains. */
     if (jass_snapshot_ownedhandle(var->type->name) && var->ref && var->ref->size) {
@@ -2738,6 +3266,8 @@ static bool jass_snapshot_writecontext(jassSnapshot_t *snapshot, jassContext_t c
     };
     if (!jass_snapshot_writestr(snapshot, jass_functionname(context->func)) ||
         !jass_snapshot_io(snapshot, (void *)&context->eventValue, sizeof(context->eventValue)) ||
+        !jass_snapshot_io(snapshot, (void *)&context->event_id, sizeof(context->event_id)) ||
+        !jass_snapshot_io(snapshot, (void *)&context->learned_level, sizeof(context->learned_level)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, (void *)&context->point, sizeof(context->point)) ||
@@ -2765,6 +3295,8 @@ static bool jass_snapshot_readcontext(jass_t *j, jassSnapshot_t *snapshot, jassC
     SAFE_DELETE(func, jass_free);
     if (has_func && !context->func) return false;
     if (!jass_snapshot_io(snapshot, &context->eventValue, sizeof(context->eventValue)) ||
+        !jass_snapshot_io(snapshot, &context->event_id, sizeof(context->event_id)) ||
+        !jass_snapshot_io(snapshot, &context->learned_level, sizeof(context->learned_level)) ||
         !jass_snapshot_io(snapshot, &context->dialog_id, sizeof(context->dialog_id)) ||
         !jass_snapshot_io(snapshot, &context->dialog_button_id, sizeof(context->dialog_button_id)) ||
         !jass_snapshot_io(snapshot, &context->point, sizeof(context->point)) ||
@@ -3008,11 +3540,27 @@ static uint32_t jass_call_impl(jass_t *j, uint32_t args) {
         jassFunc_t const *func = root->value;
         jassdict_t *locals = NULL;
         uint32_t argnum = 1;
+        if (func) jass_ordr_milestone(j, func->name, "synchronous");
 #ifdef DEBUG_JASS
         printf("%s\n", func->name);
 #endif
         if (func->nativefunc) {
+            unsigned probe_id = 0;
+            if (ordr_native_probe_active && jass_root(j) == ordr_flow_vm &&
+                ordr_native_probe_calls < 512) {
+                char detail[144];
+                probe_id = ++ordr_native_probe_calls;
+                snprintf(detail, sizeof(detail), "call=%u native=%s argc=%u",
+                         probe_id, func->name ? func->name : "(unnamed)", args);
+                jass_ordr_log_event(j, "NATIVE_BEFORE", detail);
+            }
             ret = func->nativefunc(j);
+            if (probe_id) {
+                char detail[144];
+                snprintf(detail, sizeof(detail), "call=%u native=%s returned=%u",
+                         probe_id, func->name ? func->name : "(unnamed)", ret);
+                jass_ordr_log_event(j, "NATIVE_AFTER", detail);
+            }
         } else {
             FOR_EACH_LIST(jassarg_t, arg, func->args) {
                 jassdict_t *local = JASSALLOC(jassdict_t);

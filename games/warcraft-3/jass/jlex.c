@@ -18,7 +18,18 @@ cstring_t parse_token(wordExtractor_t *p) {
     while (isspace(*p->buffer)) ++p->buffer;
     if (*p->buffer == '\"' || *p->buffer == '\'') {
         char quote = *p->buffer;
-        cstring_t closingQuote = strchr(p->buffer + 1, quote);
+        /* Skip escaped quotes: strchr() incorrectly ended JASS strings at \".
+         * This broke ORDR's SaveStr text around script line 7494. */
+        cstring_t closingQuote = p->buffer + 1;
+        while (*closingQuote) {
+            if (*closingQuote == '\\' && closingQuote[1]) {
+                closingQuote += 2;
+                continue;
+            }
+            if (*closingQuote == quote) break;
+            closingQuote++;
+        }
+        if (!*closingQuote) closingQuote = NULL;
         size_t stringLength;
         if (!closingQuote) {
             strlcpy(word, p->buffer, MAX_SEGMENT_SIZE);
@@ -33,6 +44,29 @@ cstring_t parse_token(wordExtractor_t *p) {
         if (stringLength >= MAX_SEGMENT_SIZE) stringLength = MAX_SEGMENT_SIZE - 1;
         memcpy(word, p->buffer, stringLength);
         word[stringLength] = '\0';
+        /* JASS quoted strings use backslash escapes. Decode these at the
+         * lexer boundary so all consumers (messages, frame text, tooltips)
+         * receive actual line breaks rather than the two characters \\n.
+         * Only decode when quotes are stripped; raw-token callers retain
+         * the original source spelling. */
+        if (p->eat_quotes) {
+            size_t read = 0, write = 0;
+            while (read < stringLength) {
+                if (word[read] == '\\' && read + 1 < stringLength) {
+                    char escaped = word[read + 1];
+                    if (escaped == 'n' || escaped == 'r' || escaped == 't' ||
+                        escaped == '\\' || escaped == '"') {
+                        word[write++] = escaped == 'n' ? '\n' :
+                                        escaped == 'r' ? '\r' :
+                                        escaped == 't' ? '\t' : escaped;
+                        read += 2;
+                        continue;
+                    }
+                }
+                word[write++] = word[read++];
+            }
+            word[write] = '\0';
+        }
         p->buffer = closingQuote + 1;
         return word;
     } else if (*p->buffer && strchr(p->delimiters, *p->buffer)) {

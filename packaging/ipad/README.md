@@ -1,5 +1,8 @@
 # OpenWarcraft3 on iPad
 
+**ORDR S2 2.323[C] note:** The current engine branch, device-tested status, open bugs and correct [ipad-test]/[ipad-build] workflow usage are documented in [ORDR iPad handoff](../../docs/games/warcraft-3/ordr-native-handoff.md). A successful generic IPA build does not mean enemy movement, wave count, facility buttons or UI overlap have been fixed. Always check the artifact's exact commit.
+
+
 An iPad app (one executable plus six embedded frameworks) built directly with
 Xcode SDK commands, following the `mapview/ui` Makefile workflow. No Xcode project or third-party
 iOS dependencies are required beyond the SDL2 release tarball (downloaded and
@@ -63,6 +66,35 @@ and override `BUILD_DIR` or `ARCH`.
   Files, AirDrop, or USB (`War3.mpq`, `War3x.mpq`, …) are picked up with no
   command line. The read-only `share/` tree resolves beside the executable
   inside the bundle via the existing `SDL_GetBasePath()` probe.
+
+## SideStore IPA from GitHub Actions
+
+The existing `.github/workflows/ordr-ipad-build.yml` workflow builds an
+unsigned iPad IPA from `feature/ordr-singleplayer-compat` on manual
+`workflow_dispatch` or a push with `[ipad-build]` in the commit message.
+Ordinary pushes do not spend a macOS IPA build. The `ORDR-iPad-SideStore-IPA`
+artifact contains `ORDR-iPad-SideStore-unsigned.ipa` and must be signed through
+SideStore before installation on a real iPad. The downloaded artifact is a ZIP
+containing the IPA; an Actions run being queued is not proof of a completed IPA.
+
+## ORDR JASS diagnostics (iPad)
+
+When the ORDR single-player map starts executing JASS, OpenRealm writes an
+**`ordr-jass.log`** file directly to the app's Files-visible Documents folder:
+
+**Files → On My iPad → OpenWarcraft3 → ordr-jass.log**
+
+The log records JASS function entry and execution mode, ORDR difficulty setup
+milestones, CUW timer start/expiry, five-second map-state snapshots, and
+unimplemented native / JASS runtime errors. Events are flushed immediately;
+ordinary function entries are flushed periodically. The log is overwritten
+when a new ORDR JASS VM starts. **Share or copy it before launching the map
+again** if you want to preserve the earlier run.
+
+This is a diagnostic trace, not a complete recording of every native call.
+Function entry tracing is capped at 20,000 entries to limit file size and
+runtime overhead, though critical events and state snapshots continue to be
+logged. JASS call arguments are intentionally not recorded.
 
 ## Game data
 

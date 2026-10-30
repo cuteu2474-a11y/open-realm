@@ -4136,7 +4136,9 @@ TEST(wc3_building, acolyte_builds_ziggurat_then_can_move_away) {
     T_ASSERT(!ziggurat->construction);
     T_ASSERT(acolyte->inuse);
     T_NULL(acolyte->build);
-    T_ASSERT(acolyte->goalentity && acolyte->goalentity->s.origin2.x == build_point.x);
+    /* Undead workers are released from the completed structure. Retaining
+     * the construction target would resurrect a stale follow/chase order. */
+    T_NULL(acolyte->goalentity);
     T_ASSERT(!(acolyte->s.renderfx & RF_HIDDEN));
     T_ASSERT(!acolyte->paused);
     T_ASSERT(!acolyte->invulnerable);

@@ -27,6 +27,8 @@
 #include "../g_local.h"
 
 bool run_test_jass(cstring_t src);
+slkTestData_t *parse_slk_string(char const *text);
+void free_slk_rows(slkTestData_t *data);
 bool run_test_jass_error(cstring_t src, cstring_t expected);
 void setup_test_world(void);
 
@@ -296,6 +298,84 @@ TEST(wc3_jass_map, bjassassert_error_message_must_match) {
     , "assertion failed: different failure"));
 }
 
+/* A JASS arithmetic error must be reported by the VM, not terminate the
+ * iPad process with SIGFPE while executing a map's trigger condition. */
+TEST(wc3_jass_map, integer_divide_by_zero_is_jass_runtime_error) {
+    T_ASSERT(run_test_jass_error(
+        "function main takes nothing returns nothing\n"
+        "  local integer divisor = 0\n"
+        "  local integer value = 18 / divisor\n"
+        "endfunction\n"
+    , "integer division by zero"));
+}
+
+TEST(wc3_jass_map, integer_division_signed_overflow_is_jass_runtime_error) {
+    T_ASSERT(run_test_jass_error(
+        "function main takes nothing returns nothing\n"
+        "  local integer smallest = -2147483647 - 1\n"
+        "  local integer value = smallest / -1\n"
+        "endfunction\n"
+    , "integer division overflow"));
+}
+
+TEST(wc3_jass_map, integer_division_valid_operands_preserve_original_arithmetic) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(7 / 2 == 3, \"positive integer division truncates\")\n"
+        "  call BJassAssert(-7 / 2 == -3, \"negative integer division truncates\")\n"
+        "  call BJassAssert(7.0 / 2.0 == 3.5, \"real division remains fractional\")\n"
+        "endfunction\n"
+    ));
+}
+
+/* ORDR's authored `360 / vP * EK` must multiply the quotient by EK.
+ * Right-associative parsing previously divided 360 by (vP * EK), crashing
+ * the first CV5 iteration (EK == 0) even though vP was nonzero. */
+TEST(wc3_jass_map, mixed_arithmetic_operators_evaluate_left_to_right) {
+    T_ASSERT(run_test_jass(
+        "function BFg takes integer Hv, integer Hw returns integer\n"
+        "  return Hv - Hv / Hw * Hw\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local integer vP = 10\n"
+        "  local integer EK = 0\n"
+        "  call BJassAssert(360 / vP * EK == 0, \"initial ring angle\")\n"
+        "  set EK = 1\n"
+        "  call BJassAssert(360 / vP * EK == 36, \"next ring angle\")\n"
+        "  call BJassAssert(24 / 4 / 2 == 3, \"chained division\")\n"
+        "  call BJassAssert(20 - 7 + 2 == 15, \"mixed addition subtraction\")\n"
+        "  call BJassAssert(20 - 7 - 2 == 11, \"chained subtraction\")\n"
+        "  call BJassAssert(20 / (2 * 5) == 2, \"explicit parentheses\")\n"
+        "  call BJassAssert(2 + 3 * 4 == 14, \"multiplication precedence\")\n"
+        "  call BJassAssert(BFg(7, 3) == 1, \"map grid remainder\")\n"
+        "endfunction\n"
+    ));
+}
+
+TEST(wc3_jass_map, boolean_operators_respect_precedence_and_short_circuit) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer visits = 0\n"
+        "endglobals\n"
+        "function Visited takes nothing returns boolean\n"
+        "  set visits = visits + 1\n"
+        "  return true\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(false and true or true, \"and before or\")\n"
+        "  call BJassAssert(not (true and false or false), \"left boolean group\")\n"
+        "  call BJassAssert(not (false or true and false), \"right boolean group\")\n"
+        "  call BJassAssert(true or false and false, \"or preserves true\")\n"
+        "  call BJassAssert(not (false and Visited()), \"false and skips\")\n"
+        "  call BJassAssert(true or Visited(), \"true or skips\")\n"
+        "  call BJassAssert(visits == 0, \"skipped branch has no effect\")\n"
+        "  call BJassAssert(true and Visited(), \"true and executes\")\n"
+        "  call BJassAssert(false or Visited(), \"false or executes\")\n"
+        "  call BJassAssert(visits == 2, \"required branches execute\")\n"
+        "endfunction\n"
+    ));
+}
+
 TEST(wc3_jass_map, array_assignment_and_access_evaluate_expressions) {
     T_ASSERT(run_test_jass(
         "globals\n"
@@ -493,6 +573,85 @@ TEST(wc3_jass_map, forgroup_snapshot_survives_nested_mutation) {
         "endfunction\n"));
 }
 
+/* ORDR 2.323[C] ends main() by evaluating an uninitialized (null)
+ * trigger. A null handle must not dereference trigger->conditions. */
+/* ORDR 2.323[C] uses TriggerEvaluate(Lu) to broadcast initialization
+ * callbacks declared 'returns nothing', including the difficulty timer
+ * initializer. They must all run in the order they were registered. */
+TEST(wc3_jass_map, void_trigger_conditions_execute_in_registration_order) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger initTrigger = null\n"
+        "  integer initOrder = 0\n"
+        "endglobals\n"
+        "function FirstInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 1\n"
+        "endfunction\n"
+        "function SecondInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 2\n"
+        "endfunction\n"
+        "function ThirdInit takes nothing returns nothing\n"
+        "  set initOrder = initOrder * 10 + 3\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set initTrigger = CreateTrigger()\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function FirstInit))\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function SecondInit))\n"
+        "  call TriggerAddCondition(initTrigger, Condition(function ThirdInit))\n"
+        "  call BJassAssert(not TriggerEvaluate(initTrigger), \"void conditions produce false\")\n"
+        "  call BJassAssert(initOrder == 123, \"every void callback runs in registration order\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* Explicitly false boolean conditions must still stop downstream callbacks. */
+TEST(wc3_jass_map, false_boolean_condition_still_short_circuits) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger testTrigger = null\n"
+        "  integer order = 0\n"
+        "endglobals\n"
+        "function TrueCondition takes nothing returns boolean\n"
+        "  set order = 1\n"
+        "  return true\n"
+        "endfunction\n"
+        "function FalseCondition takes nothing returns boolean\n"
+        "  set order = order * 10 + 2\n"
+        "  return false\n"
+        "endfunction\n"
+        "function SkippedCondition takes nothing returns boolean\n"
+        "  set order = order * 10 + 3\n"
+        "  return true\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set testTrigger = CreateTrigger()\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function TrueCondition))\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function FalseCondition))\n"
+        "  call TriggerAddCondition(testTrigger, Condition(function SkippedCondition))\n"
+        "  call BJassAssert(not TriggerEvaluate(testTrigger), \"false condition fails evaluation\")\n"
+        "  call BJassAssert(order == 12, \"boolean false short-circuits later callback\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_jass_map, null_trigger_evaluate_and_execute_are_safe) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  trigger unused = null\n"
+        "  integer reached = 0\n"
+        "endglobals\n"
+        "function main takes nothing returns nothing\n"
+        "  call BJassAssert(not TriggerEvaluate(unused), \"null trigger must not evaluate true\")\n"
+        "  call TriggerExecute(unused)\n"
+        "  set reached = 1\n"
+        "  call BJassAssert(reached == 1, \"null trigger execution returns to caller\")\n"
+        "endfunction\n"
+    ));
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
 TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
     T_ASSERT(run_test_jass(
         "globals\n"
@@ -520,6 +679,236 @@ TEST(wc3_jass_map, trigger_execute_runs_until_child_sleep_then_resumes) {
         "endfunction\n"
     ));
     jass_callbyname(level.vm, "VerifySleepingTrigger", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+/* ORDR main() queues multiple zero-time callbacks. Exercise the same
+ * scheduler path with more callbacks than the five that completed in the
+ * iPad crash trace; every finished coroutine must be removed safely. */
+/* BDN is the first ORDR ExecuteFunc callback after the four completed
+ * post-main callbacks in both iPad logs. It registers player-unit events;
+ * malformed/native-null handles must fail closed instead of SIGSEGV. */
+/* ORDR's BDN reaches the old MAX_EVENTS=1024 boundary before BF0
+ * registers a timer. This test must not terminate on the old 1025th
+ * registration, and verifies that high-index region tokens still roundtrip. */
+/* The ORDR difficulty buttons belong to Neutral Passive (15), while the
+ * registering PLAYER_UNIT_SELECTED trigger belongs to the human who clicked.
+ * Trigger dispatch and GetTriggerPlayer must use the clicker, not the owner. */
+/* The real ORDR script asks GetUnitAbilityLevel(button, $41393030),
+ * while object data calls the ability A900. This gate decides whether a
+ * selection is dispatched to CUK/CUL/CUM at all. */
+TEST(wc3_jass_map, ordr_numeric_a900_ability_dispatch_gate) {
+    /* The generic test fixture has no custom A900 ability. Mirror ORDR's
+     * actual UnitAbilities.slk by supplying an A900 row instead of relying
+     * on UnitAddAbility to install a nonexistent stock ability. */
+    static cstring_t const ability_slk =
+        "ID;PWXL;N;E\n"
+        "B;X3;Y2;D0\n"
+        "C;X1;Y1;K\"unitAbilID\"\n"
+        "C;X2;K\"abilList\"\n"
+        "C;X1;Y2;K\"hfoo\"\n"
+        "C;X2;K\"Aeth,A900\"\n"
+        "E\n";
+    edict_t *button = NULL;
+    slkTestData_t *rows, *old;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "endglobals\n"
+        "function CUO takes nothing returns nothing\nendfunction\n"
+        "function CUW takes nothing returns nothing\nendfunction\n"
+        "function CUN takes nothing returns nothing\nendfunction\n"
+        "function VerifyButton takes nothing returns nothing\n"
+        "  call BJassAssert(GetUnitAbilityLevel(menuButton, 'A900') > 0, \"canonical A900\")\n"
+        "  call BJassAssert(GetUnitAbilityLevel(menuButton, 0x41393030) > 0, \"ORDR numeric A900\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, globals.num_edicts)
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    T_NOT_NULL(button);
+    if (!button) return;
+    rows = parse_slk_string(ability_slk);
+    T_NOT_NULL(rows);
+    if (!rows) return;
+    old = G_SetSLKRows("UnitAbilities", rows);
+    T_NOT_NULL(old);
+    G_BindEntityData(button);
+    T_EQ(G_UnitAbilityLevel(button, MAKEFOURCC('A','9','0','0')), 1);
+    jass_callbyname(level.vm, "VerifyButton", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    G_SetSLKRows("UnitAbilities", old);
+    G_BindEntityData(button);
+    free_slk_rows(rows);
+}
+
+/* Exercise the actual client 'select N' command (the message sent by
+ * touch/mouse release), not just event injection. Neutral Passive button
+ * clicks must reach the owning human's registered PLAYER_UNIT_SELECTED. */
+TEST(wc3_jass_map, ordr_neutral_button_select_command_delivers_jass_event) {
+    edict_t *button = NULL;
+    cstring_t command[2] = { "select", NULL };
+    char number[24];
+    uint32_t const original_flags = game.clients[0].ps.rdflags;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "  integer clicked = 0\n"
+        "endglobals\n"
+        "function OnClick takes nothing returns nothing\n"
+        "  if GetTriggerPlayer() == Player(0) and GetTriggerUnit() == menuButton then\n"
+        "    set clicked = clicked + 1\n"
+        "  endif\n"
+        "endfunction\n"
+        "function CheckClick takes nothing returns nothing\n"
+        "  call BJassAssert(clicked == 1, \"neutral menu button was selected\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerAddAction(t, function OnClick)\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, globals.num_edicts)
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    T_NOT_NULL(button);
+    if (!button) return;
+    game.clients[0].ps.rdflags |= RDF_NOFOG;
+    game.clients[0].connected = true;
+    g_edicts[0].inuse = true;
+    g_edicts[0].client = &game.clients[0];
+    button->svflags |= SVF_MONSTER;
+    button->health.value = MAX(button->health.value, 100.0f);
+    T_ASSERT(G_UnitCanBeSelected(&game.clients[0], button));
+    snprintf(number, sizeof(number), "%u", (unsigned)button->s.number);
+    command[1] = number;
+    G_ClientCommand(&g_edicts[0], 2, command);
+    G_RunEvents();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "CheckClick", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    game.clients[0].ps.rdflags = original_flags;
+}
+
+TEST(wc3_jass_map, ordr_neutral_button_selection_uses_clicking_player) {
+    edict_t *button = NULL;
+    gameEvent_t *evt;
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  unit menuButton = null\n"
+        "  integer receivedClicks = 0\n"
+        "  trigger nestedMenuTrigger = null\n"
+        "endglobals\n"
+        "function OnNestedMenuClick takes nothing returns boolean\n"
+        "  call BJassAssert(GetTriggerPlayer() == Player(0), \"nested clicker retained\")\n"
+        "  call BJassAssert(GetTriggerUnit() == menuButton, \"nested neutral button retained\")\n"
+        "  set receivedClicks = receivedClicks + 1\n"
+        "  return true\n"
+        "endfunction\n"
+        "function OnMenuClick takes nothing returns nothing\n"
+        "  call BJassAssert(GetTriggerPlayer() == Player(0), \"selection player is clicker\")\n"
+        "  call BJassAssert(GetTriggerUnit() == menuButton, \"selection target is neutral button\")\n"
+        "  set receivedClicks = receivedClicks + 1\n"
+        "  call BJassAssert(TriggerEvaluate(nestedMenuTrigger), \"nested trigger evaluated\")\n"
+        "endfunction\n"
+        "function VerifyClick takes nothing returns nothing\n"
+        "  call BJassAssert(receivedClicks == 2, \"direct and nested neutral selection callbacks\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  set nestedMenuTrigger = CreateTrigger()\n"
+        "  call TriggerAddCondition(nestedMenuTrigger, Condition(function OnNestedMenuClick))\n"
+        "  set menuButton = CreateUnit(Player(15), 'hfoo', 0, 0, 0)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerAddAction(t, function OnMenuClick)\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, globals.num_edicts) {
+        if (g_edicts[i].inuse && g_edicts[i].class_id == MAKEFOURCC('h','f','o','o') &&
+            g_edicts[i].s.player == 15) { button = &g_edicts[i]; break; }
+    }
+    T_NOT_NULL(button);
+    if (!button) return;
+    evt = G_PublishEventWithSource(button, EVENT_PLAYER_UNIT_SELECTED,
+                                   G_GetPlayerEntityByNumber(0));
+    T_NOT_NULL(evt);
+    if (!evt) return;
+    evt->dialog_player = 1; /* player 0 initiated the selection */
+    G_RunEvents();
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "VerifyClick", false);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+}
+
+TEST(wc3_jass_map, ordr_registers_more_than_1024_handlers_and_timer) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  local event e = null\n"
+        "  local integer i = 0\n"
+        "  loop\n"
+        "    exitwhen i >= 1500\n"
+        "    set e = TriggerRegisterPlayerUnitEvent(t, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "    call BJassAssert(e != null, \"player-unit handler allocation\")\n"
+        "    set i = i + 1\n"
+        "  endloop\n"
+        "  set e = TriggerRegisterTimerEvent(t, 1.0, false)\n"
+        "  call BJassAssert(e != null, \"timer-event handler allocation\")\n"
+        "endfunction\n"
+    ));
+    event_t *region_event = G_MakeEvent(EVENT_GAME_ENTER_REGION);
+    uint32_t slot = 0, generation = 0;
+    T_ASSERT(region_event != NULL);
+    if (region_event) {
+        handle_t handle = G_EventHandle(region_event);
+        T_ASSERT(G_EventHandleParts(handle, &slot, &generation));
+        T_ASSERT(slot >= 1500);
+        T_ASSERT(G_EventFromHandle(handle) == region_event);
+    }
+}
+
+TEST(wc3_jass_map, ordr_player_unit_event_registration_rejects_nulls) {
+    T_ASSERT(run_test_jass(
+        "function main takes nothing returns nothing\n"
+        "  local trigger t = CreateTrigger()\n"
+        "  call TriggerRegisterPlayerUnitEvent(null, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, null, EVENT_PLAYER_UNIT_SELECTED, null)\n"
+        "  call TriggerRegisterPlayerUnitEvent(t, Player(0), null, null)\n"
+        "  call TriggerRegisterPlayerEvent(null, Player(0), null)\n"
+        "  call TriggerRegisterPlayerEvent(t, null, null)\n"
+        "  call BJassAssert(true, \"invalid event handles did not crash\")\n"
+        "endfunction\n"
+    ));
+}
+
+TEST(wc3_jass_map, ordr_startup_many_queued_callbacks_drain_after_main) {
+    T_ASSERT(run_test_jass(
+        "globals\n"
+        "  integer finished = 0\n"
+        "endglobals\n"
+        "function MarkFinished takes nothing returns nothing\n"
+        "  set finished = finished + 1\n"
+        "endfunction\n"
+        "function VerifyAllFinished takes nothing returns nothing\n"
+        "  call BJassAssert(finished == 64, \"all queued callbacks finished\")\n"
+        "endfunction\n"
+        "function main takes nothing returns nothing\n"
+        "  set finished = 0\n"
+        "endfunction\n"
+    ));
+    FOR_LOOP(i, 64)
+        jass_callbyname(level.vm, "MarkFinished", true);
+    jass_runevents(level.vm);
+    T_ASSERT(!jass_rterror_pending(level.vm));
+    jass_callbyname(level.vm, "VerifyAllFinished", true);
     jass_runevents(level.vm);
     T_ASSERT(!jass_rterror_pending(level.vm));
 }

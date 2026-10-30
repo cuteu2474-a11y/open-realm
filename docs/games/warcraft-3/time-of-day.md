@@ -181,10 +181,12 @@ Implemented against the authoritative clock:
 - `TriggerRegisterGameStateEvent` for the time-of-day float state, firing on false-to-true condition entry
 - Warsmash-style false-time state used by `AIct` (`itemchangetimeofday`)
 
-Still intentionally unresolved:
-
-- `SetTimeOfDayScale` / `GetTimeOfDayScale`: a fresh inspection of `WarsmashModEngine-main` found no implementation or registered
-  native to mirror, so OpenRealm keeps these placeholders rather than inventing a scale contract.
+- `SetTimeOfDayScale` / `GetTimeOfDayScale`: `level.timeofday.scale` defaults to 1,
+  multiplies ordinary daily-cycle progression, and persists in save format 90.
+  Zero freezes ordinary progression; suspend remains an independent gate.
+  Non-finite/negative inputs are rejected; their retail parity is unverified.
+  False-time lifetimes remain simulation ticks. The native completion tests
+  cover frame dispatch, scale, suspend and save/load.
 
 Warsmash also registers a non-retail `SetFalseTimeOfDay` helper inside its ability-builder JASS environment. OpenRealm registers the
 same host native so an extension script that explicitly declares it can call the simulation operation, but deliberately does not add

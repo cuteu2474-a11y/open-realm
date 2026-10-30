@@ -1,0 +1,254 @@
+name: ORDR iPad simulator smoke
+
+# Independent, non-cancelling simulator workflow: do not interrupt IPA builds.
+# The expensive simulator runs only for an explicitly marked commit after
+# known ORDR engine regressions have been fixed in a batch.
+# Ordinary pushes produce a skipped simulator job without booting an iPad.
+on:
+  push:
+    branches:
+      - feature/ordr-singleplayer-compat
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ordr-ipad-sim-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  simulator:
+    if: contains(github.event.head_commit.message, '[ipad-test]')
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect Xcode and available iPads
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+
+      - name: Unit-test private Drive OAuth refresh (no credentials or internet)
+        run: |
+          python3 -m unittest discover -s tools/ipad/tests -p 'test_*.py'
+          python3 -m unittest discover -s tests -p 'test_ordr_simulator_runtime.py'
+
+      - name: Build iPad simulator app
+        run: make ipad-simulator
+
+      - name: Boot iPad, install app, launch and capture evidence
+        shell: bash
+        env:
+          # Optional. A private, user-owned zip with War3*.mpq and ORDR_S2_2.323[C].w3x.
+          # Never commit or upload these licensed assets.
+          ORDR_TEST_ASSETS_URL: ${{ secrets.ORDR_TEST_ASSETS_URL }}
+          ORDR_DRIVE_ACCESS_TOKEN: ${{ secrets.ORDR_DRIVE_ACCESS_TOKEN }}
+          ORDR_DRIVE_REFRESH_TOKEN: ${{ secrets.ORDR_DRIVE_REFRESH_TOKEN }}
+          ORDR_DRIVE_CLIENT_ID: ${{ secrets.ORDR_DRIVE_CLIENT_ID }}
+          ORDR_DRIVE_CLIENT_SECRET: ${{ secrets.ORDR_DRIVE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          REPORT="build/ipad/simulator-report"
+          mkdir -p "$REPORT"
+          xcrun simctl list devices available --json > "$REPORT/available-devices.json"
+
+          # Pick an actual iPad simulator, preferring a booted device.
+          UDID="$(python3 - "$REPORT/available-devices.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          devices = [d for group in data.get('devices', {}).values() for d in group
+                     if d.get('isAvailable', True) and 'iPad' in d.get('name', '')]
+          devices.sort(key=lambda d: (d.get('state') != 'Booted', 'Pro' not in d['name'], d['name']))
+          if devices:
+              print(devices[0]['udid'])
+          PY
+          )"
+          if [ -z "$UDID" ]; then
+            echo "No available iPad simulator was found" | tee "$REPORT/error.txt" >&2
+            exit 1
+          fi
+          echo "Simulator UDID: $UDID" | tee "$REPORT/device.txt"
+          if ! xcrun simctl boot "$UDID" 2>"$REPORT/boot-stderr.txt"; then
+            # Boot reports an error when the device is already running.
+            xcrun simctl list devices booted | grep -Fq "$UDID" || exit 1
+          fi
+          xcrun simctl bootstatus "$UDID" -b
+
+          APP="$(find build/ipad -path '*/iphonesimulator-*/warcraft3/Warcraft3.app' -type d -print -quit)"
+          test -n "$APP"
+          test -f "$APP/Info.plist"
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+          xcrun simctl install "$UDID" "$APP"
+          DATA_DIR="$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)"
+          mkdir -p "$DATA_DIR/Documents/Maps"
+
+          # Licensed retail MPQs and the map are intentionally NOT in the repo.
+          # If the maintainer has configured a private test-data URL, stage its
+          # contents in the simulator app's Documents folder only.
+          if [ -n "$ORDR_TEST_ASSETS_URL" ]; then
+            curl --fail --location --silent --show-error --retry 2 \
+              "$ORDR_TEST_ASSETS_URL" --output "$RUNNER_TEMP/ordr-test-assets.zip"
+            mkdir -p "$RUNNER_TEMP/ordr-test-assets"
+            unzip -q "$RUNNER_TEMP/ordr-test-assets.zip" -d "$RUNNER_TEMP/ordr-test-assets"
+            while IFS= read -r -d '' mpq; do
+              cp "$mpq" "$DATA_DIR/Documents/$(basename "$mpq")"
+            done < <(find "$RUNNER_TEMP/ordr-test-assets" -type f -iname '*.mpq' -print0)
+            while IFS= read -r -d '' map; do
+              cp "$map" "$DATA_DIR/Documents/Maps/$(basename "$map")"
+            done < <(find "$RUNNER_TEMP/ordr-test-assets" -type f -iname 'ORDR_S2_2.323*.w3x' -print0)
+          fi
+
+          # Prefer refresh credentials. Keep old access token as migration fallback.
+          if [ -n "$ORDR_DRIVE_REFRESH_TOKEN$ORDR_DRIVE_CLIENT_ID$ORDR_DRIVE_CLIENT_SECRET$ORDR_DRIVE_ACCESS_TOKEN" ]; then
+            python3 tools/ipad/fetch_private_drive_assets.py \
+              --destination "$DATA_DIR/Documents" \
+              --manifest "$REPORT/verified-private-assets.json"
+          fi
+
+          MPQ_FOUND=false
+          MAP_FOUND=false
+          if find "$DATA_DIR/Documents" -maxdepth 1 -iname 'War3.mpq' | grep -q .; then MPQ_FOUND=true; fi
+          if find "$DATA_DIR/Documents/Maps" -maxdepth 1 -iname 'ORDR_S2_2.323*.w3x' | grep -q .; then MAP_FOUND=true; fi
+          echo "war3_mpq_present=$MPQ_FOUND" | tee "$REPORT/asset-status.txt"
+          echo "ordr_map_present=$MAP_FOUND" | tee -a "$REPORT/asset-status.txt"
+
+          # This is an app-launch smoke test, NOT a UI gameplay/touch test.
+          # Only attempt direct map loading when BOTH licensed inputs exist.
+          LAUNCH_EPOCH="$(date +%s)"
+          if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
+            MAP_NAME="$(find "$DATA_DIR/Documents/Maps" -maxdepth 1 -iname 'ORDR_S2_2.323*.w3x' -print -quit | xargs basename)"
+            echo "launch_mode=ordr_map" | tee "$REPORT/launch-mode.txt"
+            # simctl forwards SIMCTL_CHILD_* into the simulator app process.
+            # This keeps the automated finger test off real iPad builds and
+            # independent of late +cvar command parsing during map loading.
+            SIMCTL_CHILD_ORDR_SIM_TEST_CHOICES=1 xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
+              -tft +map "Maps\\$MAP_NAME" +ordr_simulator_choice_probe 1 > "$REPORT/launch.txt"
+          else
+            echo "launch_mode=menu_only_missing_licensed_assets" | tee "$REPORT/launch-mode.txt"
+            xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" \
+              > "$REPORT/launch.txt"
+          fi
+
+          # Continue through the first potential wave and building-button probes.
+          # Capture after the choice taps, scripted wisp selection and beacon
+          # two-finger order. simctl launch alone is not gameplay evidence.
+          OBSERVE_STARTED=$SECONDS
+          printf "requested_second	actual_second	sha256	file\n" > "$REPORT/screenshot-index.tsv"
+          for target in 8 16 45 90 150 240 360 480 600 720 840 960 1080 1200 1320 1500 1800; do
+            elapsed=$((SECONDS - OBSERVE_STARTED))
+            if [ "$elapsed" -lt "$target" ]; then
+              sleep "$((target - elapsed))"
+            fi
+            output="$REPORT/after-$target""s.png"
+            xcrun simctl io "$UDID" screenshot "$output"
+            # Simulator may report a portrait PNG while presenting a landscape
+            # app; retain the untouched source and a review-ready rotated copy.
+            if [ "$target" -ge 600 ]; then
+              sips -r 270 "$output" --out "${output%.png}-landscape.png" >/dev/null
+            fi
+            elapsed=$((SECONDS - OBSERVE_STARTED))
+            checksum="$(shasum -a 256 "$output" | cut -d ' ' -f 1)"
+            printf "%s\t%s\t%s\t%s\n" "$target" "$elapsed" "$checksum" "$(basename "$output")" >> "$REPORT/screenshot-index.tsv"
+            echo "Simulated iPad observation: $elapsed seconds, screenshot=$(basename "$output")"
+          done
+
+          # Capture bounded engine and client checkpoint logs; no game files.
+          if [ -f "$DATA_DIR/Documents/ordr-server.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-server.log" "$REPORT/ordr-server.log"
+            echo "server_trace_found=true" > "$REPORT/server-trace-status.txt"
+          else
+            echo "server_trace_found=false" > "$REPORT/server-trace-status.txt"
+          fi
+          if [ -f "$DATA_DIR/Documents/ordr-renderer.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-renderer.log" "$REPORT/ordr-renderer.log"
+            echo "renderer_trace_found=true" > "$REPORT/renderer-trace-status.txt"
+          else
+            echo "renderer_trace_found=false" > "$REPORT/renderer-trace-status.txt"
+          fi
+          if [ -f "$DATA_DIR/Documents/ordr-client.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-client.log" "$REPORT/ordr-client.log"
+            echo "client_trace_found=true" > "$REPORT/client-trace-status.txt"
+          else
+            echo "client_trace_found=false" > "$REPORT/client-trace-status.txt"
+          fi
+          if [ -f "$DATA_DIR/Documents/ordr-jass.log" ]; then
+            cp "$DATA_DIR/Documents/ordr-jass.log" "$REPORT/ordr-jass.log"
+            echo "jass_log_found=true" > "$REPORT/runtime-status.txt"
+          else
+            echo "jass_log_found=false" > "$REPORT/runtime-status.txt"
+          fi
+          python3 tools/ordr/check_simulator_runtime.py "$REPORT" > "$REPORT/engine-stage-summary.json"
+
+          # Retain only aggregated OS diagnostic counters, not raw system logs.
+          if xcrun simctl spawn "$UDID" log show --last 6m --style compact \
+               --predicate 'process == "warcraft3"' > "$RUNNER_TEMP/ordr-private-oslog.txt" 2>/dev/null; then
+            python3 - "$RUNNER_TEMP/ordr-private-oslog.txt" "$REPORT/runtime-status.txt" <<'PY'
+          import sys
+          from pathlib import Path
+          contents = Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          lines = contents.splitlines()
+          keywords = ("unimplemented native", "segmentation fault", "fatal error",
+                      "exited due to signal", "uncaught exception", "signal sig")
+          hits = sum(any(k in line.lower() for k in keywords) for line in lines)
+          with Path(sys.argv[2]).open("a") as report:
+              report.write("os_log_query=ok\n")
+              report.write("os_log_line_count=%d\n" % len(lines))
+              report.write("os_log_error_signature_lines=%d\n" % hits)
+          PY
+          else
+            echo "os_log_query=unavailable" >> "$REPORT/runtime-status.txt"
+          fi
+          # Restrict reports to this launch and export only allowlisted fields.
+          # No .ips content or personal device log is uploaded.
+          python3 tools/ipad/crash_report_summary.py --bundle-id "$BUNDLE_ID" \
+            --launched-at "$LAUNCH_EPOCH" > "$REPORT/crash-report-status.json"
+          echo "simulator_scripted_finger_selection_probe=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_scripted_wisp_selection_and_two_finger_beacon_order=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_enemy_wave_coordinate_probe=enabled" >> "$REPORT/runtime-status.txt"
+          echo "simulator_building_finger_and_command_button_probe=enabled" >> "$REPORT/runtime-status.txt"
+          echo "physical_touch_input=false" >> "$REPORT/runtime-status.txt"
+          echo "visual_gameplay_verification=manual_review_required" >> "$REPORT/runtime-status.txt"
+          if [ "$MPQ_FOUND" = true ] && [ "$MAP_FOUND" = true ]; then
+            echo "map_start_attempted=true" >> "$REPORT/asset-status.txt"
+            echo "gameplay_verified=false" >> "$REPORT/asset-status.txt"
+          else
+            echo "map_start_attempted=false" >> "$REPORT/asset-status.txt"
+            echo "gameplay_verified=false" >> "$REPORT/asset-status.txt"
+          fi
+
+          {
+            echo '### ORDR iPad simulator smoke'
+            echo ""
+            echo "- Simulator boot: complete"
+            echo "- App install and launch command: complete"
+            echo "- Retail War3.mpq supplied: $MPQ_FOUND"
+            echo "- ORDR map supplied: $MAP_FOUND"
+            echo "- Screenshots: after 8, 16, 45, 90, 150, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1500 and 1800 seconds (landscape review copies for >=600)"
+            echo "- Runtime signal summary: runtime-status.txt (no raw OS log upload)"
+            echo "- Engine-stage and crash classifications: engine-stage-summary.json, crash-report-status.json"
+            echo "- Simulator-only scripted SDL finger taps on nightmare, Isekai and Start: verdict in engine-stage-summary.json"
+            echo "- Simulator-only scripted wisp finger selection, two-finger beacon order and sampled positions: separate server and movement verdicts in engine-stage-summary.json"
+            echo "- Enemy wave: compare server position samples over multiple game ticks; accepted orders alone do not prove movement"
+            echo "- Buildings: select up to three visible structures by simulated SDL finger and tap enabled HUD buttons; track matching server receipt separately"
+            echo "- Physical taps and full ORDR gameplay: **not implemented / not verified**"
+            if [ "$MPQ_FOUND" != true ] || [ "$MAP_FOUND" != true ]; then
+              echo "- **BLOCKED:** no licensed game data; this does NOT pass ORDR gameplay."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '```json'
+            cat "$REPORT/engine-stage-summary.json"
+            cat "$REPORT/crash-report-status.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload simulator diagnostics (never include game assets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORDR-iPad-simulator-smoke
+          path: build/ipad/simulator-report/
+          if-no-files-found: warn
+          retention-days: 7

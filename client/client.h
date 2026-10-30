@@ -203,6 +203,7 @@ void V_Shutdown(void);
 void CL_PrepRefresh(void);
 void CL_RegisterConfigString(uint32_t index);
 void CL_UpdateConfigString(uint32_t index, cstring_t olds);
+void CL_ApplyWorldPresentationConfig(void);
 void CL_RestartRefresh(void);
 // cl_parse.c
 void CL_ParseServerMessage(sizeBuf_t *msg);
@@ -232,6 +233,9 @@ bool CL_WindowKeyEvent(int key, uint32_t mods);
 bool CL_WindowEditRepeat(int key, uint32_t mods);
 bool CL_WindowTextInput(cstring_t text);
 bool CL_WindowTextInputActive(void);
+bool SCR_LayoutTextInputActive(void);
+bool SCR_LayoutTextInput(cstring_t text);
+bool SCR_LayoutEditKeyEvent(int key, uint32_t mods);
 cstring_t CL_WindowEditTextValue(uint32_t text_frame);
 bool CL_WindowEditCursor(uint32_t text_frame, uint32_t *cursor);
 bool CL_WindowEditSelection(uint32_t text_frame, uint32_t *start, uint32_t *end);

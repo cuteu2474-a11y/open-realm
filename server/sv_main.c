@@ -11,6 +11,43 @@
 #include "server.h"
 #include "common/online.h"
 
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <SDL2/SDL.h>
+/* Observe the session/transport boundary of the original ORDR map only.
+ * Trace bounded milestones; never include client identifiers, chat or assets. */
+static void SV_ORDRTrace(cstring_t stage) {
+    static FILE *file;
+    static unsigned log_lines;
+    cstring_t map = Cvar_String("map", "");
+    if (!map || !strstr(map, "ORDR_S2_2.323") || log_lines >= 200) return;
+    if (!file) {
+        cstring_t home = getenv("HOME");
+        char path[1024];
+        if (home && *home &&
+            snprintf(path, sizeof(path), "%s/Documents/ordr-server.log", home) < (int)sizeof(path)) {
+            file = fopen(path, "w");
+            if (file) setvbuf(file, NULL, _IOLBF, 0);
+        }
+    }
+    if (!file) return;
+    ++log_lines;
+    unsigned connected = 0, spawned = 0;
+    FOR_LOOP(i, svs.num_clients) {
+        if (svs.clients[i].state == cs_connected) ++connected;
+        if (svs.clients[i].state == cs_spawned) ++spawned;
+    }
+    fprintf(file,
+            "wall_ms=%u game_ms=%u frame=%u stage=%s state=%d connected=%u spawned=%u paused=%d\n",
+            (unsigned)SDL_GetTicks(), (unsigned)sv.time,
+            (unsigned)sv.framenum, stage ? stage : "(null)",
+            (int)sv.state, connected, spawned, (int)sv.paused);
+    fflush(file);
+}
+#define SV_ORDR_TRACE(stage) do { if (sv.framenum <= 8 || !(sv.framenum % 100)) SV_ORDRTrace(stage); } while (0)
+#else
+#define SV_ORDR_TRACE(stage) ((void)(stage))
+#endif
+
 //#define PRINT_ANIMATIONS
 
 struct game_export *ge;
@@ -101,24 +138,31 @@ void SV_QueuePendingConfigStrings(void) {
 
 void SV_SendClientDatagram(client_t *client) {
     uint32_t bytes;
+    SV_ORDR_TRACE("DATAGRAM_ENTER");
     /* A modem still draining the last snapshot skips this one; the next delta is against what it acknowledged. */
     if (SV_ClientLinkBusy(client)) {
         bytes = Netchan_Transmit(NS_SERVER, &client->netchan);
     } else {
+        SV_ORDR_TRACE("DATAGRAM_BEFORE_BUILD_FRAME");
         SV_BuildClientFrame(client);
+        SV_ORDR_TRACE("DATAGRAM_AFTER_BUILD_FRAME");
         bytes = SV_WriteFrameToClient(client);
+        SV_ORDR_TRACE("DATAGRAM_AFTER_WRITE_FRAME");
     }
     /* Q2 "rate": the link stays busy until everything sent has drained at the client's modem speed, reliable stream
      * and netchan headers included (only the snapshot message used to be charged). */
     uint32_t const rate = (uint32_t)Cvar_Integer("sv_rate", 0);
     if (rate && bytes && Netchan_IsSequenced(&client->netchan))
         client->rate_clear_msec = MAX(svs.realtime, client->rate_clear_msec) + (uint32_t)((uint64_t)bytes * 1000 / rate);
+    SV_ORDR_TRACE("DATAGRAM_COMPLETE");
 }
 
 /* Flush any un-synced config strings to all clients, then send a per-frame
  * datagram to every spawned client containing the current entity snapshot. */
 static void SV_SendClientMessages(void) {
+    SV_ORDR_TRACE("SEND_BEFORE_CONFIGSTRINGS");
     SV_QueuePendingConfigStrings();
+    SV_ORDR_TRACE("SEND_AFTER_CONFIGSTRINGS");
     FOR_LOOP(i, svs.num_clients) {
         client_t *client = &svs.clients[i];
         if (client->state == cs_spawned && sv.state == ss_game) {
@@ -132,6 +176,7 @@ static void SV_SendClientMessages(void) {
         }
     }
     if (svs.realtime >= sv.keepalive) sv.keepalive = svs.realtime + BZ_KEEPALIVE_MSEC;
+    SV_ORDR_TRACE("SEND_CLIENT_MESSAGES_COMPLETE");
 }
 
 static void SV_ProcessPacket(netadr_t *from, sizeBuf_t *net_message, int r) {
@@ -304,8 +349,10 @@ void SV_Frame(uint32_t msec) {
         Online_Host(svs.lobby.map_path, svs.lobby.map_name, humans, capacity, svs.lobby.game_speed);
     }
     svs.realtime += msec;
+    SV_ORDR_TRACE("SERVER_FRAME_ENTER");
     SV_ReapZombieClients();
     SV_ReadPackets();
+    SV_ORDR_TRACE("SERVER_AFTER_READ_PACKETS");
 
     if (sv.state == ss_lobby) {
         /* An unchanged lobby previously sent nothing and timed out even its own loopback host. */
@@ -327,7 +374,10 @@ void SV_Frame(uint32_t msec) {
     }
 
     sv.next_frame_msec = SV_ClampSimulationDeadline(svs.realtime, sv.next_frame_msec);
+    SV_ORDR_TRACE("SERVER_BEFORE_GAME_FRAME");
     SV_RunGameFrame();
+    SV_ORDR_TRACE("SERVER_AFTER_GAME_FRAME");
     sv.next_frame_msec += FRAMETIME;
     SV_SendClientMessages();
+    SV_ORDR_TRACE("SERVER_FRAME_COMPLETE");
 }

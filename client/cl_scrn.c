@@ -3,8 +3,135 @@
 #include "ui_layout.h"
 #include <ctype.h>
 #include <SDL2/SDL.h>
+#if defined(__APPLE__) && defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#include <TargetConditionals.h>
+#endif
+
+/* An edit control in a persistent game-authored layout is not a transient
+ * client window. Keep one locally focused editor across redraws and transport
+ * changes through its server-authored OnClick command, without game-specific
+ * input rules in the universal client or alterations to the UI wire schema. */
+static struct {
+    bool active;
+    uint32_t layer, frame, cursor, anchor, max_chars;
+    char text[256], command[CMDARG_LEN];
+} layout_editor;
+static uint32_t layout_edit_suppress_layer, layout_edit_suppress_frame;
+/* One modal popup chooser per persistent layout, independent of game scripts. */
+static uint32_t layout_popup_layer, layout_popup_frame;
+static int layout_popup_scroll, layout_popup_pressed=-1;
+
+bool SCR_LayoutTextInputActive(void) { return layout_editor.active; }
+
+static void SCR_LayoutBlurEdit(void) {
+    if (layout_editor.active) {
+        layout_edit_suppress_layer = layout_editor.layer;
+        layout_edit_suppress_frame = layout_editor.frame;
+    }
+    layout_editor.active = false;
+    CL_SetTransientTextInput(CL_WindowTextInputActive());
+}
+
+static bool SCR_LayoutIsEdit(uiFrame_t const *frame) {
+    return frame && !(frame->flagsvalue & UIFRAME_DISABLED) && frame->onclick && *frame->onclick &&
+        (frame->flags.type == FT_EDITBOX || frame->flags.type == FT_GLUEEDITBOX ||
+         frame->flags.type == FT_SLASHCHATBOX);
+}
+
+/* Optional generic OnClick descriptor for server-authored event controls.
+ * Keeping the metadata in the existing command string preserves all network
+ * field widths and leaves the renderer independent of the owning game. */
+static bool SCR_LayoutScriptDescriptor(uiFrame_t const *frame,uint32_t *handle,uint32_t *mask) {
+    unsigned int id,bits;
+    char extra;
+    if(!frame || !frame->onclick ||
+       sscanf(frame->onclick,"#uievent %u %u %c",&id,&bits,&extra)!=2 || !id || !bits)
+        return false;
+    if(handle)*handle=id;
+    if(mask)*mask=bits;
+    return true;
+}
+
+static void SCR_LayoutFocusEdit(uiFrame_t const *frame, uint32_t layer) {
+    if (!SCR_LayoutIsEdit(frame)) return;
+    if (layout_editor.active && layout_editor.frame == frame->number && layout_editor.layer == layer) return;
+    memset(&layout_editor, 0, sizeof(layout_editor));
+    layout_editor.active = true;
+    layout_editor.layer = layer;
+    layout_editor.frame = frame->number;
+    uint32_t handle;
+    if(SCR_LayoutScriptDescriptor(frame,&handle,NULL))
+        snprintf(layout_editor.command,sizeof(layout_editor.command),"uievent %u 9",handle);
+    else strlcpy(layout_editor.command, frame->onclick, sizeof(layout_editor.command));
+    uiEditBox_t const *wire = frame->buffer.size >= sizeof(uiEditBox_t) ? frame->buffer.data : NULL;
+    layout_editor.max_chars = wire && wire->maxChars ? MIN(wire->maxChars, 255u) : 255u;
+    cstring_t value = frame->text;
+    FOR_LOOP(i, SCR_NumFrames()) {
+        uiFrame_t const *child = SCR_Frame(i);
+        if (child && child->parent == frame->number &&
+            (child->flags.type == FT_STRING || child->flags.type == FT_TEXT)) {
+            if (child->text && *child->text) value = child->text;
+            break;
+        }
+    }
+    snprintf(layout_editor.text, sizeof(layout_editor.text), "%.*s",
+             (int)layout_editor.max_chars, value ? value : "");
+    layout_editor.cursor = layout_editor.anchor = (uint32_t)strlen(layout_editor.text);
+    CL_SetTransientTextInput(true);
+}
+
+static void SCR_LayoutSendEditText(void) {
+    if (!layout_editor.active || !layout_editor.command[0]) return;
+    char escaped[sizeof(layout_editor.text) * 2 + 1];
+    size_t out = 0;
+    for (cstring_t p = layout_editor.text; *p && out + 2 < sizeof(escaped); p++) {
+        if (*p == '"' || *p == '\\') escaped[out++] = '\\';
+        escaped[out++] = *p;
+    }
+    escaped[out] = '\0';
+    MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
+    SZ_Printf(&cls.netchan.message, "%s \"%s\"", layout_editor.command, escaped);
+}
+
+bool SCR_LayoutTextInput(cstring_t text) {
+    if (!layout_editor.active || !text || !*text) return false;
+    char filtered[256], old[256];
+    strlcpy(old, layout_editor.text, sizeof(old));
+    M_TextInput_Filter(text, filtered, sizeof(filtered));
+    menuTextInput_t ti = {
+        .text = layout_editor.text, .size = sizeof(layout_editor.text),
+        .max_chars = layout_editor.max_chars,
+        .cursor = layout_editor.cursor, .anchor = layout_editor.anchor,
+    };
+    M_TextInput_Insert(&ti, filtered);
+    layout_editor.cursor = ti.cursor;
+    layout_editor.anchor = ti.anchor;
+    if (strcmp(old, layout_editor.text)) SCR_LayoutSendEditText();
+    return true;
+}
+
+bool SCR_LayoutEditKeyEvent(int key, uint32_t mods) {
+    if (!layout_editor.active) return false;
+    if (key == K_ESCAPE || key == K_TAB || key == K_ENTER) {
+        SCR_LayoutBlurEdit();
+        return true;
+    }
+    char old[256];
+    strlcpy(old, layout_editor.text, sizeof(old));
+    menuTextInput_t ti = {
+        .text = layout_editor.text, .size = sizeof(layout_editor.text),
+        .max_chars = layout_editor.max_chars,
+        .cursor = layout_editor.cursor, .anchor = layout_editor.anchor,
+    };
+    M_TextInput_KeyModified(&ti, key, (mods & KEY_MOD_SHIFT) != 0, (mods & KEY_MOD_CTRL) != 0);
+    layout_editor.cursor = ti.cursor;
+    layout_editor.anchor = ti.anchor;
+    if (strcmp(old, layout_editor.text)) SCR_LayoutSendEditText();
+    return true; /* focused text entry must not activate world/game hotkeys */
+}
 
 bool scr_initialized;
+static void SCR_LayoutDrawActivePopup(void);
 
 #define SCR_FPS_HEIGHT 8
 #define SCR_FPS_BOTTOM_MARGIN 4
@@ -205,6 +332,20 @@ void SCR_DrawScreenField(uint32_t msec) {
         break;
     }
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if (cls.state == ca_active && cls.key_dest == key_game &&
+        cl.playerstate.client_ui_state == CLIENT_UI_GAME &&
+        !CL_WindowModalActive() && !SCR_LayoutModalActive()) {
+        /* Always provide a large CHAT key when a custom map hides the
+         * original upper-button bar. Reuse the stock chat_open flow. */
+        rect_t const button = SCR_iPadChatButtonRect(re.GetWindowSize());
+        re.DrawFill(&button, MAKE(color32_t, 220, 170, 56, 255));
+        rect_t const inset = { button.x + 2, button.y + 2, button.w - 4, button.h - 4 };
+        re.DrawFill(&inset, MAKE(color32_t, 18, 39, 66, 255));
+        re.DrawString((int)button.x + 54, (int)button.y + 8, "CHAT");
+        re.DrawString((int)button.x + 24, (int)button.y + 29, "TAP TO TYPE");
+    }
+#endif
     CON_DrawConsole();
     if (Cvar_Integer("scr_showfps", 0)) {
         SCR_DrawFPS(msec);
@@ -280,6 +421,13 @@ static handle_t layout_layers[MAX_LAYOUT_LAYERS];
 static texture_t *layout_dynamic_pics[MAX_DYNAMIC_IMAGES];
 static char layout_dynamic_pic_names[MAX_DYNAMIC_IMAGES][512];
 static uint32_t layout_dynamic_pic_cursor;
+/* Window-pixel coordinates shared by the iPad renderer and touch hit test. */
+rect_t SCR_iPadChatButtonRect(size2_t size) {
+    /* Move below stock resources and the ORDR timer; top bar painted over
+     * the previous y=18 button. This rect is shared with touch hit-testing. */
+    return (rect_t){ .x = size.width - 194, .y = 120, .w = 174, .h = 61 };
+}
+
 static bool layout_left_down;
 /* Captured identity is layer+frame, since frame numbers repeat across layers. */
 static uint32_t layout_press_frame, layout_press_layer;
@@ -287,6 +435,7 @@ static uint32_t layout_right_press_frame, layout_right_press_layer;
 static char layout_held_command[CMDARG_LEN * 2];
 static uint32_t layout_hovered_number;
 static uint32_t layout_hovered_layer;
+static uint32_t layout_pointer_frame,layout_pointer_layer;
 static uint32_t layout_current_layer;
 static handle_t layout_hovered;
 static handle_t layout_current;
@@ -960,9 +1109,21 @@ void SCR_LayoutDrawPortrait(uiFrame_t const *frame, rect_t const *screen) {
     uint32_t const model_index = frame->tex.index;
     model_t const *port = model_index < MAX_MODELS ? cl.portraits[model_index] : NULL;
     model_t const *model = model_index < MAX_MODELS ? cl.models[model_index] : NULL;
-    model_t const *draw  = port ? port : model;
-    cstring_t anim = (frame->text && *frame->text) ? frame->text : "Portrait";
-    if (!draw) return;
+    /* A MODEL widget must keep its requested 3D model, even when that model
+     * has an alternate _Portrait asset. Only portrait widgets opt in to the
+     * companion model and its Portrait default animation. */
+    bool const is_portrait = frame->flags.type == FT_PORTRAIT;
+    model_t const *draw = is_portrait && port ? port : model;
+    cstring_t anim = (frame->text && *frame->text)
+        ? frame->text : (is_portrait ? "Portrait" : "Stand");
+    if (!draw) {
+        /* A custom map may register a model path that is absent from the
+         * client's archive. Clear only that portrait aperture instead of
+         * leaving the HUD's pale placeholder visible as a white flash.
+         * FT_MODEL controls have no such portrait background to clear. */
+        if (is_portrait) re.DrawFill(screen, MAKE(color32_t, 0, 0, 0, 255));
+        return;
+    }
 
     renderEntity_t entity = {0};
     entity.model = draw; entity.scale = 1.0f;
@@ -1097,8 +1258,20 @@ void SCR_LayoutDrawCommandButton(uiFrame_t const *frame, rect_t const *screen) {
 
 void layout_text(uiFrame_t const *frame, rect_t const *screen, cstring_t text) {
     drawText_t dt = SCR_GetDrawText(frame, screen->w, text, frame->buffer.data);
-    dt.rect   = *screen;
-    dt.flags |= DRAW_WORD_WRAP;
+    uiFrame_t const *parent = frame->parent < SCR_NumFrames() ? SCR_Frame(frame->parent) : NULL;
+    bool const single_line = (!layout_current_window && layout_current_layer == LAYER_GAME_4) ||
+        (parent && (parent->flags.type == FT_GLUEBUTTON ||
+                    parent->flags.type == FT_GLUETEXTBUTTON ||
+                    parent->flags.type == FT_TEXTBUTTON));
+    dt.rect = *screen;
+    /* Authored strings must not paint over adjacent buttons, the next
+     * scoreboard row or an unrelated game UI frame. Only multiboard cells
+     * and button captions must stay on a single line; dialogue still wraps
+     * inside its own authored rectangle. */
+    dt.flags |= DRAW_CLIP;
+    dt.clip = *screen;
+    if (single_line) dt.flags &= ~DRAW_WORD_WRAP;
+    else dt.flags |= DRAW_WORD_WRAP;
     re.DrawText(&dt);
 }
 
@@ -1147,7 +1320,10 @@ void SCR_LayoutDrawNameTag(uiFrame_t const *frame, rect_t const *screen) {
                   screen->w - tag->padding_x * 2, screen->h - tag->padding_y * 2 };
     drawText_t dt = SCR_GetDrawText(frame, text.w, SCR_GetStringValue(frame), &tag->text);
     SCR_LayoutDrawBackdrop2(frame, screen, &tag->background);
-    dt.rect = text; dt.flags |= DRAW_WORD_WRAP; re.DrawText(&dt);
+    dt.rect = text;
+    dt.flags |= DRAW_WORD_WRAP | DRAW_CLIP;
+    dt.clip = text;
+    re.DrawText(&dt);
 }
 
 void SCR_LayoutDrawTextArea(uiFrame_t const *frame, rect_t const *screen) {
@@ -1236,13 +1412,16 @@ void SCR_LayoutDrawEditBox(uiFrame_t const *frame, rect_t const *screen) {
             break;
         }
     }
-    if (!text_frame) return;
+    if (!text_frame) text_frame = frame;
 
-    value = CL_WindowEditTextValue(text_frame->number);
+    value = layout_editor.active && !layout_current_window &&
+            layout_current_layer == layout_editor.layer && frame->number == layout_editor.frame
+        ? layout_editor.text : NULL;
+    if (!value) value = CL_WindowEditTextValue(text_frame->number);
     if (!value) value = SCR_GetStringValue(text_frame);
     if (!value) value = "";
 
-    if (text_frame->buffer.data && text_frame->buffer.size >= sizeof(uiLabel_t))
+    if (text_frame != frame && text_frame->buffer.data && text_frame->buffer.size >= sizeof(uiLabel_t))
         label = *(uiLabel_t const *)text_frame->buffer.data;
     if (edit->font) label.font = edit->font;
 
@@ -1306,7 +1485,10 @@ void SCR_LayoutDrawEditBox(uiFrame_t const *frame, rect_t const *screen) {
         }
     }
     re.DrawText(&dt);
-    if (CL_WindowEditCursor(text_frame->number, &cursor))
+    if (layout_editor.active && !layout_current_window &&
+        layout_current_layer == layout_editor.layer && frame->number == layout_editor.frame)
+        M_DrawTextInputCursor(&re, &dt, value, layout_editor.cursor, COLOR32_WHITE);
+    else if (CL_WindowEditCursor(text_frame->number, &cursor))
         M_DrawTextInputCursor(&re, &dt, value, cursor, COLOR32_WHITE);
 }
 
@@ -1539,8 +1721,62 @@ void SCR_LayoutDrawOverlay(handle_t layout) {
     }
 }
 
+/* No persistent mouse hover exists on iPad. Show authoritative snapshot HP
+ * above selected or wounded combat units. World projection yields WC3 UI
+ * units; DrawFill expects *physical pixels*. Always convert both origin and
+ * size through the resolved window canvas, otherwise a ~0.05 pixel bar is
+ * effectively invisible on the iPad display. */
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+static rect_t SCR_iPadWorldHealthBarRect(vec2_t point, size2_t window, float canvas) {
+    float const sx = canvas > 0.0f ? (float)window.width / canvas : 0.0f;
+    float const sy = (float)window.height / UI_BASE_HEIGHT;
+    return (rect_t){(point.x - 0.028f) * sx, (point.y - 0.010f) * sy,
+                    0.056f * sx, 0.006f * sy};
+}
+
+static void SCR_DrawTouchSelectionHealthBars(void) {
+    viewDef_t const *view = &cl.viewDef;
+    size2_t const window = re.GetWindowSize();
+    float const canvas = SCR_UICanvasWidth();
+    if (cl.playerstate.client_ui_state != CLIENT_UI_GAME ||
+        !view->entities || !re.GetEntityOverheadPosition ||
+        !window.width || !window.height || canvas <= 0.0f) return;
+
+    FOR_LOOP(i, view->num_entities) {
+        renderEntity_t const *ent = &view->entities[i];
+        uint32_t const id = ent->number;
+        if (!id || id >= MAX_CLIENT_ENTITIES || !(ent->flags & RF_UNIT) ||
+            (ent->flags & RF_HIDDEN)) continue;
+        entityState_t const *state = &cl.ents[id].current;
+        if (state->number != id || (state->renderfx & RF_HIDDEN) ||
+            !(state->flags & EF_HOVER_HEALTH)) continue;
+        float const hp = BYTE2FLOAT(state->stats[ENT_HEALTH]);
+        if (hp <= 0.0f) continue;
+        bool selected = false;
+        FOR_LOOP(j, cl.selection.num_selected)
+            if (cl.selection.entity_nums[j] == id) { selected = true; break; }
+        /* Injured units are meaningful even without a selected group; a
+         * full-health field army should not cover the screen in green bars. */
+        if (!selected && hp >= 0.995f) continue;
+        vec3_t top;
+        vec2_t screen;
+        if (!re.GetEntityOverheadPosition(ent, &top) ||
+            !SCR_ProjectWorldPoint(&top, &screen)) continue;
+        rect_t const bg = SCR_iPadWorldHealthBarRect(screen, window, canvas);
+        rect_t const fill = {bg.x + 1.0f, bg.y + 1.0f,
+                            MAX(0.0f, (bg.w - 2.0f) * MIN(1.0f, hp)),
+                            MAX(1.0f, bg.h - 2.0f)};
+        re.DrawFill(&bg, MAKE(color32_t, 0, 0, 0, 220));
+        re.DrawFill(&fill, MAKE(color32_t, 58, 215, 77, 255));
+    }
+}
+#endif
+
 void SCR_DrawLayout(void) {
     active_tooltip = NULL;
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    SCR_DrawTouchSelectionHealthBars();
+#endif
 
     FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
         uint32_t flags = cl.playerstate.uiflags;
@@ -1552,6 +1788,29 @@ void SCR_DrawLayout(void) {
             layout_current_window = false;
             layout_current_layer = layer;
             SCR_ClearLayer(layout, layer);
+            /* The server may set edit focus without an initial pointer tap.
+             * Focus is encoded in the edit frame's existing value field. */
+            bool suppressed_hint_seen = false;
+            bool focused_frame_seen = false;
+            FOR_LOOP(i, SCR_NumFrames()) {
+                uiFrame_t const *frame = SCR_Frame(i);
+                if (!frame) continue;
+                if (layout_editor.active && layout_editor.layer == layer &&
+                    layout_editor.frame == frame->number && SCR_LayoutIsEdit(frame))
+                    focused_frame_seen = true;
+                if (frame->value > 0.5f && SCR_LayoutIsEdit(frame)) {
+                    if (layout_edit_suppress_layer == layer &&
+                        layout_edit_suppress_frame == frame->number) suppressed_hint_seen = true;
+                    else {
+                        SCR_LayoutFocusEdit(frame, layer);
+                        focused_frame_seen = true;
+                    }
+                }
+            }
+            if (layout_edit_suppress_layer == layer && !suppressed_hint_seen)
+                layout_edit_suppress_frame = 0;
+            if (layout_editor.active && layout_editor.layer == layer && !focused_frame_seen)
+                SCR_LayoutBlurEdit();
             if (layer == LAYER_WORLD_HOVER) {
                 if (!SCR_LayoutWorldHoverRoot(&root)) continue;
                 SCR_SetLayoutRoot(&root);
@@ -1560,6 +1819,7 @@ void SCR_DrawLayout(void) {
             SCR_LayoutDrawOverlay(layout);
         }
     }
+    SCR_LayoutDrawActivePopup();
     /* Transient windows are frontmost gameplay UI. The window manager already
      * preserves server-authored z-order, but previously had no screen caller. */
     CL_WindowDraw();
@@ -1585,6 +1845,13 @@ void SCR_SetLayoutLayer(uint32_t layer, handle_t data) {
 
 void SCR_ClearLayoutLayer(uint32_t layer) {
     if (layer < MAX_LAYOUT_LAYERS) layout_layers[layer] = NULL;
+    if (layout_editor.active && layout_editor.layer == layer) SCR_LayoutBlurEdit();
+    if(layout_pointer_frame && layout_pointer_layer==layer)layout_pointer_frame=0;
+    if(layout_popup_frame && layout_popup_layer==layer){
+        layout_popup_frame=0;
+        layout_popup_pressed=-1;
+        layout_popup_scroll=0;
+    }
 }
 
 void SCR_ReleaseLayoutCameraEvents(uint32_t layer) {
@@ -1603,6 +1870,8 @@ void SCR_ReleaseWindowCameraEvents(uintptr_t window_namespace) {
 }
 
 void SCR_ClearLayoutResources(void) {
+    SCR_LayoutBlurEdit();
+    layout_edit_suppress_frame = 0;
     FOR_LOOP(i, MAX_DYNAMIC_IMAGES) {
         SAFE_DELETE(layout_dynamic_pics[i], re.ReleaseTexture);
         layout_dynamic_pic_names[i][0] = '\0';
@@ -1611,6 +1880,186 @@ void SCR_ClearLayoutResources(void) {
 }
 
 static bool SCR_LayoutLayerVisible(uint32_t layer) { return layer < MAX_LAYOUT_LAYERS && layout_layers[layer] && !((1u << layer) & cl.playerstate.uiflags); }
+
+/* Script-owned frames advertise their event subscriptions in the existing
+ * OnClick descriptor. The renderer reports generic UI input; it knows
+ * nothing about JASS or any particular game's native function names. */
+static bool SCR_LayoutScriptEvent(uiFrame_t const *frame,int event) {
+    uint32_t mask,target;
+    if(!frame || (frame->flagsvalue & UIFRAME_DISABLED) || event<1 || event>8 ||
+       !SCR_LayoutScriptDescriptor(frame,&target,&mask))return false;
+    bool checkbox=frame->flags.type==FT_CHECKBOX || frame->flags.type==FT_GLUECHECKBOX ||
+                  frame->flags.type==FT_SIMPLECHECKBOX;
+    /* A checkbox click toggles the server-owned value even if neither toggle
+     * callback is registered (but this frame has another subscribed event). */
+    if(!(mask & (1u<<event)) && !(checkbox && event==7))return false;
+    MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+    SZ_Printf(&cls.netchan.message,"uievent %u %d",target,event);
+    return true;
+}
+
+/* Select a rendered LISTBOX row using the exact border, row height and scroll
+ * calculations used by SCR_LayoutDrawListBox. The UI command carries an index;
+ * the authoritative game validates it against its current contents. */
+static bool SCR_LayoutScriptListSelection(uiFrame_t const *frame,vec2_t const *point) {
+    uint32_t mask,handle;
+    uiListBox_t const *lb;
+    rect_t view;
+    int row,visible,scroll_offset,index,count=0;
+    if(!frame || frame->flags.type!=FT_LISTBOX || !frame->buffer.data ||
+       frame->buffer.size<sizeof(uiListBox_t) || !point ||
+       !SCR_LayoutScriptDescriptor(frame,&handle,&mask) || !(mask&(1u<<10)))return false;
+    lb=frame->buffer.data;
+    if(!strcmp(lb->fetchCommand,"FRAME_ROWS"))return false;
+    view=Rect_inset(SCR_LayoutRect(frame),lb->border);
+    if(!Rect_contains(&view,point) || !frame->text || !*frame->text)return true;
+    float item_height=lb->itemHeight>0.0f?lb->itemHeight:0.018f;
+    visible=SCR_LayoutListBoxVisibleRows(frame,&view);
+    row=(int)floorf((point->y-view.y)/item_height);
+    if(row<0 || row>=visible)return true;
+    for(cstring_t p=frame->text;*p;p++)if((*p!='\n' && *p!='\r') &&
+        (p==frame->text || p[-1]=='\n' || p[-1]=='\r'))count++;
+    scroll_offset=SCR_LayoutListBoxMaxScroll(frame);
+    scroll_offset=scroll_offset?
+        (int)lroundf(MIN(MAX(frame->value,0.0f),1.0f)*scroll_offset):0;
+    index=row+scroll_offset;
+    if(index>=count || index==lb->selectedIndex)return true;
+    MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+    SZ_Printf(&cls.netchan.message,"uievent %u 10 %d",handle,index);
+    return true;
+}
+
+static uiFrame_t const *SCR_LayoutFindScriptEventFrame(uint32_t layer,uint32_t number) {
+    if(!number || !SCR_LayoutLayerVisible(layer))return NULL;
+    SCR_Clear(layout_layers[layer]);
+    FOR_LOOP(i,SCR_NumFrames()) {
+        uiFrame_t const *frame=SCR_Frame(i);
+        if(frame && frame->number==number && SCR_LayoutFrameRowsVisible(frame))return frame;
+    }
+    return NULL;
+}
+
+static bool SCR_LayoutIsScriptPopup(uiFrame_t const *frame) {
+    uint32_t mask;
+    return frame && (frame->flags.type==FT_POPUPMENU || frame->flags.type==FT_GLUEPOPUPMENU) &&
+        frame->text && *frame->text && !(frame->flagsvalue & UIFRAME_DISABLED) &&
+        SCR_LayoutScriptDescriptor(frame,NULL,&mask) && (mask&(1u<<10));
+}
+
+static int SCR_LayoutPopupRowCount(uiFrame_t const *frame) {
+    int count=0;
+    bool in_row=false;
+    if(!frame || !frame->text)return 0;
+    for(cstring_t p=frame->text;*p;p++){
+        if(*p=='\n' || *p=='\r')in_row=false;
+        else if(!in_row){count++;in_row=true;}
+    }
+    return count;
+}
+
+static bool SCR_LayoutPopupRowText(uiFrame_t const *frame,int index,char *buf,size_t cap) {
+    cstring_t p;
+    int current=0;
+    if(!frame || !frame->text || !buf || !cap || index<0)return false;
+    p=frame->text;
+    while(*p){
+        while(*p=='\n' || *p=='\r')p++;
+        if(!*p)break;
+        cstring_t end=p;
+        while(*end && *end!='\n' && *end!='\r')end++;
+        if(current++==index){
+            size_t len=MIN((size_t)(end-p),cap-1);
+            memcpy(buf,p,len);buf[len]='\0';
+            return true;
+        }
+        p=end;
+    }
+    return false;
+}
+
+static rect_t SCR_LayoutPopupOptionsRect(uiFrame_t const *frame,int count) {
+    rect_t button=*SCR_LayoutRect(frame);
+    rect_t scene=SCR_LayoutSceneRect();
+    float row_height=MAX(button.h,0.018f);
+    float height=row_height*(float)MIN(count,8);
+    float y=button.y+button.h;
+    if(y+height>scene.y+scene.h && button.y-height>=scene.y)y=button.y-height;
+    return MAKE(rect_t,button.x,y,button.w,height);
+}
+
+static void SCR_LayoutDismissPopup(void) {
+    layout_popup_frame=0;
+    layout_popup_scroll=0;
+    layout_popup_pressed=-1;
+}
+
+static void SCR_LayoutDrawActivePopup(void) {
+    if(!layout_popup_frame)return;
+    uiFrame_t const *frame=SCR_LayoutFindScriptEventFrame(layout_popup_layer,layout_popup_frame);
+    if(!SCR_LayoutIsScriptPopup(frame)){SCR_LayoutDismissPopup();return;}
+    int count=SCR_LayoutPopupRowCount(frame);
+    rect_t menu=SCR_LayoutPopupOptionsRect(frame,count);
+    rect_t scene=SCR_LayoutSceneRect();
+    float row_height=MAX(SCR_LayoutRect(frame)->h,0.018f);
+    if(!count || menu.w<=0 || menu.h<=0)return;
+    SCR_SetLayoutRoot(&scene);
+    re.DrawImageEx(&MAKE(drawImage_t,
+        .texture=NULL,.shader=SHADER_UI,.alphamode=BLEND_MODE_BLEND,
+        .screen=menu,.uv=MAKE(rect_t,0,0,1,1),
+        .color=MAKE(color32_t,13,19,34,245)));
+    for(int visible=0;visible<MIN(count,8);visible++){
+        int index=visible+layout_popup_scroll;
+        char label[256];
+        if(!SCR_LayoutPopupRowText(frame,index,label,sizeof(label)))break;
+        rect_t row=MAKE(rect_t,menu.x,menu.y+visible*row_height,menu.w,row_height);
+        if(index==(int)frame->value)
+            re.DrawImageEx(&MAKE(drawImage_t,
+                .texture=NULL,.shader=SHADER_UI,.alphamode=BLEND_MODE_BLEND,
+                .screen=row,.uv=MAKE(rect_t,0,0,1,1),
+                .color=MAKE(color32_t,50,77,153,200)));
+        re.DrawText(&MAKE(drawText_t,
+            .font=cl.fonts[0],.text=label,.color=COLOR32_WHITE,
+            .halign=FONT_JUSTIFYLEFT,.valign=FONT_JUSTIFYMIDDLE,
+            .textWidth=row.w,.lineHeight=1.33f,.rect=row,
+            .flags=DRAW_CLIP,.clip=row));
+    }
+}
+
+static bool SCR_LayoutPopupMouseEvent(menuMouseEvent_t event,vec2_t const *point,int32_t param) {
+    if(!layout_popup_frame)return false;
+    uiFrame_t const *frame=SCR_LayoutFindScriptEventFrame(layout_popup_layer,layout_popup_frame);
+    if(!SCR_LayoutIsScriptPopup(frame)){SCR_LayoutDismissPopup();return false;}
+    int count=SCR_LayoutPopupRowCount(frame);
+    rect_t menu=SCR_LayoutPopupOptionsRect(frame,count);
+    bool inside=Rect_contains(&menu,point);
+    int visible=MIN(count,8);
+    if(event==MENU_MOUSE_SCROLL && inside){
+        int dy=MENU_MOUSE_PARAM_Y(param);
+        layout_popup_scroll=MIN(MAX(layout_popup_scroll-dy,0),MAX(count-visible,0));
+        return true;
+    }
+    if(param!=SDL_BUTTON_LEFT)return inside;
+    if(event==MENU_MOUSE_DOWN){
+        layout_popup_pressed=inside?
+            (int)floorf((point->y-menu.y)/MAX(SCR_LayoutRect(frame)->h,0.018f))+
+            layout_popup_scroll:-1;
+        if(!inside && !Rect_contains(SCR_LayoutRect(frame),point))SCR_LayoutDismissPopup();
+        return inside;
+    }
+    if(event!=MENU_MOUSE_UP || layout_popup_pressed<0)return false;
+    int index=(int)floorf((point->y-menu.y)/MAX(SCR_LayoutRect(frame)->h,0.018f))+
+        layout_popup_scroll;
+    bool matched=inside && index==layout_popup_pressed && index>=0 && index<count;
+    layout_popup_pressed=-1;
+    if(matched && index!=(int)frame->value){
+        uint32_t handle;
+        SCR_LayoutScriptDescriptor(frame,&handle,NULL);
+        MSG_WriteByte(&cls.netchan.message,clc_stringcmd);
+        SZ_Printf(&cls.netchan.message,"uievent %u 10 %d",handle,index);
+    }
+    SCR_LayoutDismissPopup();
+    return true;
+}
 
 /* Result screens outrank Quest when malformed/server-overlapping modal layers coexist. */
 static int SCR_LayoutModalLayer(void) {
@@ -1627,6 +2076,11 @@ static void SCR_LayoutApplyOrderQueueModifier(uiFrame_t const *frame, char *comm
     strlcat(command, " queue", size);
 }
 
+/* SDL's synthetic world press might never have armed the visible HUD button. */
+bool SCR_LayoutTouchPressArmed(void) {
+    return layout_press_frame != 0 || layout_held_command[0] != '\0';
+}
+
 bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     menuMouseEvent_t const event = mouse_event->event;
     int const x = mouse_event->x;
@@ -1638,9 +2092,11 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     int const modal_layer = SCR_LayoutModalLayer();
     /* This path handles persistent layout layers, not client-managed windows. */
     layout_current_window = false;
+    if(SCR_LayoutPopupMouseEvent(event,&point,param))return true;
     layout_hovered = NULL;
     layout_hovered_number = 0;
-    FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
+    /* Hit-test the frontmost (last-painted) interactive layer first. */
+    for (uint32_t layer = MAX_LAYOUT_LAYERS; layer-- > 0;) {
         handle_t layout = layout_layers[layer];
         if (modal_layer >= 0 && (int)layer != modal_layer) continue;
         uint32_t flags = cl.playerstate.uiflags;
@@ -1655,6 +2111,7 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
                 hit = SCR_LayoutMultiselectEntityAt(frame, &point) != 0;
             else
                 hit = (SCR_LayoutFrameHasClickCommand(frame) ||
+                       SCR_LayoutIsEdit(frame) ||
                        (frame->tooltip && *frame->tooltip)) &&
                       Rect_contains(SCR_LayoutRect(frame), &point);
             if (hit) {
@@ -1665,6 +2122,28 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
             }
         }
         if (layout_hovered_number) break;
+    }
+
+    if(event==MENU_MOUSE_MOVE) {
+        bool sent=false;
+        if(layout_pointer_frame!=layout_hovered_number ||
+           (layout_pointer_frame && layout_pointer_layer!=layout_hovered_layer)) {
+            uiFrame_t const *previous=SCR_LayoutFindScriptEventFrame(layout_pointer_layer,layout_pointer_frame);
+            if(previous)sent|=SCR_LayoutScriptEvent(previous,3);
+            if(hovered_frame){
+                /* SCR_Clear swaps the shared layout decode buffer; re-find
+                 * the new frame after looking up the previous hover. */
+                uiFrame_t const *next=SCR_LayoutFindScriptEventFrame(layout_hovered_layer,layout_hovered_number);
+                if(next)sent|=SCR_LayoutScriptEvent(next,2);
+            }
+        }
+        layout_pointer_frame=layout_hovered_number;
+        layout_pointer_layer=layout_hovered_layer;
+        return sent;
+    }
+    if(event==MENU_MOUSE_SCROLL) {
+        if(MENU_MOUSE_PARAM_Y(param)==0)return false;
+        return SCR_LayoutScriptEvent(hovered_frame,6);
     }
 
     /* Proxy command buttons may carry a secondary command in text. Warcraft
@@ -1690,18 +2169,35 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     }
 
     if (param != SDL_BUTTON_LEFT) return false;
+    if (event == MENU_MOUSE_UP && SCR_LayoutIsEdit(hovered_frame) && layout_editor.active &&
+        layout_editor.frame == hovered_frame->number && layout_editor.layer == layout_hovered_layer) {
+        layout_left_down = false;
+        layout_press_frame = 0;
+        SCR_LayoutScriptEvent(hovered_frame,4);
+        return true;
+    }
     if (event == MENU_MOUSE_DOWN) {
+        if (SCR_LayoutIsEdit(hovered_frame)) {
+            SCR_LayoutFocusEdit(hovered_frame, layout_hovered_layer);
+            SCR_LayoutScriptEvent(hovered_frame,5);
+            layout_left_down = true;
+            layout_press_frame = 0;
+            return true;
+        }
+        if (layout_editor.active) SCR_LayoutBlurEdit();
         char command[CMDARG_LEN * 2];
         layout_left_down = true;
         layout_press_frame = hovered_frame ? hovered_frame->number : 0;
         layout_press_layer = hovered_frame ? layout_hovered_layer : 0;
+        bool script_frame=SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL);
+        SCR_LayoutScriptEvent(hovered_frame,5);
         /* Multiselect icons are server-authored gameplay controls. They do not
          * have an onclick string, so consume the press here and resolve the
          * concrete entity on release below. */
         if (hovered_frame && hovered_frame->flags.type == FT_MULTISELECT) return true;
-        if (!hovered_frame || layout_held_command[0]) return false;
+        if (!hovered_frame || layout_held_command[0]) return script_frame;
         SCR_LayoutFormatOnClickCommand(hovered_frame->onclick, command, sizeof(command));
-        if (command[0] != '+') return false;
+        if (command[0] != '+') return script_frame;
         strlcpy(layout_held_command, command, sizeof(layout_held_command));
         MSG_WriteByte(&cls.netchan.message, clc_stringcmd);
         SZ_Printf(&cls.netchan.message, "%s", layout_held_command);
@@ -1723,6 +2219,31 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
     }
 
     if (!matched) return false;
+    if(SCR_LayoutIsScriptPopup(hovered_frame)){
+        if(layout_popup_frame==hovered_frame->number && layout_popup_layer==layout_hovered_layer)
+            SCR_LayoutDismissPopup();
+        else {
+            layout_popup_frame=hovered_frame->number;
+            layout_popup_layer=layout_hovered_layer;
+            layout_popup_scroll=0;
+            layout_popup_pressed=-1;
+        }
+        SCR_LayoutScriptEvent(hovered_frame,4);
+        SCR_LayoutScriptEvent(hovered_frame,1);
+        return true;
+    }
+    if(hovered_frame->flags.type==FT_LISTBOX &&
+       SCR_LayoutScriptListSelection(hovered_frame,&point))return true;
+    bool script_release=SCR_LayoutScriptEvent(hovered_frame,4);
+    bool script_toggle=false;
+    if(SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL) &&
+       (hovered_frame->flags.type==FT_CHECKBOX || hovered_frame->flags.type==FT_GLUECHECKBOX ||
+        hovered_frame->flags.type==FT_SIMPLECHECKBOX))
+        script_toggle=SCR_LayoutScriptEvent(hovered_frame,7);
+    if(SCR_LayoutScriptDescriptor(hovered_frame,NULL,NULL)){
+        SCR_LayoutScriptEvent(hovered_frame,1);
+        return true;
+    }
     FOR_LOOP(layer, MAX_LAYOUT_LAYERS) {
         handle_t layout = layout_layers[layer];
         uint32_t flags = cl.playerstate.uiflags;
@@ -1753,7 +2274,7 @@ bool SCR_LayoutMouseEvent(layoutMouseEvent_t const *mouse_event) {
             }
         }
     }
-    return false;
+    return script_release || script_toggle;
 }
 
 /* Dispatch a command-button hotkey the same way a mouse click on that */
@@ -1872,6 +2393,49 @@ void SCR_LayoutClampSelectionRect(rect_t *rect) {
     rect->h = (clamped.y / UI_BASE_HEIGHT) * window.height - rect->y;
 }
 
+/* Only available in simulator builds: discover an enabled, visible command
+ * icon in the actual server-authored HUD, then return its screen center. */
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+bool SCR_ORDRSimulatorFindCommandButton(vec2_t *point, char *command, size_t capacity) {
+    uiCanvas_t const *canvas = CL_Canvas();
+    size2_t const win = re.GetWindowSize ? re.GetWindowSize() : (size2_t){ 0 };
+    if (!point || !command || capacity < 2 || !canvas ||
+        canvas->scene.w <= 0 || canvas->scene.h <= 0 ||
+        win.width <= 0 || win.height <= 0 ||
+        !SCR_LayoutLayerVisible(LAYER_COMMANDBAR))
+        return false;
+    SCR_Clear(layout_layers[LAYER_COMMANDBAR]);
+    for (uint32_t i = SCR_NumFrames(); i > 0; i--) {
+        uiFrame_t const *frame = SCR_Frame(i - 1);
+        rect_t const *r;
+        vec2_t candidate;
+        if (!frame || frame->flags.type != FT_COMMANDBUTTON ||
+            !SCR_LayoutFrameRowsVisible(frame) ||
+            !SCR_LayoutFrameHasClickCommand(frame) ||
+            (strncmp(frame->onclick, "button ", 7) &&
+             strncmp(frame->onclick, "research ", 9) &&
+             strncmp(frame->onclick, "upgrade ", 8)))
+            continue;
+        if (strstr(frame->onclick, "CmdStop") ||
+            strstr(frame->onclick, "CmdCancel") ||
+            strstr(frame->onclick, "CmdHoldPos")) continue;
+        r = SCR_LayoutRect(frame);
+        if (!r || r->w <= 0 || r->h <= 0) continue;
+        candidate = (vec2_t){
+            (r->x + r->w * 0.5f) * win.width / canvas->scene.w,
+            (r->y + r->h * 0.5f) * win.height / canvas->scene.h
+        };
+        if (candidate.x < 0 || candidate.y < 0 ||
+            candidate.x >= win.width || candidate.y >= win.height)
+            continue;
+        strlcpy(command, frame->onclick, capacity);
+        *point = candidate;
+        return true;
+    }
+    return false;
+}
+#endif
+
 bool SCR_LayoutHitTest(int x, int y) {
     vec2_t const point = SCR_ScreenToUI(x, y);
     if (SCR_LayoutModalActive()) return true;
@@ -1891,10 +2455,20 @@ bool SCR_LayoutHitTest(int x, int y) {
                 continue;
             }
             /* Texture tiles mask console input even without a command or
-             * tooltip; making all textures pass through leaks clicks to the world. */
+             * tooltip. A full-screen noninteractive texture is different:
+             * ORDR uses them as world backdrops. Blocking their entire rect
+             * makes every ordinary mouse drag, unit click and Smart order
+             * disappear although the texture has no input handler. */
             if (frame->flags.type != FT_TEXTURE &&
                 !SCR_LayoutFrameHasClickCommand(frame) &&
                 !(frame->tooltip && *frame->tooltip)) continue;
+            if (frame->flags.type == FT_TEXTURE &&
+                !SCR_LayoutFrameHasClickCommand(frame) &&
+                !(frame->tooltip && *frame->tooltip)) {
+                rect_t const *r = SCR_LayoutRect(frame);
+                if (r && r->w >= UI_BASE_WIDTH * 0.8f &&
+                    r->h >= UI_BASE_HEIGHT * 0.75f) continue;
+            }
             if (Rect_contains(SCR_LayoutRect(frame), &point)) return true;
         }
     }

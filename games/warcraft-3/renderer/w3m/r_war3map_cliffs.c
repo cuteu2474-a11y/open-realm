@@ -111,17 +111,26 @@ float GetAccurateHeightAtPoint(float sx, float sy) {
     return DECODE_HEIGHT(LerpNumber(ab, cd, y - fy)) + R_W3TerrainOffsetAtPoint(sx, sy);
 }
 
-static float GetAccurateWaterLevelAtPoint(float sx, float sy) {
+static float GetAccurateWaterLevelAtPoint(float sx, float sy, float *wet_coverage) {
     float x = sx / TILE_SIZE;
     float y = sy / TILE_SIZE;
     float fx = floorf(x);
     float fy = floorf(y);
-    float a = GetWar3MapVertex(tr.world, fx, fy)->waterlevel;
-    float b = GetWar3MapVertex(tr.world, fx + 1, fy)->waterlevel;
-    float c = GetWar3MapVertex(tr.world, fx, fy + 1)->waterlevel;
-    float d = GetWar3MapVertex(tr.world, fx + 1, fy + 1)->waterlevel;
+    war3mapVertex_t const *sw = GetWar3MapVertex(tr.world, fx, fy);
+    war3mapVertex_t const *se = GetWar3MapVertex(tr.world, fx + 1, fy);
+    war3mapVertex_t const *nw = GetWar3MapVertex(tr.world, fx, fy + 1);
+    war3mapVertex_t const *ne = GetWar3MapVertex(tr.world, fx + 1, fy + 1);
+    float a = sw->waterlevel, b = se->waterlevel;
+    float c = nw->waterlevel, d = ne->waterlevel;
     float ab = LerpNumber(a, b, x - fx);
     float cd = LerpNumber(c, d, x - fx);
+    /* Dry W3E corners also encode a water height. Interpolate the authored
+     * wet mask across cliff geometry so dry faces are not darkened by it. */
+    if (wet_coverage) {
+        float wet_south = LerpNumber(sw->water != 0, se->water != 0, x - fx);
+        float wet_north = LerpNumber(nw->water != 0, ne->water != 0, x - fx);
+        *wet_coverage = LerpNumber(wet_south, wet_north, y - fy);
+    }
     return DECODE_HEIGHT(LerpNumber(ab, cd, y - fy));
 }
 
@@ -302,9 +311,10 @@ static vertex_t R_BakeCliffVertex(war3map_t const *map, mdxGeoset_t const *geose
     vec3_t pos = Matrix4_multiply_vector3(&r_cliff_axes, &geoset->vertices[index]);
     float const fx = pos.x + offset->x, fy = pos.y + offset->y;
     float const fh = GetAccurateHeightAtPoint(fx, fy);
-    float const fw = GetAccurateWaterLevelAtPoint(fx, fy);
+    float wet_coverage = 0.0f;
+    float const fw = GetAccurateWaterLevelAtPoint(fx, fy, &wet_coverage);
     float const fz = geoset->vertices[index].z + baselevel * TILE_SIZE + fh - HEIGHT_COR;
-    float const dp = GetTileDepth(fw, fz);
+    float const dp = LerpNumber(1.0f, GetTileDepth(fw, fz), wet_coverage);
     vec3_t fn = Matrix4_multiply_vector3(&r_cliff_axes, &geoset->normals[index]);
     vec3_t an = GetAccurateNormalAtPoint(fx, fy);
     vertex_t vertex = { 0 };
